@@ -7,6 +7,7 @@ import { MonitoringRightPanel } from './MonitoringRightPanel';
 import { MonitoringBottomPanel } from './MonitoringBottomPanel';
 import { MonitoringMap } from './MonitoringMap';
 import { GisUploadModal } from './GisUploadModal';
+import SettingsModal from './SettingsModal';
 import type { LayerPeta, LayerRaster, MonitoringStats } from '@/types/gis';
 
 interface KebunItem {
@@ -36,6 +37,8 @@ export function MonitoringDashboard() {
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
   const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(true);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [deletedCount, setDeletedCount] = useState<number>(0);
 
   // Time & Period state (matching screenshot: January 2021)
   const [selectedYear, setSelectedYear] = useState('2026');
@@ -71,10 +74,11 @@ export function MonitoringDashboard() {
       if (selectedLayerId) params.push(`layer_id=${selectedLayerId}`);
       const statsQuery = params.length > 0 ? `?${params.join('&')}` : '';
 
-      const [lRes, rRes, sRes] = await Promise.all([
+      const [lRes, rRes, sRes, hRes] = await Promise.all([
         fetch('/api/gis/layers'),
         fetch('/api/gis/rasters'),
         fetch(`/api/stats${statsQuery}`),
+        fetch('/api/gis/history'),
       ]);
       if (lRes.ok) {
         const lj = await lRes.json();
@@ -87,6 +91,12 @@ export function MonitoringDashboard() {
       if (sRes.ok) {
         const sj = await sRes.json();
         setStats(sj.data || null);
+      }
+      if (hRes.ok) {
+        const hj = await hRes.json();
+        if (hj.status === 'success' && hj.data?.counts) {
+          setDeletedCount(hj.data.counts.total_deleted || 0);
+        }
       }
     } catch (err) {
       console.error('Failed to refresh layers and stats:', err);
@@ -367,6 +377,8 @@ export function MonitoringDashboard() {
           onSelectLayer={(id) => setSelectedLayerId(id)}
           onToggleLayerVisibility={handleToggleLayerVisibility}
           onZoomToLayer={(bbox) => setFitBoundsTarget(bbox)}
+          onOpenSettings={() => setIsSettingsModalOpen(true)}
+          deletedCount={deletedCount}
         />
 
         {/* Center: Main Map View + Collapsible Bottom Panel */}
@@ -437,6 +449,16 @@ export function MonitoringDashboard() {
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
         onUploadSuccess={handleUploadSuccess}
+      />
+
+      {/* 4. SETTINGS, BACKUP & TRASH RECYCLE BIN MODAL */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        onDataChanged={() => {
+          setDataRevision((prev) => prev + 1);
+          refreshStatsAndLayers();
+        }}
       />
     </div>
   );

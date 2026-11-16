@@ -9,6 +9,7 @@ import {
   IconEye,
   IconEyeOff,
   IconZoomTo,
+  IconSettings,
 } from '../GisIcons';
 import type { LayerPeta } from '@/types/gis';
 
@@ -58,6 +59,9 @@ interface MonitoringSidebarProps {
   onSelectLayer?: (id: number) => void;
   onToggleLayerVisibility?: (id: number, visible: boolean) => void;
   onZoomToLayer?: (bbox: [number, number, number, number]) => void;
+  // Settings & History
+  onOpenSettings?: () => void;
+  deletedCount?: number;
 }
 
 export function MonitoringSidebar({
@@ -82,6 +86,8 @@ export function MonitoringSidebar({
   onSelectLayer,
   onToggleLayerVisibility,
   onZoomToLayer,
+  onOpenSettings,
+  deletedCount = 0,
 }: MonitoringSidebarProps) {
   // Cascading lists
   const availableWilayah = Array.from(
@@ -357,10 +363,38 @@ export function MonitoringSidebar({
         </div>
       </div>
 
-      {/* Footer Info */}
-      <div className="p-3 bg-[#0D1322] border-t border-[#1E2942] text-[10px] text-[#8B9BB4] flex items-center justify-between">
-        <span>PostGIS Filter Engine</span>
-        <span className="text-[#00D2FF] font-mono font-semibold">EPSG:4326</span>
+      {/* Footer Info & Settings */}
+      <div className="p-2.5 bg-[#0D1322] border-t border-[#1E2942] flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="flex-1 flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[#12192B] hover:bg-[#1A2338] border border-[#1E2942] hover:border-[#00D2FF]/50 text-xs text-[#E2E8F0] transition-all cursor-pointer group shadow-sm"
+          title="Buka Pengaturan Sistem, Cadangan Data & Riwayat Sampah Spasial"
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md bg-[#00D2FF]/10 text-[#00D2FF] flex items-center justify-center group-hover:scale-105 transition-transform">
+              <IconSettings className="w-3.5 h-3.5" />
+            </div>
+            <div className="text-left">
+              <div className="font-semibold text-[11px] group-hover:text-[#00D2FF] transition-colors leading-tight">
+                Settings
+              </div>
+              <div className="text-[9px] text-[#8B9BB4] leading-tight">Backup & Riwayat</div>
+            </div>
+          </div>
+          {typeof deletedCount === 'number' && deletedCount > 0 ? (
+            <span className="px-1.5 py-0.5 rounded-full bg-[#EF4444] text-white text-[9px] font-bold shadow-xs">
+              {deletedCount}
+            </span>
+          ) : (
+            <span className="text-[10px] text-[#566680] group-hover:text-[#8B9BB4]">Buka</span>
+          )}
+        </button>
+
+        <div className="text-right text-[10px] text-[#8B9BB4] pl-1 font-mono flex-shrink-0">
+          <div className="text-[9px] text-[#566680]">Proyeksi</div>
+          <span className="text-[#00D2FF] font-semibold">EPSG:4326</span>
+        </div>
       </div>
     </aside>
   );
