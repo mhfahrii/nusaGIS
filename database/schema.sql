@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS public.fitur_peta (
     layer_id BIGINT NOT NULL REFERENCES public.layer_peta(id) ON DELETE CASCADE,
     geom GEOMETRY(Geometry, 4326) NOT NULL,
     atribut JSONB NOT NULL DEFAULT '{}'::jsonb,
+    is_deleted BOOLEAN DEFAULT FALSE,
+    dihapus_pada TIMESTAMP WITHOUT TIME ZONE,
     dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -155,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_layer_raster_bbox ON public.layer_raster USING GI
 
 -- Indeks Relasional Foreign Key
 CREATE INDEX IF NOT EXISTS idx_fitur_peta_layer_id ON public.fitur_peta (layer_id);
+CREATE INDEX IF NOT EXISTS idx_fitur_peta_is_deleted ON public.fitur_peta (is_deleted);
 CREATE INDEX IF NOT EXISTS idx_layer_peta_kebun ON public.layer_peta (kebun_id);
 CREATE INDEX IF NOT EXISTS idx_layer_peta_unggahan ON public.layer_peta (unggahan_id);
 CREATE INDEX IF NOT EXISTS idx_layer_raster_kebun ON public.layer_raster (kebun_id);

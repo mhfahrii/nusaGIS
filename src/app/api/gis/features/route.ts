@@ -40,13 +40,13 @@ export async function GET(req: NextRequest) {
     const keysRes = await query<{ col_key: string }>(
       `SELECT DISTINCT jsonb_object_keys(atribut) as col_key
        FROM fitur_peta
-       WHERE layer_id = $1
+       WHERE layer_id = $1 AND COALESCE(is_deleted, FALSE) = FALSE
        LIMIT 40;`,
       [layerId]
     );
     const columns = keysRes.rows.map((r) => r.col_key);
 
-    let whereClause = 'WHERE layer_id = $1';
+    let whereClause = 'WHERE layer_id = $1 AND COALESCE(is_deleted, FALSE) = FALSE';
     const params: unknown[] = [layerId];
 
     if (search) {
@@ -175,31 +175,29 @@ export async function DELETE(req: NextRequest) {
       `Fitur #${id}`
     );
 
-    // 2. Hapus dari tabel public.fitur_peta
-    await query('DELETE FROM public.fitur_peta WHERE id = $1', [id]);
+    // 2. Soft Delete: Tandai fitur sebagai terhapus tanpa menghapus data spasial fisik
+    await query(
+      'UPDATE public.fitur_peta SET is_deleted = TRUE, dihapus_pada = NOW() WHERE id = $1',
+      [id]
+    );
 
-    // 3. Update jumlah fitur di layer_peta
+    // 3. Update jumlah fitur aktif di layer_peta
     await query(
       `UPDATE public.layer_peta
-       SET jumlah_fitur = (SELECT COUNT(*)::int FROM public.fitur_peta WHERE layer_id = $1)
+       SET jumlah_fitur = (SELECT COUNT(*)::int FROM public.fitur_peta WHERE layer_id = $1 AND COALESCE(is_deleted, FALSE) = FALSE)
        WHERE id = $1`,
       [layerId]
     );
 
-    // 4. Catat riwayat aktivitas
+    // 4. Catat riwayat aktivitas audit trail
     try {
       await query(
-        `INSERT INTO public.riwayat_aktivitas (pengguna_id, aksi, detail)
+        `INSERT INTO public.riwayat_aktivitas (pengguna_id, aktivitas, keterangan)
          VALUES ($1, $2, $3)`,
         [
           auth.user.id,
-          'HAPUS_FITUR_LAHAN',
-          JSON.stringify({
-            feature_id: id,
-            layer_id: layerId,
-            nama_lahan: featName,
-            waktu: new Date().toISOString(),
-          }),
+          'soft_delete_fitur',
+          `Menghapus lahan ${featName} (Layer ID: ${layerId}, Fitur ID: ${id}).`,
         ]
       );
     } catch (logErr) {

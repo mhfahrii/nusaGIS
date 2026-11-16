@@ -51,13 +51,13 @@ export async function GET(req: NextRequest) {
     }
 
     // Hitung statistik aktual dari PostgreSQL & PostGIS
-    let luasWhere = "WHERE ST_GeometryType(fp.geom) IN ('ST_Polygon', 'ST_MultiPolygon')";
+    let luasWhere = "WHERE ST_GeometryType(fp.geom) IN ('ST_Polygon', 'ST_MultiPolygon') AND COALESCE(fp.is_deleted, FALSE) = FALSE";
     const luasParams: unknown[] = [];
     if (layerId && !isNaN(layerId) && layerId > 0) {
       luasWhere += ' AND fp.layer_id = $1';
       luasParams.push(layerId);
     } else if (kebunId && !isNaN(kebunId) && kebunId > 0) {
-      luasWhere = `JOIN public.layer_peta lp ON lp.id = fp.layer_id WHERE lp.kebun_id = $1 AND ST_GeometryType(fp.geom) IN ('ST_Polygon', 'ST_MultiPolygon')`;
+      luasWhere = `JOIN public.layer_peta lp ON lp.id = fp.layer_id WHERE lp.kebun_id = $1 AND ST_GeometryType(fp.geom) IN ('ST_Polygon', 'ST_MultiPolygon') AND COALESCE(fp.is_deleted, FALSE) = FALSE`;
       luasParams.push(kebunId);
     }
 
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
         }) AS total_blok,
         (SELECT COUNT(*)::int FROM public.layer_peta ${whereKebun}) AS total_layer,
         (SELECT COUNT(*)::int FROM public.fitur_peta fp ${
-          kebunId ? 'JOIN public.layer_peta lp ON lp.id = fp.layer_id WHERE lp.kebun_id = $1' : ''
+          kebunId ? 'JOIN public.layer_peta lp ON lp.id = fp.layer_id WHERE lp.kebun_id = $1 AND COALESCE(fp.is_deleted, FALSE) = FALSE' : 'WHERE COALESCE(fp.is_deleted, FALSE) = FALSE'
         }) AS total_fitur,
         (SELECT COUNT(*)::int FROM public.data_unggahan ${whereKebun}) AS total_unggahan;
     `;

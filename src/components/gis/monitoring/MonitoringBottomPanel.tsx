@@ -388,6 +388,8 @@ export function MonitoringBottomPanel({
           selectedFeatureId={selectedFeatureId}
           onSelectFeature={onSelectFeature}
           onZoomToFeature={onZoomToFeature}
+          selectedAfdelingId={selectedAfdelingId}
+          afdelingList={afdelingList}
           dataRevision={dataRevision}
         />
       ) : (

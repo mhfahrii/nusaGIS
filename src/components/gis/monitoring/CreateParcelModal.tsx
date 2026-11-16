@@ -45,10 +45,11 @@ export function CreateParcelModal({
   const [afdelingList, setAfdelingList] = useState<AfdelingItem[]>([]);
   const [selectedKebunId, setSelectedKebunId] = useState<number | null>(null);
   const [selectedAfdelingId, setSelectedAfdelingId] = useState<number | null>(null);
-  const [komoditas, setKomoditas] = useState('Kelapa Sawit');
+  const [komoditas, setKomoditas] = useState('Tebu');
   const [tahunTanam, setTahunTanam] = useState(new Date().getFullYear().toString());
-  const [statusLahan, setStatusLahan] = useState('Tanaman Menghasilkan (TM)');
+  const [statusLahan, setStatusLahan] = useState('KS GPA 2023');
   const [luasHa, setLuasHa] = useState(calculatedAreaHa.toString());
+  const [luasBaku, setLuasBaku] = useState(calculatedAreaHa.toFixed(2));
   const [keterangan, setKeterangan] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -61,7 +62,9 @@ export function CreateParcelModal({
     } else if (layers.length > 0) {
       setSelectedLayerId(layers[0].id);
     }
-    setLuasHa(calculatedAreaHa.toFixed(2));
+    const areaStr = calculatedAreaHa.toFixed(2);
+    setLuasHa(areaStr);
+    setLuasBaku(areaStr);
     setKode(`BLK-${Date.now().toString().slice(-4)}`);
   }, [defaultLayerId, layers, calculatedAreaHa]);
 
@@ -129,6 +132,7 @@ export function CreateParcelModal({
         tahun_tanam: parseInt(tahunTanam, 10) || null,
         status_lahan: statusLahan,
         luas_ha: parseFloat(luasHa) || calculatedAreaHa,
+        luas_baku: luasBaku ? parseFloat(luasBaku) : null,
         keterangan: keterangan.trim() || undefined,
       };
 
@@ -164,7 +168,7 @@ export function CreateParcelModal({
             </div>
             <div>
               <h3 className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
-                Simpan Lahan Baru Hasil Gambar
+                Simpan Lahan Hasil Digitasi
               </h3>
               <p className="text-[10px] text-[#8B9BB4]">
                 Data poligon otomatis disesuaikan dan disimpan ke database PostGIS
@@ -210,13 +214,13 @@ export function CreateParcelModal({
 
           {/* Layer Tujuan */}
           <div>
-            <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+            <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
               Layer GIS Tujuan <span className="text-rose-400">*</span>
             </label>
             <select
               value={selectedLayerId}
               onChange={(e) => setSelectedLayerId(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500"
+              className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
             >
               {layers.map((l) => (
                 <option key={l.id} value={l.id}>
@@ -229,20 +233,20 @@ export function CreateParcelModal({
           {/* Grid: Nama & Kode Blok */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
                 Nama Lahan / Blok <span className="text-rose-400">*</span>
               </label>
               <input
                 type="text"
                 required
-                placeholder="misal: Blok GPA 9 (Barat)"
+                placeholder="misal: GPA 9 (Bakalan C, Timur)"
                 value={nama}
                 onChange={(e) => setNama(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-hidden focus:border-emerald-500"
+                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50 focus:outline-hidden focus:border-[#00D2FF]"
               />
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
                 Kode Blok
               </label>
               <input
@@ -250,7 +254,7 @@ export function CreateParcelModal({
                 placeholder="misal: GPA-09"
                 value={kode}
                 onChange={(e) => setKode(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-hidden focus:border-emerald-500 font-mono"
+                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50 focus:outline-hidden focus:border-[#00D2FF] font-mono"
               />
             </div>
           </div>
@@ -258,7 +262,7 @@ export function CreateParcelModal({
           {/* Grid: Kebun & Afdeling */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
                 Unit Kebun
               </label>
               <select
@@ -267,7 +271,7 @@ export function CreateParcelModal({
                   setSelectedKebunId(Number(e.target.value) || null);
                   setSelectedAfdelingId(null);
                 }}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500"
+                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
               >
                 <option value="">-- Pilih Kebun --</option>
                 {kebunList.map((k) => (
@@ -278,13 +282,13 @@ export function CreateParcelModal({
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
                 Afdeling
               </label>
               <select
                 value={selectedAfdelingId || ''}
                 onChange={(e) => setSelectedAfdelingId(Number(e.target.value) || null)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500"
+                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
               >
                 <option value="">-- Pilih Afdeling --</option>
                 {filteredAfdeling.map((a) => (
@@ -299,16 +303,16 @@ export function CreateParcelModal({
           {/* Grid: Komoditas & Tahun Tanam */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
                 Komoditas
               </label>
               <select
                 value={komoditas}
                 onChange={(e) => setKomoditas(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500"
+                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
               >
+                <option value="Tebu">Tebu (PSKA 942)</option>
                 <option value="Kelapa Sawit">Kelapa Sawit</option>
-                <option value="Tebu">Tebu</option>
                 <option value="Karet">Karet</option>
                 <option value="Kopi">Kopi</option>
                 <option value="Kakao">Kakao</option>
@@ -316,7 +320,7 @@ export function CreateParcelModal({
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
                 Tahun Tanam
               </label>
               <input
@@ -325,53 +329,58 @@ export function CreateParcelModal({
                 max="2035"
                 value={tahunTanam}
                 onChange={(e) => setTahunTanam(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-hidden focus:border-emerald-500 font-mono"
+                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF] font-mono"
               />
             </div>
           </div>
 
-          {/* Grid: Status Lahan & Luas (Ha) */}
+          {/* Grid: Status Lahan & Luas Baku Dokumen */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                Status Lahan
+              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
+                Status Pengelolaan Lahan
               </label>
               <select
                 value={statusLahan}
                 onChange={(e) => setStatusLahan(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500"
+                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
               >
+                <option value="KS GPA 2023">KS GPA 2023 (Kerjasama Garapan)</option>
+                <option value="Kebun Tebu Giling (KTG)">Kebun Tebu Giling (KTG)</option>
                 <option value="Tanaman Menghasilkan (TM)">Tanaman Menghasilkan (TM)</option>
                 <option value="Tanaman Belum Menghasilkan (TBM)">Tanaman Belum Menghasilkan (TBM)</option>
-                <option value="Lahan Baku (KS GPA)">Lahan Baku (KS GPA)</option>
                 <option value="Lahan Cadangan / Replanting">Lahan Cadangan / Replanting</option>
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                Luas Lahan Baku (Ha)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-semibold text-[#8B9BB4]">
+                  Luas Baku Dokumen (Ha)
+                </label>
+                <span className="text-[9.5px] text-[#00D2FF]">GIS: {calculatedAreaHa.toFixed(2)} Ha</span>
+              </div>
               <input
                 type="number"
                 step="0.01"
-                value={luasHa}
-                onChange={(e) => setLuasHa(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-hidden focus:border-emerald-500 font-mono font-bold text-emerald-400"
+                placeholder={calculatedAreaHa.toFixed(2)}
+                value={luasBaku}
+                onChange={(e) => setLuasBaku(e.target.value)}
+                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#00D2FF] placeholder:text-[#8B9BB4]/50 focus:outline-hidden focus:border-[#00D2FF] font-mono font-bold"
               />
             </div>
           </div>
 
           {/* Keterangan */}
           <div>
-            <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+            <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
               Catatan / Keterangan
             </label>
             <textarea
               rows={2}
-              placeholder="Catatan topografi, jenis bibit, atau kondisi jalan..."
+              placeholder="Catatan topografi, nomor kontrak, atau kondisi lahan..."
               value={keterangan}
               onChange={(e) => setKeterangan(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-hidden focus:border-emerald-500 resize-none"
+              className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50 focus:outline-hidden focus:border-[#00D2FF] resize-none"
             />
           </div>
 

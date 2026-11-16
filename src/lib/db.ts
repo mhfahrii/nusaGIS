@@ -82,6 +82,10 @@ export async function ensureGisSpatialIndices(): Promise<void> {
     // 4. Indeks Relasional layer_peta
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_layer_peta_kebun ON public.layer_peta (kebun_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_layer_peta_unggahan ON public.layer_peta (unggahan_id);`);
+    // 5. Dukungan Soft Delete & Audit Trail pada fitur_peta (Standar Enterprise)
+    await pool.query(`ALTER TABLE public.fitur_peta ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;`);
+    await pool.query(`ALTER TABLE public.fitur_peta ADD COLUMN IF NOT EXISTS dihapus_pada TIMESTAMP WITHOUT TIME ZONE;`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_fitur_peta_is_deleted ON public.fitur_peta (is_deleted);`);
   } catch (err) {
     // Abaikan jika tabel belum ada atau indeks sedang dibuat paralel
     console.warn('Notice (Spatial Indices Check):', (err as Error).message);

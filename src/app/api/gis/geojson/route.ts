@@ -18,11 +18,17 @@ function buildFeatureLabel(
   geomType: string
 ): string {
   const preferredKeys = [
+    'Name',
+    'NAME',
+    'name',
+    'Nama',
+    'NAMA',
     'Kode Blok',
     'KODE_BLOK',
     'kode_blok',
     'Nama_Blok',
     'NAMA_BLOK',
+    'nama_blok',
     'Nama Afdeling',
     'NAMA_AFDELING',
     'Kode Afdeling',
@@ -33,13 +39,26 @@ function buildFeatureLabel(
     'KODE_KEBUN',
     'Nama Jalan',
     'NAMA_JALAN',
-    'NAMA',
-    'Nama',
-    'NAME',
-    'name',
     'KODE',
     'Kode',
+    'Label',
+    'LABEL',
+    'label',
   ];
+
+  const garbageKeyNames = new Set([
+    'symbolid',
+    'altmode',
+    'base',
+    'clamped',
+    'extruded',
+    'snippet',
+    'folderpath',
+    'shape_leng',
+    'shape_area',
+    'popupinfo',
+    'objectid',
+  ]);
 
   let primaryText = '';
   for (const key of preferredKeys) {
@@ -50,11 +69,12 @@ function buildFeatureLabel(
     }
   }
 
+  // Fallback: cari atribut pertama yang bukan kunci sampah teknis
   if (!primaryText) {
     for (const [k, v] of Object.entries(atribut)) {
       if (
         !k.startsWith('_') &&
-        k.toUpperCase() !== 'OBJECTID' &&
+        !garbageKeyNames.has(k.toLowerCase()) &&
         v !== null &&
         v !== undefined &&
         String(v).trim() !== ''
@@ -148,7 +168,7 @@ export async function GET(req: NextRequest) {
           ELSE NULL
         END AS luas_geodesik_ha
       FROM fitur_peta fp
-      WHERE fp.layer_id = $1
+      WHERE fp.layer_id = $1 AND COALESCE(fp.is_deleted, FALSE) = FALSE
       ORDER BY fp.id ASC;`,
       [layerId]
     );

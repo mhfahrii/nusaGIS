@@ -54,7 +54,7 @@ export function MonitoringDashboard() {
   const [selectedKebunId, setSelectedKebunId] = useState<number | null>(null);
   const [selectedAfdelingId, setSelectedAfdelingId] = useState<number | null>(null);
   const [selectedBlokId, setSelectedBlokId] = useState<number | null>(null);
-  const [geometryFilter, setGeometryFilter] = useState<'semua' | 'polygon' | 'line'>('semua');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'ktg' | 'ks_gpa'>('all');
   const [layerCategoryFilter, setLayerCategoryFilter] = useState('');
 
   // Active map and selection states
@@ -200,19 +200,14 @@ export function MonitoringDashboard() {
       if (selectedKebunId && l.kebun_id && l.kebun_id !== selectedKebunId) {
         return false;
       }
-      // Filter Afdeling
+      // Filter Afdeling: Hanya sembunyikan jika layer ini memang eksplisit milik afdeling lain
       if (selectedAfdelingId && l.afdeling_id && l.afdeling_id !== selectedAfdelingId) {
-        return false;
+        if (!l.kebun_id || (selectedKebunId && l.kebun_id !== selectedKebunId)) {
+          return false;
+        }
       }
       // Filter Blok
       if (selectedBlokId && l.blok_id && l.blok_id !== selectedBlokId) {
-        return false;
-      }
-      // Filter Geometry
-      if (geometryFilter === 'polygon' && !l.tipe_geometri.includes('Polygon')) {
-        return false;
-      }
-      if (geometryFilter === 'line' && !l.tipe_geometri.includes('Line')) {
         return false;
       }
       // Filter Category
@@ -229,7 +224,6 @@ export function MonitoringDashboard() {
     selectedKebunId,
     selectedAfdelingId,
     selectedBlokId,
-    geometryFilter,
     layerCategoryFilter,
   ]);
 
@@ -239,7 +233,6 @@ export function MonitoringDashboard() {
     setSelectedKebunId(null);
     setSelectedAfdelingId(null);
     setSelectedBlokId(null);
-    setGeometryFilter('semua');
     setLayerCategoryFilter('');
     const firstLayerWithBbox = rawLayers.find((l) => l.bbox);
     if (firstLayerWithBbox?.bbox) {
@@ -334,20 +327,8 @@ export function MonitoringDashboard() {
       <MonitoringHeader
         kebunList={kebunList}
         selectedKebunId={selectedKebunId}
-        onSelectKebun={(id) => {
-          setSelectedKebunId(id);
-          setSelectedAfdelingId(null);
-          setSelectedBlokId(null);
-          // Auto zoom to kebun extent if available
-          const kebunLayers = rawLayers.filter((l) => l.kebun_id === id && l.bbox);
-          if (kebunLayers.length > 0 && kebunLayers[0].bbox) {
-            setFitBoundsTarget(kebunLayers[0].bbox);
-          }
-        }}
-        selectedYear={selectedYear}
-        onSelectYear={setSelectedYear}
-        selectedMonth={selectedMonth}
-        onSelectMonth={setSelectedMonth}
+        selectedStatusFilter={selectedStatusFilter}
+        onSelectStatusFilter={(val) => setSelectedStatusFilter(val as 'all' | 'ktg' | 'ks_gpa')}
         onOpenUpload={() => setIsUploadModalOpen(true)}
       />
 
@@ -363,13 +344,21 @@ export function MonitoringDashboard() {
           selectedWilayah={selectedWilayah}
           onSelectWilayah={setSelectedWilayah}
           selectedKebunId={selectedKebunId}
-          onSelectKebun={setSelectedKebunId}
+          onSelectKebun={(id) => {
+            setSelectedKebunId(id);
+            setSelectedAfdelingId(null);
+            setSelectedBlokId(null);
+            if (id) {
+              const kebunLayers = rawLayers.filter((l) => l.kebun_id === id && l.bbox);
+              if (kebunLayers.length > 0 && kebunLayers[0].bbox) {
+                setFitBoundsTarget(kebunLayers[0].bbox);
+              }
+            }
+          }}
           selectedAfdelingId={selectedAfdelingId}
           onSelectAfdeling={setSelectedAfdelingId}
           selectedBlokId={selectedBlokId}
           onSelectBlok={setSelectedBlokId}
-          geometryFilter={geometryFilter}
-          onChangeGeometryFilter={setGeometryFilter}
           layerCategoryFilter={layerCategoryFilter}
           onChangeLayerCategoryFilter={setLayerCategoryFilter}
           onResetFilters={handleResetFilters}
@@ -389,6 +378,9 @@ export function MonitoringDashboard() {
               rasterLayers={rasterLayers}
               stats={stats}
               selectedLayerId={selectedLayerId}
+              statusFilter={selectedStatusFilter}
+              selectedAfdelingId={selectedAfdelingId}
+              afdelingList={afdelingList}
               onSelectFeature={(featId, layerId) => {
                 setSelectedFeatureId(featId);
                 if (layerId) setSelectedLayerId(layerId);

@@ -12,27 +12,27 @@ interface KebunItem {
 }
 
 interface MonitoringHeaderProps {
-  kebunList: KebunItem[];
-  selectedKebunId: number | null;
-  onSelectKebun: (id: number | null) => void;
-  selectedYear: string;
-  onSelectYear: (year: string) => void;
-  selectedMonth: string;
-  onSelectMonth: (month: string) => void;
+  kebunList?: KebunItem[];
+  selectedKebunId?: number | null;
+  onSelectKebun?: (id: number | null) => void;
+  selectedStatusFilter?: string;
+  onSelectStatusFilter?: (status: string) => void;
+  selectedYear?: string;
+  onSelectYear?: (year: string) => void;
+  selectedMonth?: string;
+  onSelectMonth?: (month: string) => void;
   onOpenUpload: () => void;
 }
 
 export function MonitoringHeader({
-  kebunList,
-  selectedKebunId,
-  onSelectKebun,
-  selectedYear,
-  onSelectYear,
-  selectedMonth,
-  onSelectMonth,
+  kebunList = [],
+  selectedKebunId = null,
+  selectedStatusFilter = 'all',
+  onSelectStatusFilter,
   onOpenUpload,
 }: MonitoringHeaderProps) {
   const { user, logout } = useAuth();
+  const activeKebun = selectedKebunId ? kebunList.find((k) => k.id === selectedKebunId) : null;
 
   return (
     <header className="h-13 bg-[#0D1322] border-b border-[#1E2942] px-4 flex items-center justify-between text-xs select-none shrink-0 z-30 shadow-md">
@@ -51,69 +51,53 @@ export function MonitoringHeader({
             </span>
           </div>
           <p className="text-[10px] text-[#8B9BB4] leading-none">
-            Monitoring Spasial Kebun, Afdeling, &amp; Blok Kelapa Sawit
+            Monitoring Spasial Kebun &amp; Blok Lahan (Tebu / Agribisnis)
           </p>
         </div>
       </div>
 
       {/* 2. Middle Period & Quick Filter Indicators */}
       <div className="hidden lg:flex items-center gap-6 text-[11px] text-[#8B9BB4]">
-        {/* Tahun Produksi */}
+        {/* Filter Status Pengelolaan Areal (Standar ArcGIS Pro) */}
         <div className="flex flex-col">
-          <span className="text-[10px] text-[#8B9BB4]">Tahun Produksi</span>
+          <span className="text-[10px] text-[#8B9BB4] flex items-center gap-1 font-semibold">
+            <span>Status Pengelolaan</span>
+            <span className="text-[9px] text-[#00D2FF] font-mono px-1 bg-[#0E3A5D]/60 rounded">ArcGIS</span>
+          </span>
           <select
-            value={selectedYear}
-            onChange={(e) => onSelectYear(e.target.value)}
-            className="bg-[#12192B] border border-[#1E2942] rounded px-2 py-0.5 text-[#F0F6FC] font-semibold focus:outline-none focus:border-[#00D2FF] cursor-pointer text-xs"
+            value={selectedStatusFilter}
+            onChange={(e) => onSelectStatusFilter?.(e.target.value)}
+            className="bg-[#12192B] border border-[#1E2942] rounded px-2.5 py-0.5 text-[#F0F6FC] font-semibold focus:outline-none focus:border-[#00D2FF] cursor-pointer text-xs mt-0.5"
           >
-            <option value="2026" className="bg-[#0D1322]">2026</option>
-            <option value="2025" className="bg-[#0D1322]">2025</option>
-            <option value="2024" className="bg-[#0D1322]">2024</option>
+            <option value="all" className="bg-[#0D1322]">Semua Status Areal</option>
+            <option value="ktg" className="bg-[#0D1322]">🟢 KTG (Kebun Sendiri)</option>
+            <option value="ks_gpa" className="bg-[#0D1322]">🔵 KS GPA 2023 (Garapan)</option>
           </select>
         </div>
 
-        {/* Bulan Produksi */}
-        <div className="flex flex-col">
-          <span className="text-[10px] text-[#8B9BB4]">Bulan Produksi</span>
-          <select
-            value={selectedMonth}
-            onChange={(e) => onSelectMonth(e.target.value)}
-            className="bg-[#12192B] border border-[#1E2942] rounded px-2 py-0.5 text-[#F0F6FC] font-semibold focus:outline-none focus:border-[#00D2FF] cursor-pointer text-xs"
-          >
-            <option value="Semua" className="bg-[#0D1322]">Semua Bulan</option>
-            <option value="Januari" className="bg-[#0D1322]">Januari</option>
-            <option value="Februari" className="bg-[#0D1322]">Februari</option>
-            <option value="Maret" className="bg-[#0D1322]">Maret</option>
-            <option value="April" className="bg-[#0D1322]">April</option>
-            <option value="Mei" className="bg-[#0D1322]">Mei</option>
-            <option value="Juni" className="bg-[#0D1322]">Juni</option>
-            <option value="Juli" className="bg-[#0D1322]">Juli</option>
-            <option value="Agustus" className="bg-[#0D1322]">Agustus</option>
-            <option value="September" className="bg-[#0D1322]">September</option>
-            <option value="Oktober" className="bg-[#0D1322]">Oktober</option>
-            <option value="November" className="bg-[#0D1322]">November</option>
-            <option value="Desember" className="bg-[#0D1322]">Desember</option>
-          </select>
+        {/* Indikator Komoditas Aktif */}
+        <div className="flex flex-col justify-center">
+          <span className="text-[10px] text-[#8B9BB4] font-semibold">Komoditas Lahan</span>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#10B981]/20 border border-[#10B981]/50 text-[#10B981] flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse"></span>
+              <span>Tebu (PSKA 942)</span>
+            </span>
+          </div>
         </div>
 
-        {/* Pilihan Kebun Utama */}
-        <div className="flex flex-col">
-          <span className="text-[10px] text-[#8B9BB4]">Pilihan Kebun</span>
-          <select
-            value={selectedKebunId || ''}
-            onChange={(e) =>
-              onSelectKebun(e.target.value ? Number(e.target.value) : null)
-            }
-            className="bg-[#12192B] border border-[#1E2942] rounded px-2 py-0.5 text-[#00D2FF] font-bold focus:outline-none focus:border-[#00D2FF] cursor-pointer text-xs"
-          >
-            <option value="" className="bg-[#0D1322]">Semua Kebun</option>
-            {kebunList.map((k) => (
-              <option key={k.id} value={k.id} className="bg-[#0D1322]">
-                {k.nama_kebun} ({k.kode_kebun})
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Indikator Unit Kebun Terpilih (Sinkron Otomatis dari Sidebar Filter) */}
+        {activeKebun && (
+          <div className="flex flex-col justify-center animate-in fade-in duration-200">
+            <span className="text-[10px] text-[#8B9BB4] font-semibold">Fokus Unit Terpilih</span>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#0E3A5D]/70 border border-[#00D2FF]/40 text-[#00D2FF] flex items-center gap-1.5 shadow-xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#00D2FF]"></span>
+                <span>{activeKebun.nama_kebun} ({activeKebun.kode_kebun})</span>
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 3. Action Buttons & User Profile */}

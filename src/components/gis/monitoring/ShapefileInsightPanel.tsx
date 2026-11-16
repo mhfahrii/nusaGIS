@@ -20,12 +20,16 @@ interface BlokRecord {
   bbox: [number, number, number, number] | null;
 }
 
+import { isFeatureMatchingAfdeling } from './MonitoringMap';
+
 interface ShapefileInsightPanelProps {
   layers: LayerPeta[];
   selectedLayerId: number | null;
   selectedFeatureId: number | null;
   onSelectFeature: (id: number | null) => void;
   onZoomToFeature?: (bbox: [number, number, number, number]) => void;
+  selectedAfdelingId?: number | null;
+  afdelingList?: { id: number; nama_afdeling: string; kode_afdeling: string }[];
   dataRevision?: number;
 }
 
@@ -98,6 +102,8 @@ export function ShapefileInsightPanel({
   selectedFeatureId,
   onSelectFeature,
   onZoomToFeature,
+  selectedAfdelingId = null,
+  afdelingList = [],
   dataRevision,
 }: ShapefileInsightPanelProps) {
   const [tab, setTab] = useState<InsightTab>('luas');
@@ -129,6 +135,9 @@ export function ShapefileInsightPanel({
           for (const f of fc?.features || []) {
             const t = f.geometry?.type;
             if (t !== 'Polygon' && t !== 'MultiPolygon') continue;
+            if (selectedAfdelingId && !isFeatureMatchingAfdeling(f, selectedAfdelingId, afdelingList)) {
+              continue;
+            }
             const p = (f.properties || {}) as Record<string, unknown>;
             const popup = parsePopupInfo(p.PopupInfo ?? p.popupinfo);
             const rawName = pick(p, popup, ['Name', 'nama_blok', 'kode_blok', '_label']) || `Fitur #${f.id}`;
@@ -165,7 +174,7 @@ export function ShapefileInsightPanel({
     return () => {
       ignore = true;
     };
-  }, [targetLayerIds, dataRevision]);
+  }, [targetLayerIds, selectedAfdelingId, afdelingList, dataRevision]);
 
   const selectBlok = (r: BlokRecord) => {
     onSelectFeature(r.id);

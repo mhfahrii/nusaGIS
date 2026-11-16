@@ -14,6 +14,7 @@ interface CreateFeatureBody {
   tahun_tanam?: number | string | null;
   status_lahan?: string;
   luas_ha?: number | string | null;
+  luas_baku?: number | string | null;
   keterangan?: string;
 }
 
@@ -80,15 +81,18 @@ export async function POST(req: NextRequest) {
       coordinates: [ring],
     };
 
-    // Siapkan atribut JSONB sesuai struktur master RPN
+    // Siapkan atribut JSONB sesuai struktur master RPN & ArcGIS Shapefile
+    const finalLuasBaku = body.luas_baku ? Number(body.luas_baku) : (luas_ha ? Number(luas_ha) : null);
     const attributesPayload: Record<string, unknown> = {
       Name: nama.trim(),
       KODE_BLOK: kode?.trim() || `BLK-${Date.now().toString().slice(-4)}`,
       Label: nama.trim(),
-      komoditas: komoditas?.trim() || 'Kelapa Sawit',
+      komoditas: komoditas?.trim() || 'Tebu',
       tahun_tanam: tahun_tanam ? Number(tahun_tanam) : new Date().getFullYear(),
-      status_lahan: status_lahan?.trim() || 'Lahan Baku',
+      status_lahan: status_lahan?.trim() || 'KS GPA 2023',
       luas_input_ha: luas_ha ? Number(luas_ha) : null,
+      luas_baku: finalLuasBaku,
+      PopupInfo: `Luas Baku : ${finalLuasBaku !== null ? finalLuasBaku.toFixed(2) : '-'} Ha\nStatus Lahan : ${status_lahan?.trim() || 'KS GPA 2023'}\nTanaman : ${komoditas?.trim() || 'Tebu'}`,
       keterangan: keterangan?.trim() || 'Dibuat via Tool Digitasi Web GIS',
       metode_input: 'Digitasi Langsung Peta',
       dibuat_oleh: auth.user.nama || auth.user.email,

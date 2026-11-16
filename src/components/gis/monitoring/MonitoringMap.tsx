@@ -41,9 +41,12 @@ interface MonitoringMapProps {
   onFeatureCreated?: (newFeature: Record<string, unknown>, layerId: number) => void;
   onFeatureDeleted?: (featureId: number, layerId: number) => void;
   dataRevision?: number;
+  statusFilter?: 'all' | 'ktg' | 'ks_gpa';
+  selectedAfdelingId?: number | null;
+  afdelingList?: { id: number; nama_afdeling: string; kode_afdeling: string }[];
 }
 
-export type LeafletBasemapKey = 'google_sat' | 'google_hybrid' | 'satellite' | 'topo' | 'osm' | 'dark';
+export type LeafletBasemapKey = 'google_sat' | 'google_hybrid' | 'satellite' | 'topo' | 'osm';
 
 export interface BasemapConfig {
   name: string;
@@ -98,15 +101,6 @@ export const BASEMAP_STYLES: Record<LeafletBasemapKey, BasemapConfig> = {
     maxNativeZoom: 19,
     maxZoom: 21,
   },
-  dark: {
-    name: 'Dark Canvas',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    description: 'Peta latar gelap kontras',
-    maxNativeZoom: 19,
-    maxZoom: 21,
-    subdomains: 'abcd',
-  },
 };
 
 export interface RkapClassification {
@@ -116,6 +110,58 @@ export interface RkapClassification {
   label: string;
   statusText: string;
   badgeText: string;
+}
+
+/**
+ * Filter cerdas keterkaitan fitur blok terhadap Afdeling (Standar Hierarki Perkebunan)
+ */
+export function isFeatureMatchingAfdeling(
+  feature: GeoJSON.Feature | Record<string, unknown>,
+  afdelingId: number | null | undefined,
+  afdelingList: { id: number; nama_afdeling: string; kode_afdeling: string }[] = []
+): boolean {
+  if (!afdelingId) return true;
+  const props = ((feature as GeoJSON.Feature).properties || feature || {}) as Record<string, unknown>;
+
+  // 1. Cek langsung jika id afdeling tersimpan di atribut
+  if (props.afdeling_id && Number(props.afdeling_id) === Number(afdelingId)) {
+    return true;
+  }
+
+  const afd = afdelingList.find((a) => a.id === Number(afdelingId));
+  if (!afd) return true;
+
+  const afdNameLower = (afd.nama_afdeling || '').toLowerCase();
+  const afdCodeLower = (afd.kode_afdeling || '').toLowerCase();
+
+  // 2. Cek jika nama atau kode afdeling terdapat dalam atribut
+  const featAfd = String(
+    props.afdeling || props.nama_afdeling || props.NAMA_AFDELING || props.kode_afdeling || ''
+  ).toLowerCase();
+  if (featAfd) {
+    if (featAfd.includes(afdNameLower) || afdNameLower.includes(featAfd)) return true;
+    if (featAfd.includes(afdCodeLower) || afdCodeLower.includes(featAfd)) return true;
+  }
+
+  // 3. Heuristik Partisi Blok Kebun Bakalan (PTPN / RPN Rayon Standard):
+  // Afdeling I (Rayon A): Bakalan A, GPA 1, GPA 2, GPA 3
+  // Afdeling II (Rayon B & C): GPA 4, GPA 5, GPA 6, GPA 7, GPA 8
+  const featName = String(
+    props.Name || props.NAME || props.nama_blok || props.KODE_BLOK || props.kode_blok || props._label || ''
+  ).toLowerCase();
+  const isAfd1 =
+    afdCodeLower.includes('1') || afdNameLower.includes(' i') || afdNameLower.endsWith(' 1') || afdNameLower.includes('-1');
+  const isAfd2 =
+    afdCodeLower.includes('2') || afdNameLower.includes(' ii') || afdNameLower.endsWith(' 2') || afdCodeLower.includes('-2');
+
+  if (isAfd1) {
+    return /gpa\s*[1-3]|bakalan\s*a/i.test(featName);
+  }
+  if (isAfd2) {
+    return /gpa\s*[4-8]|bakalan\s*[bc]/i.test(featName);
+  }
+
+  return true;
 }
 
 /**
@@ -246,6 +292,9 @@ export function MonitoringMap({
   onFeatureCreated,
   onFeatureDeleted,
   dataRevision,
+  statusFilter = 'all',
+  selectedAfdelingId = null,
+  afdelingList = [],
 }: MonitoringMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const leafletRef = useRef<typeof LType | null>(null);
@@ -270,8 +319,8 @@ export function MonitoringMap({
   const [isLayersPanelOpen, setIsLayersPanelOpen] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
   const [isOutlineOnly, setIsOutlineOnly] = useState(false);
-  // ArcGIS Thematic Symbology: Mode Pewarnaan Layer ('default' vs 'rkap')
-  const [symbologyMode, setSymbologyMode] = useState<'default' | 'rkap'>('default');
+  // ArcGIS Thematic Symbology: Mode Pewarnaan Layer ('default' vs 'rkap') — Default 'rkap' agar tematik status langsung aktif
+  const [symbologyMode, setSymbologyMode] = useState<'default' | 'rkap'>('rkap');
   const [isLegendOpen, setIsLegendOpen] = useState(true);
   const [legendCounts, setLegendCounts] = useState({ optimal: 0, warning: 0, critical: 0, total: 0 });
   const [mapReady, setMapReady] = useState(false);
@@ -315,23 +364,38 @@ export function MonitoringMap({
       ) {
         return;
       }
-      map.fitBounds(
-        [
-          [s, w],
-          [n, e],
-        ],
-        {
-          padding: [50, 50],
-          maxZoom: 17,
-          animate: true,
-        }
-      );
+      if (typeof map.flyToBounds === 'function') {
+        map.flyToBounds(
+          [
+            [s, w],
+            [n, e],
+          ],
+          {
+            padding: [50, 50],
+            maxZoom: 17,
+            duration: 1.0,
+            easeLinearity: 0.25,
+          }
+        );
+      } else {
+        map.fitBounds(
+          [
+            [s, w],
+            [n, e],
+          ],
+          {
+            padding: [50, 50],
+            maxZoom: 17,
+            animate: true,
+          }
+        );
+      }
     } catch (err) {
       console.warn('Leaflet fitBounds warning:', err);
     }
   }, []);
 
-  // Helper: Membangun kartu popup fitur VEKTOR bergaya RPN Monitoring Dashboard + Tombol Ekspor
+  // Helper: Membangun kartu popup fitur VEKTOR standar ArcGIS Pro / ArcGIS Enterprise
   const buildPopupElement = useCallback(
     (
       map: LType.Map,
@@ -341,98 +405,288 @@ export function MonitoringMap({
       layer: LayerPeta,
       featId: number
     ): HTMLElement => {
+      // 0. Helper Validasi Nilai (Hilangkan jika kosong / null / tanda strip '-')
+      const isValidValue = (val: unknown): boolean => {
+        if (val === undefined || val === null) return false;
+        const str = String(val).trim();
+        if (
+          str === '' ||
+          str === '-' ||
+          str === '--' ||
+          str.toLowerCase() === 'null' ||
+          str.toLowerCase() === 'none' ||
+          str.toLowerCase() === 'undefined'
+        ) {
+          return false;
+        }
+        return true;
+      };
+
+      // 1. Ekstraksi Identitas Nama Blok Lahan
       const nameVal =
-        properties.kode_kebun ||
-        properties.KODE_KEBUN ||
-        properties.nama_kebun ||
-        properties.NAMA_KEBUN ||
-        properties.kode_afdeling ||
-        properties.nama_afdeling ||
-        properties.kode_blok ||
-        properties.KODE_BLOK ||
         properties.Name ||
         properties.NAME ||
+        properties.nama_blok ||
+        properties.kode_blok ||
+        properties.KODE_BLOK ||
+        properties.nama_kebun ||
+        properties.kode_kebun ||
         `Fitur #${featId}`;
 
-      const titleLabel = `Peta ${layer.nama_layer}: ${String(nameVal)}`;
+      // 2. Parsing cerdas PopupInfo (format DBF/ArcGIS "Kunci : Nilai\n...")
+      const rawPopupInfo = String(properties.PopupInfo || properties.popupinfo || '');
+      const parsedInfo: Record<string, string> = {};
+      if (rawPopupInfo) {
+        for (const line of rawPopupInfo.split(/\r?\n/)) {
+          const colonIdx = line.indexOf(':');
+          if (colonIdx > 0) {
+            const k = line.slice(0, colonIdx).trim().toLowerCase();
+            const v = line.slice(colonIdx + 1).trim();
+            if (k && isValidValue(v)) {
+              parsedInfo[k] = v;
+            }
+          }
+        }
+      }
 
-      const rows = Object.entries(properties)
-        .filter(([k]) => !k.startsWith('_'))
-        .slice(0, 15)
-        .map(
-          ([k, v], idx) => `
-          <tr style="background: ${idx % 2 === 0 ? '#0d1322' : '#12192b'};">
-            <td style="padding: 6px 12px; color: #8b9bb4; font-size: 11px; font-family: ui-monospace, SFMono-Regular, monospace; white-space: nowrap; border-bottom: 1px solid #1e2942;">${k}</td>
-            <td style="padding: 6px 12px; color: #f0f6fc; font-weight: 600; font-size: 11px; text-align: left; word-break: break-all; border-bottom: 1px solid #1e2942;">${String(
-              v ?? '-'
-            )}</td>
-          </tr>`
-        )
-        .join('');
+      // 3. Ekstraksi Luas Ukur GIS vs Luas Baku Dokumen
+      const luasUkurHa = Number(
+        properties._luas_geodesik_ha ||
+        properties.luas ||
+        (properties.Shape_Area && Number(properties.Shape_Area) > 0.01 ? properties.Shape_Area : 0) ||
+        0
+      );
 
-      const rkapClass = getFeatureRkapClassification(featId, properties);
-      const extraRkap = `
-        <tr style="background: ${rkapClass.color}15; border-bottom: 1px solid ${rkapClass.color}40;">
-          <td style="padding: 6px 12px; color: ${rkapClass.color}; font-size: 11px; font-weight: 700; font-family: ui-monospace, monospace;">kelas_areal</td>
-          <td style="padding: 6px 12px; color: #ffffff; font-weight: 800; font-size: 11px; text-align: left;">
-            <span style="background: ${rkapClass.color}25; border: 1px solid ${rkapClass.color}; color: ${rkapClass.color}; padding: 1.5px 6px; border-radius: 4px; font-size: 10px; margin-right: 6px;">
-              ${rkapClass.badgeText}
-            </span>
-            <span style="font-size: 10px; color: #8b9bb4;">${rkapClass.statusText}</span>
-          </td>
-        </tr>`;
+      const rawLuasBaku = parsedInfo['luas baku'] || (properties.luas_baku ? String(properties.luas_baku) : '');
+      let luasBakuNum: number | null = null;
+      if (rawLuasBaku) {
+        const m = rawLuasBaku.replace(/\s/g, '').match(/([0-9]+(?:[.,][0-9]+)?)/);
+        if (m) {
+          const parsed = parseFloat(m[1].replace(',', '.'));
+          if (Number.isFinite(parsed) && parsed > 0) luasBakuNum = parsed;
+        }
+      }
 
-      const extraLuas = properties._luas_geodesik_ha
-        ? `<tr style="background: #0e3a5d; border-bottom: 1px solid #00b4d8;">
-            <td style="padding: 6px 12px; color: #7dd3fc; font-size: 11px; font-weight: 700; font-family: ui-monospace, monospace;">luas_geodesik</td>
-            <td style="padding: 6px 12px; color: #00d2ff; font-weight: 800; font-size: 11px; text-align: left;">${properties._luas_geodesik_ha} Ha</td>
-          </tr>`
-        : '';
+      // Kalkulasi Selisih Luas (Variance Analysis Ukur vs Baku)
+      let selisihHa: number | null = null;
+      let selisihPct: number | null = null;
+      if (luasBakuNum && luasUkurHa > 0) {
+        selisihHa = Number((luasUkurHa - luasBakuNum).toFixed(2));
+        selisihPct = Number(((selisihHa / luasBakuNum) * 100).toFixed(1));
+      }
+
+      // 4. Ekstraksi Status Lahan, Varietas, dan Masa Tanam
+      const rawStatus = parsedInfo['status lahan'] || (properties.status || properties.status_lahan ? String(properties.status || properties.status_lahan) : '');
+      const statusLahan = isValidValue(rawStatus) ? rawStatus : '';
+      const varietas = parsedInfo['varietas'] || (properties.varietas || properties.VARIETAS ? String(properties.varietas || properties.VARIETAS) : '');
+      const mtRaw = parsedInfo['mt'] || (properties.mt || properties.MT ? String(properties.mt || properties.MT) : '');
+      const luasTanam = parsedInfo['luas tanam'] || (properties.luas_tanam ? String(properties.luas_tanam) : '');
+      const rawLabel = properties.Label || properties.label || properties.wilayah;
+      const labelWilayah = isValidValue(rawLabel) ? String(rawLabel) : '';
+
+      // Format Masa Tanam ramah pembaca (misal "08/24" -> "Agustus 2024 (08/24)")
+      let mtFormatted = mtRaw;
+      if (isValidValue(mtRaw)) {
+        const mtMatch = mtRaw.match(/^(\d{1,2})\s*\/\s*(\d{2,4})$/);
+        if (mtMatch) {
+          const bulanList = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+          const bIdx = parseInt(mtMatch[1], 10) - 1;
+          const bName = bulanList[bIdx];
+          const yr = mtMatch[2].length === 2 ? `20${mtMatch[2]}` : mtMatch[2];
+          if (bName) mtFormatted = `${bName} ${yr} (${mtRaw})`;
+        }
+      }
+
+      // 5. Filter Kolom Sampah Teknis KML / GIS (SymbolID, Clamped, Extruded, FolderPath, Derajat)
+      const GARBAGE_KEYS = new Set([
+        'symbolid',
+        'altmode',
+        'base',
+        'clamped',
+        'extruded',
+        'snippet',
+        'folderpath',
+        'shape_leng',
+        'shape_area',
+        'popupinfo',
+        '_luas_geodesik_ha',
+        '_bbox',
+        'id',
+        'layer_id',
+        'created_at',
+        'updated_at',
+        'luas',
+        'name',
+        'label'
+      ]);
+
+      // 6. Susun baris atribut yang hanya BERISI DATA (Jika kosong, HILANGKAN row & nama barisnya!)
+      const extraAttributes: Array<{ label: string; value: string }> = [];
+      if (isValidValue(statusLahan)) {
+        extraAttributes.push({ label: 'Status Lahan', value: statusLahan });
+      }
+      if (isValidValue(varietas)) {
+        extraAttributes.push({ label: 'Varietas Tebu', value: varietas });
+      }
+      if (isValidValue(mtFormatted)) {
+        extraAttributes.push({ label: 'Masa Tanam (MT)', value: mtFormatted });
+      }
+      if (isValidValue(luasTanam)) {
+        extraAttributes.push({ label: 'Luas Tanam', value: luasTanam });
+      }
+      if (isValidValue(labelWilayah)) {
+        extraAttributes.push({ label: 'Wilayah / Afdeling', value: labelWilayah });
+      }
+
+      // Masukkan atribut kustom lain jika ada (yang bukan sampah dan punya nilai nyata)
+      for (const [k, v] of Object.entries(properties)) {
+        if (!k.startsWith('_') && !GARBAGE_KEYS.has(k.toLowerCase()) && isValidValue(v)) {
+          const keyLower = k.toLowerCase();
+          if (
+            keyLower !== 'status' &&
+            keyLower !== 'status_lahan' &&
+            keyLower !== 'varietas' &&
+            keyLower !== 'mt' &&
+            keyLower !== 'luas_tanam' &&
+            keyLower !== 'wilayah' &&
+            keyLower !== 'afdeling'
+          ) {
+            extraAttributes.push({ label: k, value: String(v) });
+          }
+        }
+      }
+
+      // Status Badge Styling
+      const isKTG = statusLahan.toLowerCase().includes('ktg') || statusLahan.toLowerCase().includes('kebun tebu giling');
+      const statusBadgeColor = isKTG ? '#10B981' : '#00D2FF';
+
+      // Selisih Badge Styling
+      let varianceBadge = '';
+      if (selisihHa !== null && selisihPct !== null) {
+        const isOptimal = Math.abs(selisihPct) <= 5.0;
+        const varColor = isOptimal ? '#10B981' : '#F59E0B';
+        const sign = selisihHa > 0 ? '+' : '';
+        varianceBadge = `
+          <div style="margin-top: 6px; padding: 4px 8px; background: ${varColor}15; border: 1px solid ${varColor}40; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; font-size: 10px;">
+            <span style="color: #8b9bb4;">Selisih Ukur vs Baku:</span>
+            <span style="font-weight: 800; color: ${varColor}; font-family: ui-monospace, monospace;">${sign}${selisihHa.toFixed(2)} Ha (${sign}${selisihPct}%)</span>
+          </div>
+        `;
+      }
+
+      // Highlight Luas: Hanya render box Luas Baku jika datanya ada
+      const hasLuasBaku = Boolean(luasBakuNum || isValidValue(rawLuasBaku));
+      const kpiHighlightHtml = hasLuasBaku
+        ? `
+        <div style="padding: 9px 12px; background: #0a0e1a; border-bottom: 1px solid #1e2942;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div style="background: #0d1322; border: 1px solid #1e2942; border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 9px; font-weight: 700; color: #8b9bb4; text-transform: uppercase; letter-spacing: 0.03em;">Luas Ukur GIS</div>
+              <div style="font-size: 15px; font-weight: 900; color: #00D2FF; margin-top: 1px; font-family: ui-monospace, monospace;">
+                ${luasUkurHa > 0 ? `${luasUkurHa.toFixed(2)} Ha` : '-'}
+              </div>
+              <div style="font-size: 8.5px; color: #566680; margin-top: 1px;">PostGIS Geodesik</div>
+            </div>
+            <div style="background: #0d1322; border: 1px solid #1e2942; border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 9px; font-weight: 700; color: #8b9bb4; text-transform: uppercase; letter-spacing: 0.03em;">Luas Baku Dokumen</div>
+              <div style="font-size: 15px; font-weight: 900; color: #f0f6fc; margin-top: 1px; font-family: ui-monospace, monospace;">
+                ${luasBakuNum ? `${luasBakuNum.toFixed(2)} Ha` : rawLuasBaku}
+              </div>
+              <div style="font-size: 8.5px; color: #566680; margin-top: 1px;">Legal Dokumen</div>
+            </div>
+          </div>
+          ${varianceBadge}
+        </div>`
+        : `
+        <div style="padding: 9px 12px; background: #0a0e1a; border-bottom: 1px solid #1e2942;">
+          <div style="background: #0d1322; border: 1px solid #1e2942; border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+              <div style="font-size: 9px; font-weight: 700; color: #8b9bb4; text-transform: uppercase; letter-spacing: 0.03em;">Luas Ukur GIS (PostGIS)</div>
+              <div style="font-size: 8.5px; color: #566680; margin-top: 1px;">Hasil Ukur Spasial Satelit</div>
+            </div>
+            <div style="font-size: 16px; font-weight: 900; color: #00D2FF; font-family: ui-monospace, monospace;">
+              ${luasUkurHa > 0 ? `${luasUkurHa.toFixed(2)} Ha` : '-'}
+            </div>
+          </div>
+        </div>`;
+
+      // Tabel Atribut: Hanya tampil jika ada atribut yang memiliki nilai
+      const tableContentHtml =
+        extraAttributes.length > 0
+          ? `
+        <div style="max-height: 160px; overflow-y: auto;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
+            <tbody>
+              ${extraAttributes
+                .map(
+                  (attr, idx) => `
+                <tr style="background: ${idx % 2 === 0 ? '#0d1322' : '#12192b'}; border-bottom: 1px solid #1e2942;">
+                  <td style="padding: 5px 10px; color: #8b9bb4; font-size: 10px; font-weight: 600; white-space: nowrap; width: 44%;">${attr.label}</td>
+                  <td style="padding: 5px 10px; color: #f0f6fc; font-weight: 700; font-size: 11px; text-align: left;">${attr.value}</td>
+                </tr>`
+                )
+                .join('')}
+            </tbody>
+          </table>
+        </div>`
+          : '';
 
       const wrapper = document.createElement('div');
       wrapper.style.cssText =
-        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 8px; overflow: hidden; min-width: 310px; max-width: 390px; box-shadow: 0 14px 35px -4px rgba(0, 0, 0, 0.6), 0 8px 16px -4px rgba(0, 0, 0, 0.4);';
+        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; min-width: 310px; max-width: 360px; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.8), 0 10px 20px -4px rgba(0, 0, 0, 0.5);';
 
       wrapper.innerHTML = `
-        <!-- Top Action Bar (Zoom to | Pan | Export) matching RPN screenshot -->
-        <div style="background: #12192b; padding: 7px 12px; border-bottom: 1px solid #1e2942; display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <button type="button" data-action="zoom" style="background: transparent; border: none; color: #8b9bb4; font-size: 11px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 3px;">
-              <svg style="width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              <span>Zoom to</span>
+        <!-- 1. ArcGIS Pro Header -->
+        <div style="background: linear-gradient(180deg, #12192b 0%, #0d1322 100%); padding: 10px 12px; border-bottom: 1px solid #1e2942;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                <span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: ${statusBadgeColor};"></span>
+                <span style="font-size: 9px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: #00D2FF;">${layer.nama_layer}</span>
+              </div>
+              <h4 style="margin: 0; font-size: 13px; font-weight: 800; color: #ffffff; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                ${String(nameVal)}
+              </h4>
+            </div>
+            ${
+              isValidValue(statusLahan)
+                ? `<span style="background: ${statusBadgeColor}20; border: 1px solid ${statusBadgeColor}60; color: ${statusBadgeColor}; padding: 2px 7px; border-radius: 4px; font-size: 9.5px; font-weight: 800; white-space: nowrap;">
+                     ${statusLahan}
+                   </span>`
+                : ''
+            }
+          </div>
+        </div>
+
+        <!-- 2. Dual KPI Highlight Card (Luas Ukur GIS vs Luas Baku) -->
+        ${kpiHighlightHtml}
+
+        <!-- 3. Clean Attribute Table (Hanya baris yang ada nilainya) -->
+        ${tableContentHtml}
+
+        <!-- 4. Modern Action Bar -->
+        <div style="background: #12192b; padding: 7px 10px; border-top: 1px solid #1e2942; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <button type="button" data-action="zoom" style="background: #0d1322; border: 1px solid #1e2942; color: #8b9bb4; font-size: 10px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 4px;" title="Zoom ke Poligon Blok Ini">
+              <svg style="width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <span>Zoom</span>
             </button>
-            <button type="button" data-action="pan" style="background: transparent; border: none; color: #8b9bb4; font-size: 11px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 3px;">
-              <svg style="width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><polyline points="5 9 2 12 5 15"></polyline><polyline points="9 5 12 2 15 5"></polyline><polyline points="15 19 12 22 9 19"></polyline><polyline points="19 9 22 12 19 15"></polyline><line x1="2" y1="12" x2="22" y2="12"></line><line x1="12" y1="2" x2="12" y2="22"></line></svg>
+            <button type="button" data-action="pan" style="background: #0d1322; border: 1px solid #1e2942; color: #8b9bb4; font-size: 10px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 4px;" title="Pusatkan Layar ke Blok Ini">
+              <svg style="width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><polyline points="5 9 2 12 5 15"></polyline><polyline points="9 5 12 2 15 5"></polyline><polyline points="15 19 12 22 9 19"></polyline><polyline points="19 9 22 12 19 15"></polyline><line x1="2" y1="12" x2="22" y2="12"></line><line x1="12" y1="2" x2="12" y2="22"></line></svg>
               <span>Pan</span>
             </button>
           </div>
-          <!-- Download Links -->
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <a href="/api/gis/export?feature_id=${featId}&format=geojson" target="_blank" download="${String(nameVal)}.geojson" style="color: #00d2ff; background: #0e3a5d; border: 1px solid #00b4d8; font-size: 10px; font-weight: 700; text-decoration: none; padding: 2px 6px; border-radius: 3px; display: inline-flex; align-items: center; gap: 3px;" title="Unduh GeoJSON">
-              <svg style="width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"></path></svg>
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <a href="/api/gis/export?feature_id=${featId}&format=geojson" target="_blank" download="${String(nameVal)}.geojson" style="color: #00d2ff; background: #0e3a5d; border: 1px solid #00b4d8; font-size: 9.5px; font-weight: 700; text-decoration: none; padding: 3px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;" title="Unduh GeoJSON">
               <span>GeoJSON</span>
             </a>
-            <a href="/api/gis/export?feature_id=${featId}&format=kml" target="_blank" download="${String(nameVal)}.kml" style="color: #7dd3fc; background: #132238; border: 1px solid #1e2942; font-size: 10px; font-weight: 700; text-decoration: none; padding: 2px 6px; border-radius: 3px; display: inline-flex; align-items: center; gap: 3px;" title="Unduh KML Google Earth">
-              <svg style="width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"></path></svg>
+            <a href="/api/gis/export?feature_id=${featId}&format=kml" target="_blank" download="${String(nameVal)}.kml" style="color: #7dd3fc; background: #132238; border: 1px solid #1e2942; font-size: 9.5px; font-weight: 700; text-decoration: none; padding: 3px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;" title="Unduh KML Google Earth">
               <span>KML</span>
             </a>
-            <button type="button" data-action="delete" style="color: #f87171; background: #450a0a; border: 1px solid #991b1b; font-size: 10px; font-weight: 700; cursor: pointer; padding: 2px 6px; border-radius: 3px; display: inline-flex; align-items: center; gap: 3px;" title="Hapus Lahan ini dari Database">
-              <svg style="width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+            <button type="button" data-action="delete" style="color: #f87171; background: #450a0a; border: 1px solid #991b1b; font-size: 9.5px; font-weight: 700; cursor: pointer; padding: 3px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;" title="Hapus Lahan ini dari Database">
               <span>Hapus</span>
             </button>
           </div>
-        </div>
-
-        <!-- Title bar matching screenshot: "Peta Kebun: ptpnxivluwu" -->
-        <div style="background: #0d1322; padding: 10px 12px 6px;">
-          <h4 style="margin: 0; font-size: 12px; font-weight: 700; color: #f0f6fc; line-height: 1.3;">${titleLabel}</h4>
-        </div>
-
-        <!-- Attributes table with dark alternating zebra striping -->
-        <div style="padding: 0 12px 10px; max-height: 220px; overflow-y: auto;">
-          <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
-            <tbody>${extraRkap}${rows}${extraLuas}</tbody>
-          </table>
         </div>
       `;
 
@@ -704,10 +958,13 @@ export function MonitoringMap({
             const popupEl = buildRasterPopupElement(clickedRaster, json.data, e.latlng);
             L.popup({
               className: 'monitoring-leaflet-popup',
-              maxWidth: 380,
+              maxWidth: 360,
               minWidth: 300,
               closeButton: true,
               autoPan: true,
+              autoPanPaddingTopLeft: [280, 80],
+              autoPanPaddingBottomRight: [40, 80],
+              offset: [0, -12],
             })
               .setLatLng(e.latlng)
               .setContent(popupEl)
@@ -899,12 +1156,17 @@ export function MonitoringMap({
 
         if (ignore || !geojsonData) continue;
 
-        // Hitung statistik klasifikasi RKAP jika fitur poligon
+        // Hitung statistik klasifikasi RKAP jika fitur poligon (memperhitungkan filter status & afdeling)
         if (geojsonData.features) {
           for (const f of geojsonData.features) {
-            totalFeaturesCount++;
+            if (selectedAfdelingId && !isFeatureMatchingAfdeling(f, selectedAfdelingId, afdelingList)) {
+              continue;
+            }
             const featId = Number(f.id || f.properties?._feature_id || 0);
             const rkap = getFeatureRkapClassification(featId, (f.properties || {}) as Record<string, unknown>);
+            if (statusFilter === 'ktg' && rkap.category !== 'optimal') continue;
+            if (statusFilter === 'ks_gpa' && rkap.category !== 'warning' && rkap.category !== 'critical') continue;
+            totalFeaturesCount++;
             if (rkap.category === 'optimal') optCount++;
             else if (rkap.category === 'warning') warnCount++;
             else critCount++;
@@ -930,6 +1192,17 @@ export function MonitoringMap({
         const defaultFillColor = strokeColor;
 
         const geoJsonLayer = L.geoJSON(geojsonData, {
+          filter: (feature) => {
+            if (selectedAfdelingId && !isFeatureMatchingAfdeling(feature, selectedAfdelingId, afdelingList)) {
+              return false;
+            }
+            if (!statusFilter || statusFilter === 'all') return true;
+            const featId = Number(feature?.id || feature?.properties?._feature_id || 0);
+            const rkap = getFeatureRkapClassification(featId, (feature?.properties || {}) as Record<string, unknown>);
+            if (statusFilter === 'ktg') return rkap.category === 'optimal';
+            if (statusFilter === 'ks_gpa') return rkap.category === 'warning' || rkap.category === 'critical';
+            return true;
+          },
           style: (feature) => {
             const featId = Number(feature?.id || feature?.properties?._feature_id || 0);
             const isSelected = selectedFeatureId !== null && featId === selectedFeatureId;
@@ -941,8 +1214,10 @@ export function MonitoringMap({
                 color: '#00f5ff',
                 weight: 5,
                 opacity: 1,
+                dashArray: '8, 6',
+                className: 'selected-feature-pulse',
                 fillColor: '#00f5ff',
-                fillOpacity: isOutlineOnly ? 0.1 : 0.55,
+                fillOpacity: isOutlineOnly ? 0.15 : 0.55,
               };
             }
 
@@ -1013,13 +1288,13 @@ export function MonitoringMap({
             if (showLabels) {
               const labelText = String(
                 props._label ||
-                  props.kode_blok ||
-                  props.KODE_BLOK ||
-                  props.nama_blok ||
-                  props.nama_afdeling ||
-                  props.nama_kebun ||
                   props.Name ||
                   props.NAME ||
+                  props.nama_blok ||
+                  props.kode_blok ||
+                  props.KODE_BLOK ||
+                  props.nama_afdeling ||
+                  props.nama_kebun ||
                   ''
               ).trim();
 
@@ -1056,10 +1331,13 @@ export function MonitoringMap({
 
               L.popup({
                 className: 'monitoring-leaflet-popup',
-                maxWidth: 390,
+                maxWidth: 360,
                 minWidth: 310,
                 closeButton: true,
                 autoPan: true,
+                autoPanPaddingTopLeft: [280, 80],
+                autoPanPaddingBottomRight: [40, 80],
+                offset: [0, -12],
               })
                 .setLatLng(e.latlng)
                 .setContent(popupEl)
@@ -1069,6 +1347,31 @@ export function MonitoringMap({
         });
 
         geoJsonLayer.addTo(group);
+
+        // Auto-fit & Visualisasi Batas Afdeling jika filter Afdeling aktif
+        if (selectedAfdelingId) {
+          const afdBnds = geoJsonLayer.getBounds();
+          if (afdBnds.isValid()) {
+            map.fitBounds(afdBnds, { padding: [50, 50], maxZoom: 18 });
+            const afdItem = afdelingList.find((a) => a.id === selectedAfdelingId);
+            const afdRect = L.rectangle(afdBnds, {
+              color: '#65A30D', // Warna Standar Batas Afdeling ArcGIS (Olive Gold)
+              weight: 3.5,
+              dashArray: '8, 6',
+              fillColor: '#65A30D',
+              fillOpacity: 0.06,
+              interactive: false,
+            });
+            if (afdItem) {
+              afdRect.bindTooltip(`Batas Wilayah: ${afdItem.nama_afdeling} (${afdItem.kode_afdeling})`, {
+                permanent: true,
+                direction: 'top',
+                className: 'leaflet-gis-label',
+              });
+            }
+            afdRect.addTo(group);
+          }
+        }
       }
 
       setLegendCounts({
@@ -1079,7 +1382,7 @@ export function MonitoringMap({
       });
 
       // Auto-fit awal jika belum pernah auto-fit
-      if (!initialAutoFitDoneRef.current && (visibleLayers.length > 0 || rasterLayers.length > 0)) {
+      if (!initialAutoFitDoneRef.current && !selectedAfdelingId && (visibleLayers.length > 0 || rasterLayers.length > 0)) {
         const firstVector = visibleLayers.find((l) => l.bbox);
         const firstRaster = rasterLayers.find((r) => r.bbox);
         const targetBbox = firstVector?.bbox || firstRaster?.bbox;
@@ -1103,6 +1406,9 @@ export function MonitoringMap({
     showLabels,
     isOutlineOnly,
     symbologyMode,
+    statusFilter,
+    selectedAfdelingId,
+    afdelingList,
     selectedFeatureId,
     mapReady,
     buildPopupElement,
@@ -1475,17 +1781,17 @@ export function MonitoringMap({
       {/* 1. MAP SEARCH & LOCATION LOCATOR BAR (Pencarian Lokasi Global & Regional Indonesia) */}
       <div
         ref={searchContainerRef}
-        className="absolute top-3 left-3 z-[1000] w-72 sm:w-80 md:w-96 select-text"
+        className="absolute top-3 left-3 z-[1000] w-48 sm:w-56 md:w-64 select-text"
       >
-        <div className="relative flex items-center bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] focus-within:border-[#00D2FF] rounded-xl shadow-2xl transition-all">
-          <div className="pl-3 text-[#00D2FF]">
+        <div className="relative flex items-center bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] focus-within:border-[#00D2FF] rounded-lg shadow-xl transition-all">
+          <div className="pl-2.5 text-[#00D2FF]">
             {isSearching ? (
-              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+              <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
               </svg>
             ) : (
-              <IconSearch className="w-4 h-4" />
+              <IconSearch className="w-3.5 h-3.5" />
             )}
           </div>
           <input
@@ -1502,8 +1808,8 @@ export function MonitoringMap({
                 setIsSearchDropdownOpen(false);
               }
             }}
-            placeholder="Cari Lokasi"
-            className="w-full bg-transparent text-[#F0F6FC] placeholder-[#566680] text-xs py-2.5 pl-2 pr-8 focus:outline-none"
+            placeholder="Cari Lokasi..."
+            className="w-full bg-transparent text-[#F0F6FC] placeholder-[#566680] text-xs py-1.5 pl-2 pr-7 focus:outline-none"
           />
           {searchQuery && (
             <button
@@ -1573,10 +1879,10 @@ export function MonitoringMap({
                 type="button"
                 onClick={handleStartDrawAtLocation}
                 className="bg-[#00D2FF] hover:bg-[#38BDF8] text-[#0A0E1A] font-extrabold px-3 py-1.5 rounded-lg text-xs transition-all shadow-md shadow-[#00D2FF]/20 flex items-center gap-1 cursor-pointer"
-                title="Mulai Gambar Lahan Baru di Lokasi Ini"
+                title="Mulai Digitasi Lahan di Lokasi Ini"
               >
                 <IconPencil className="w-3.5 h-3.5" />
-                <span>+ Buat Lahan</span>
+                <span>+ Digitasi Lahan</span>
               </button>
               <button
                 type="button"
@@ -1694,10 +2000,10 @@ export function MonitoringMap({
                 ? 'bg-[#00D2FF] border-[#00B4D8] text-[#0A0E1A] font-extrabold shadow-lg shadow-[#00D2FF]/20'
                 : 'bg-[#12192B] border-[#1E2942] text-[#00D2FF] hover:bg-[#19233A] hover:border-[#00D2FF]'
             }`}
-            title="Klik untuk mengaktifkan Tool Pensil Gambar Lahan Baru di Peta"
+            title="Klik untuk mengaktifkan Tool Digitasi Poligon Lahan di Peta"
           >
             <IconPencil className="w-3.5 h-3.5" />
-            <span>{isDrawingMode ? 'Mode Gambar Aktif' : 'Gambar Lahan Baru'}</span>
+            <span>{isDrawingMode ? 'Mode Digitasi Aktif' : 'Digitasi'}</span>
           </button>
 
           {/* Panel Manajemen Layer & Konten (Vektor & Raster) */}

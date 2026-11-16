@@ -49,8 +49,6 @@ interface MonitoringSidebarProps {
   onSelectAfdeling: (id: number | null) => void;
   selectedBlokId: number | null;
   onSelectBlok: (id: number | null) => void;
-  geometryFilter: 'semua' | 'polygon' | 'line';
-  onChangeGeometryFilter: (val: 'semua' | 'polygon' | 'line') => void;
   layerCategoryFilter: string;
   onChangeLayerCategoryFilter: (cat: string) => void;
   onResetFilters: () => void;
@@ -76,8 +74,6 @@ export function MonitoringSidebar({
   onSelectAfdeling,
   selectedBlokId,
   onSelectBlok,
-  geometryFilter,
-  onChangeGeometryFilter,
   layerCategoryFilter,
   onChangeLayerCategoryFilter,
   onResetFilters,
@@ -252,50 +248,8 @@ export function MonitoringSidebar({
           </select>
         </div>
 
-        {/* 5. Tipe Geometri Filter Buttons */}
+        {/* 5. Kategori Layer */}
         <div className="space-y-1.5 pt-2 border-t border-[#1E2942]">
-          <label className="text-[11px] font-semibold text-[#8B9BB4] block">
-            Filter Tipe Layer
-          </label>
-          <div className="grid grid-cols-3 gap-1 bg-[#0A0E1A] p-1 rounded-md border border-[#1E2942]">
-            <button
-              type="button"
-              onClick={() => onChangeGeometryFilter('semua')}
-              className={`py-1 text-[10px] font-semibold rounded transition-colors cursor-pointer ${
-                geometryFilter === 'semua'
-                  ? 'bg-[#00D2FF] text-[#0A0E1A] font-bold shadow-xs'
-                  : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
-              }`}
-            >
-              Semua
-            </button>
-            <button
-              type="button"
-              onClick={() => onChangeGeometryFilter('polygon')}
-              className={`py-1 text-[10px] font-semibold rounded transition-colors cursor-pointer ${
-                geometryFilter === 'polygon'
-                  ? 'bg-[#00D2FF] text-[#0A0E1A] font-bold shadow-xs'
-                  : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
-              }`}
-            >
-              Poligon
-            </button>
-            <button
-              type="button"
-              onClick={() => onChangeGeometryFilter('line')}
-              className={`py-1 text-[10px] font-semibold rounded transition-colors cursor-pointer ${
-                geometryFilter === 'line'
-                  ? 'bg-[#00D2FF] text-[#0A0E1A] font-bold shadow-xs'
-                  : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
-              }`}
-            >
-              Garis
-            </button>
-          </div>
-        </div>
-
-        {/* 6. Kategori Layer */}
-        <div className="space-y-1.5">
           <label className="text-[11px] font-semibold text-[#8B9BB4] block">
             Kategori Layer
           </label>
