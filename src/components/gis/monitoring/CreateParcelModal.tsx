@@ -178,19 +178,19 @@ export function CreateParcelModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="w-full max-w-lg bg-[#0D1322] border border-[#1E2942] rounded-xl shadow-2xl overflow-hidden flex flex-col text-[#F0F6FC] animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-1200 flex items-center justify-center bg-black/80 p-4 overflow-hidden">
+      <div className="w-full max-w-lg max-h-modal bg-bg-nav border border-border-subtle rounded-xl shadow-2xl overflow-hidden flex flex-col min-h-0 text-text-primary animate-in fade-in zoom-in-95 duration-150">
         {/* Header Modal */}
-        <div className="h-12 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between shrink-0">
+        <div className="h-12 px-4 bg-bg-nav border-b border-border-subtle flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-[#0E3A5D] border border-[#00B4D8]/50 flex items-center justify-center text-[#00D2FF]">
+            <div className="w-7 h-7 rounded-lg bg-bg-accent-surface border border-accent-secondary/50 flex items-center justify-center text-accent-primary">
               <IconPencil className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
+              <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider">
                 Simpan Lahan Hasil Digitasi
               </h3>
-              <p className="text-[10px] text-[#8B9BB4]">
+              <p className="text-2xs text-text-secondary">
                 Data poligon otomatis disesuaikan dan disimpan ke database PostGIS
               </p>
             </div>
@@ -198,7 +198,7 @@ export function CreateParcelModal({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-lg hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#F0F6FC] transition-colors cursor-pointer"
+            className="p-1 rounded-lg hover:bg-bg-surface text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
           >
             <IconClose className="w-4 h-4" />
           </button>
@@ -212,21 +212,21 @@ export function CreateParcelModal({
         )}
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-4 space-y-3.5 text-xs">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3.5 text-xs nusa-scroll">
           {/* Summary Box Hasil Digitasi */}
-          <div className="bg-[#12192B] border border-[#1E2942] rounded-lg p-2.5 flex items-center justify-between shadow-xs">
+          <div className="bg-bg-surface border border-border-subtle rounded-lg p-2.5 flex items-center justify-between shadow-xs">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#00D2FF] animate-pulse" />
-              <span className="text-[11px] text-[#8B9BB4] font-medium">
+              <span className="w-2.5 h-2.5 rounded-full bg-accent-primary animate-pulse" />
+              <span className="text-caption text-text-secondary font-medium">
                 Geometri Poligon Terbentuk:
               </span>
-              <span className="font-mono text-[11px] font-bold text-[#00D2FF]">
+              <span className="font-mono text-caption font-bold text-accent-primary">
                 {coordinates.length} titik sudut
               </span>
             </div>
             <div className="text-right">
-              <span className="text-[10px] text-[#8B9BB4] block">Luas Geodesik Riil</span>
-              <span className="font-mono text-xs font-extrabold text-[#00D2FF] tabular-nums">
+              <span className="text-2xs text-text-secondary block">Luas Geodesik Riil</span>
+              <span className="font-mono text-xs font-extrabold text-accent-primary tabular-nums">
                 {calculatedAreaHa.toFixed(2)} Ha
               </span>
             </div>
@@ -234,13 +234,13 @@ export function CreateParcelModal({
 
           {/* Layer Tujuan */}
           <div>
-            <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
+            <label className="block text-caption font-semibold text-text-secondary mb-1">
               Layer GIS Tujuan <span className="text-rose-400">*</span>
             </label>
             <select
               value={selectedLayerId}
               onChange={(e) => setSelectedLayerId(Number(e.target.value))}
-              className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
+              className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-border-active"
             >
               {layers.map((l) => (
                 <option key={l.id} value={l.id}>
@@ -253,7 +253,7 @@ export function CreateParcelModal({
           {/* Grid: Nama & Kode Blok */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
+              <label className="block text-caption font-semibold text-text-secondary mb-1">
                 Nama Lahan / Blok <span className="text-rose-400">*</span>
               </label>
               <input
@@ -262,11 +262,11 @@ export function CreateParcelModal({
                 placeholder="misal: GPA 9 (Bakalan C, Timur)"
                 value={nama}
                 onChange={(e) => setNama(e.target.value)}
-                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50 focus:outline-hidden focus:border-[#00D2FF]"
+                className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-border-active"
               />
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
+              <label className="block text-caption font-semibold text-text-secondary mb-1">
                 Kode Blok
               </label>
               <input
@@ -274,15 +274,15 @@ export function CreateParcelModal({
                 placeholder="misal: GPA-09"
                 value={kode}
                 onChange={(e) => setKode(e.target.value)}
-                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50 focus:outline-hidden focus:border-[#00D2FF] font-mono"
+                className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-border-active font-mono"
               />
             </div>
           </div>
 
           {/* Section: Unit Kebun & Afdeling (Pilih yang Ada atau Ketik Baru) */}
-          <div className="space-y-2.5 p-2.5 bg-[#0a0e1a] rounded-lg border border-[#1E2942]">
+          <div className="space-y-2.5 p-2.5 bg-bg-ground rounded-lg border border-border-subtle">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-[#F0F6FC]">Kelompok Unit Kebun & Wilayah</span>
+              <span className="text-caption font-bold text-text-primary">Kelompok Unit Kebun & Wilayah</span>
               <button
                 type="button"
                 onClick={() => {
@@ -292,7 +292,7 @@ export function CreateParcelModal({
                     setSelectedAfdelingId(null);
                   }
                 }}
-                className="text-[10px] text-[#00D2FF] hover:underline cursor-pointer"
+                className="text-2xs text-accent-primary hover:underline cursor-pointer"
               >
                 {isNewKebun ? '← Pilih Kebun yang Ada' : '+ Ketik / Buat Kebun Baru'}
               </button>
@@ -301,7 +301,7 @@ export function CreateParcelModal({
             {!isNewKebun ? (
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                  <label className="block text-2xs font-semibold text-text-secondary mb-1">
                     Pilih Unit Kebun
                   </label>
                   <select
@@ -315,7 +315,7 @@ export function CreateParcelModal({
                       }
                       setSelectedAfdelingId(null);
                     }}
-                    className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
+                    className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-border-active"
                   >
                     <option value="">-- Pilih Kebun --</option>
                     {kebunList.map((k) => (
@@ -323,11 +323,11 @@ export function CreateParcelModal({
                         {k.nama_kebun} ({k.wilayah || 'Wilayah'})
                       </option>
                     ))}
-                    <option value="__new__" className="text-[#00D2FF] font-bold">+ Ketik Kebun Baru...</option>
+                    <option value="__new__" className="text-accent-primary font-bold">+ Ketik Kebun Baru...</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                  <label className="block text-2xs font-semibold text-text-secondary mb-1">
                     Afdeling
                   </label>
                   {!isNewAfdeling ? (
@@ -341,7 +341,7 @@ export function CreateParcelModal({
                           setSelectedAfdelingId(Number(e.target.value) || null);
                         }
                       }}
-                      className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
+                      className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-border-active"
                     >
                       <option value="">-- Pilih Afdeling --</option>
                       {filteredAfdeling.map((a) => (
@@ -349,7 +349,7 @@ export function CreateParcelModal({
                           {a.nama_afdeling} ({a.kode_afdeling})
                         </option>
                       ))}
-                      <option value="__new_afd__" className="text-[#00D2FF] font-bold">+ Ketik Afdeling Baru...</option>
+                      <option value="__new_afd__" className="text-accent-primary font-bold">+ Ketik Afdeling Baru...</option>
                     </select>
                   ) : (
                     <div className="flex items-center gap-1">
@@ -358,12 +358,12 @@ export function CreateParcelModal({
                         placeholder="Nama Afdeling..."
                         value={newAfdelingNama}
                         onChange={(e) => setNewAfdelingNama(e.target.value)}
-                        className="w-full bg-[#12192B] border border-[#00D2FF] rounded-lg px-2 py-1 text-xs text-[#F0F6FC]"
+                        className="w-full bg-bg-surface border border-border-active rounded-lg px-2 py-1 text-xs text-text-primary"
                       />
                       <button
                         type="button"
                         onClick={() => setIsNewAfdeling(false)}
-                        className="text-[10px] text-[#8B9BB4] hover:text-[#F0F6FC] px-1"
+                        className="text-2xs text-text-secondary hover:text-text-primary px-1"
                         title="Batal"
                       >
                         ✕
@@ -373,10 +373,10 @@ export function CreateParcelModal({
                 </div>
               </div>
             ) : (
-              <div className="space-y-2 border-t border-[#1E2942] pt-2">
+              <div className="space-y-2 border-t border-border-subtle pt-2">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                    <label className="block text-2xs font-semibold text-text-secondary mb-1">
                       Nama Kebun Baru <span className="text-rose-400">*</span>
                     </label>
                     <input
@@ -385,11 +385,11 @@ export function CreateParcelModal({
                       placeholder="misal: Kebun Cibeureum"
                       value={newKebunNama}
                       onChange={(e) => setNewKebunNama(e.target.value)}
-                      className="w-full bg-[#12192B] border border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50"
+                      className="w-full bg-bg-surface border border-border-active rounded-lg px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-secondary/50"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                    <label className="block text-2xs font-semibold text-text-secondary mb-1">
                       Wilayah Geografis <span className="text-rose-400">*</span>
                     </label>
                     <input
@@ -398,14 +398,14 @@ export function CreateParcelModal({
                       placeholder="misal: Kabupaten Bandung, Jawa Barat"
                       value={newKebunWilayah}
                       onChange={(e) => setNewKebunWilayah(e.target.value)}
-                      className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50"
+                      className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-secondary/50"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                    <label className="block text-2xs font-semibold text-text-secondary mb-1">
                       Perusahaan / Holding
                     </label>
                     <input
@@ -413,11 +413,11 @@ export function CreateParcelModal({
                       placeholder="misal: PT Perkebunan Nusantara I"
                       value={newKebunPerusahaan}
                       onChange={(e) => setNewKebunPerusahaan(e.target.value)}
-                      className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC]"
+                      className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                    <label className="block text-2xs font-semibold text-text-secondary mb-1">
                       Afdeling (Opsional)
                     </label>
                     <input
@@ -425,7 +425,7 @@ export function CreateParcelModal({
                       placeholder="misal: Afdeling I"
                       value={newAfdelingNama}
                       onChange={(e) => setNewAfdelingNama(e.target.value)}
-                      className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC]"
+                      className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary"
                     />
                   </div>
                 </div>
@@ -436,13 +436,13 @@ export function CreateParcelModal({
           {/* Grid: Komoditas & Tahun Tanam */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
+              <label className="block text-caption font-semibold text-text-secondary mb-1">
                 Komoditas
               </label>
               <select
                 value={komoditas}
                 onChange={(e) => setKomoditas(e.target.value)}
-                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
+                className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-border-active"
               >
                 <option value="Tebu">Tebu (PSKA 942)</option>
                 <option value="Kelapa Sawit">Kelapa Sawit</option>
@@ -453,7 +453,7 @@ export function CreateParcelModal({
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
+              <label className="block text-caption font-semibold text-text-secondary mb-1">
                 Tahun Tanam
               </label>
               <input
@@ -462,7 +462,7 @@ export function CreateParcelModal({
                 max="2035"
                 value={tahunTanam}
                 onChange={(e) => setTahunTanam(e.target.value)}
-                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF] font-mono"
+                className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-border-active font-mono"
               />
             </div>
           </div>
@@ -470,13 +470,13 @@ export function CreateParcelModal({
           {/* Grid: Status Lahan & Luas Baku Dokumen */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
+              <label className="block text-caption font-semibold text-text-secondary mb-1">
                 Status Pengelolaan Lahan
               </label>
               <select
                 value={statusLahan}
                 onChange={(e) => setStatusLahan(e.target.value)}
-                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
+                className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-border-active"
               >
                 <option value="KS GPA 2023">KS GPA 2023 (Kerjasama Garapan)</option>
                 <option value="Kebun Tebu Giling (KTG)">Kebun Tebu Giling (KTG)</option>
@@ -487,10 +487,10 @@ export function CreateParcelModal({
             </div>
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-[11px] font-semibold text-[#8B9BB4]">
+                <label className="text-caption font-semibold text-text-secondary">
                   Luas Baku Dokumen (Ha)
                 </label>
-                <span className="text-[9.5px] text-[#00D2FF]">GIS: {calculatedAreaHa.toFixed(2)} Ha</span>
+                <span className="text-3xs text-accent-primary">GIS: {calculatedAreaHa.toFixed(2)} Ha</span>
               </div>
               <input
                 type="number"
@@ -498,14 +498,14 @@ export function CreateParcelModal({
                 placeholder={calculatedAreaHa.toFixed(2)}
                 value={luasBaku}
                 onChange={(e) => setLuasBaku(e.target.value)}
-                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#00D2FF] placeholder:text-[#8B9BB4]/50 focus:outline-hidden focus:border-[#00D2FF] font-mono font-bold"
+                className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-accent-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-border-active font-mono font-bold"
               />
             </div>
           </div>
 
           {/* Keterangan */}
           <div>
-            <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
+            <label className="block text-caption font-semibold text-text-secondary mb-1">
               Catatan / Keterangan
             </label>
             <textarea
@@ -513,24 +513,24 @@ export function CreateParcelModal({
               placeholder="Catatan topografi, nomor kontrak, atau kondisi lahan..."
               value={keterangan}
               onChange={(e) => setKeterangan(e.target.value)}
-              className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50 focus:outline-hidden focus:border-[#00D2FF] resize-none"
+              className="w-full bg-bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-border-active resize-none"
             />
           </div>
 
           {/* Footer Actions */}
-          <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#1E2942]">
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-border-subtle">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-3 py-1.5 rounded-lg border border-[#1E2942] hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#F0F6FC] text-xs transition-colors cursor-pointer"
+              className="px-3 py-1.5 rounded-lg border border-border-subtle hover:bg-bg-surface text-text-secondary hover:text-text-primary text-xs transition-colors cursor-pointer"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-1.5 rounded-lg bg-[#00D2FF] hover:bg-[#38BDF8] text-[#0A0E1A] font-bold text-xs flex items-center gap-1.5 shadow-md shadow-[#00D2FF]/20 transition-all cursor-pointer disabled:opacity-50"
+              className="px-4 py-1.5 rounded-lg bg-accent-primary hover:brightness-110 text-background font-bold text-xs flex items-center gap-1.5 shadow-md shadow-accent-primary/20 transition-all cursor-pointer disabled:opacity-50"
             >
               <IconCheck className="w-3.5 h-3.5" />
               <span>{isSubmitting ? 'Menyimpan ke PostGIS...' : 'Simpan Lahan ke PostGIS'}</span>

@@ -12,6 +12,7 @@ import {
   IconDatabase,
   IconCheck,
 } from '@/components/gis/GisIcons';
+import type { MonitoringUiTheme } from '@/lib/monitoring/uiTheme';
 
 interface DeletedFeature {
   id: number;
@@ -50,6 +51,8 @@ interface SettingsModalProps {
   onClose: () => void;
   onDataChanged?: () => void;
   initialTab?: 'backup' | 'history';
+  uiTheme?: MonitoringUiTheme;
+  onUiThemeChange?: (theme: MonitoringUiTheme) => void;
 }
 
 export default function SettingsModal({
@@ -57,6 +60,8 @@ export default function SettingsModal({
   onClose,
   onDataChanged,
   initialTab = 'backup',
+  uiTheme = 'dark',
+  onUiThemeChange,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<'backup' | 'history'>(initialTab);
   const [loading, setLoading] = useState<boolean>(false);
@@ -235,24 +240,21 @@ export default function SettingsModal({
   const activeCount = data?.counts.total_active || 0;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-fadeIn">
-      <div className="relative w-full max-w-4xl max-h-[90vh] bg-[#0D1322] border border-[#1E2942] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-[#E2E8F0]">
+    <div className="fixed inset-0 z-9999 flex items-center justify-center bg-black/75 p-4 overflow-hidden animate-fadeIn">
+      <div className="relative w-full max-w-4xl max-h-modal bg-bg-nav border border-border-subtle rounded-2xl shadow-2xl flex flex-col min-h-0 overflow-hidden text-text-primary">
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 bg-[#090D18] border-b border-[#1E2942] flex items-center justify-between gap-4">
+        <div className="p-4 sm:p-5 bg-bg-ground border-b border-border-subtle flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#00D2FF]/10 border border-[#00D2FF]/30 flex items-center justify-center text-[#00D2FF] shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-accent-primary/10 border border-border-active/30 flex items-center justify-center text-accent-primary shadow-sm">
               <IconSettings className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
-                  Settings & Pemeliharaan Data GIS
+                  Pengaturan & pemeliharaan data GIS
                 </h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-[#12192B] text-[#00D2FF] border border-[#1E2942]">
-                  PostGIS Engine
-                </span>
               </div>
-              <p className="text-xs text-[#8B9BB4] mt-0.5">
+              <p className="text-xs text-text-secondary mt-0.5">
                 Pusat cadangan dataset spasial, pemulihan lahan terhapus, dan audit riwayat aktivitas.
               </p>
             </div>
@@ -261,23 +263,47 @@ export default function SettingsModal({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg bg-[#12192B] hover:bg-[#1E2942] text-[#8B9BB4] hover:text-white transition-colors cursor-pointer"
+            className="p-2 rounded-lg bg-bg-surface hover:bg-bg-surface-hover text-text-secondary hover:text-white transition-colors cursor-pointer"
             title="Tutup dialog"
           >
             <IconClose className="w-4 h-4" />
           </button>
         </div>
 
+        {onUiThemeChange && (
+          <div className="px-5 py-3 bg-bg-nav border-b border-border-subtle flex flex-wrap items-center gap-3 text-xs">
+            <label className="text-text-secondary font-semibold" htmlFor="nusa-ui-theme">
+              Tema panel kerja
+            </label>
+            <select
+              id="nusa-ui-theme"
+              value={uiTheme}
+              onChange={(e) => onUiThemeChange(e.target.value as MonitoringUiTheme)}
+              className="bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 text-text-primary nusa-focus min-h-11"
+            >
+              <option value="dark" className="bg-bg-nav">
+                Gelap (peta)
+              </option>
+              <option value="light" className="bg-bg-nav">
+                Terang (ruang terang)
+              </option>
+            </select>
+            <p className="text-2xs text-text-muted">
+              Hanya mengubah sidebar, header, dan panel atribut. Peta tetap gelap.
+            </p>
+          </div>
+        )}
+
         {/* Tab Navigation */}
-        <div className="px-5 pt-3 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between">
+        <div className="px-5 pt-3 bg-bg-nav border-b border-border-subtle flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setActiveTab('backup')}
               className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer border-b-2 ${
                 activeTab === 'backup'
-                  ? 'border-[#00D2FF] text-[#00D2FF] bg-[#12192B]'
-                  : 'border-transparent text-[#8B9BB4] hover:text-white hover:bg-[#12192B]/50'
+                  ? 'border-border-active text-accent-primary bg-bg-surface'
+                  : 'border-transparent text-text-secondary hover:text-white hover:bg-bg-surface/50'
               }`}
             >
               <IconDownload className="w-4 h-4" />
@@ -289,14 +315,14 @@ export default function SettingsModal({
               onClick={() => setActiveTab('history')}
               className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-t-lg transition-all cursor-pointer border-b-2 ${
                 activeTab === 'history'
-                  ? 'border-[#00D2FF] text-[#00D2FF] bg-[#12192B]'
-                  : 'border-transparent text-[#8B9BB4] hover:text-white hover:bg-[#12192B]/50'
+                  ? 'border-border-active text-accent-primary bg-bg-surface'
+                  : 'border-transparent text-text-secondary hover:text-white hover:bg-bg-surface/50'
               }`}
             >
               <IconHistory className="w-4 h-4" />
               <span>History & Tempat Sampah</span>
               {deletedCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-[#EF4444] text-white">
+                <span className="px-1.5 py-0.2 rounded-full text-2xs font-bold bg-status-danger text-white">
                   {deletedCount}
                 </span>
               )}
@@ -307,10 +333,10 @@ export default function SettingsModal({
             type="button"
             onClick={fetchHistory}
             disabled={loading}
-            className="text-xs text-[#8B9BB4] hover:text-[#00D2FF] flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-[#12192B] border border-[#1E2942] transition-colors cursor-pointer"
+            className="text-xs text-text-secondary hover:text-accent-primary flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-bg-surface border border-border-subtle transition-colors cursor-pointer"
             title="Segarkan data"
           >
-            <IconRefresh className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#00D2FF]' : ''}`} />
+            <IconRefresh className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-accent-primary' : ''}`} />
             <span className="hidden sm:inline">Segarkan</span>
           </button>
         </div>
@@ -320,8 +346,8 @@ export default function SettingsModal({
           <div
             className={`mx-5 mt-3 px-3 py-2 rounded-lg text-xs flex items-center justify-between transition-all ${
               actionMessage.type === 'success'
-                ? 'bg-[#10B981]/15 border border-[#10B981]/40 text-[#10B981]'
-                : 'bg-[#EF4444]/15 border border-[#EF4444]/40 text-[#EF4444]'
+                ? 'bg-status-success/15 border border-status-success/40 text-status-success'
+                : 'bg-status-danger/15 border border-status-danger/40 text-status-danger'
             }`}
           >
             <div className="flex items-center gap-2">
@@ -343,52 +369,52 @@ export default function SettingsModal({
         )}
 
         {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 nusa-scroll">
           {/* TAB 1: BACK UP DATA */}
           {activeTab === 'backup' && (
             <div className="space-y-6">
               {/* Stat Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-3.5 bg-[#12192B] border border-[#1E2942] rounded-xl flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-[#00D2FF]/10 text-[#00D2FF] flex items-center justify-center">
+                <div className="p-3.5 bg-bg-surface border border-border-subtle rounded-xl flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-accent-primary/10 text-accent-primary flex items-center justify-center">
                     <IconDatabase className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="text-[11px] text-[#8B9BB4]">Total Fitur Aktif</div>
+                    <div className="text-caption text-text-secondary">Total Fitur Aktif</div>
                     <div className="text-lg font-bold text-white font-mono">{activeCount} Poligon</div>
                   </div>
                 </div>
 
-                <div className="p-3.5 bg-[#12192B] border border-[#1E2942] rounded-xl flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-[#10B981]/10 text-[#10B981] flex items-center justify-center">
+                <div className="p-3.5 bg-bg-surface border border-border-subtle rounded-xl flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-status-success/10 text-status-success flex items-center justify-center">
                     <IconDownload className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="text-[11px] text-[#8B9BB4]">Format Cadangan</div>
-                    <div className="text-sm font-bold text-[#10B981]">GeoJSON & DB JSON</div>
+                    <div className="text-caption text-text-secondary">Format Cadangan</div>
+                    <div className="text-sm font-bold text-status-success">GeoJSON & DB JSON</div>
                   </div>
                 </div>
 
-                <div className="p-3.5 bg-[#12192B] border border-[#1E2942] rounded-xl flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-[#F59E0B]/10 text-[#F59E0B] flex items-center justify-center">
+                <div className="p-3.5 bg-bg-surface border border-border-subtle rounded-xl flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-status-warning/10 text-status-warning flex items-center justify-center">
                     <IconHistory className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="text-[11px] text-[#8B9BB4]">Data Terhapus (Trash)</div>
-                    <div className="text-lg font-bold text-[#F59E0B] font-mono">{deletedCount} Poligon</div>
+                    <div className="text-caption text-text-secondary">Data Terhapus (Trash)</div>
+                    <div className="text-lg font-bold text-status-warning font-mono">{deletedCount} Poligon</div>
                   </div>
                 </div>
               </div>
 
               {/* Download Card */}
-              <div className="p-5 bg-[#12192B] border border-[#1E2942] rounded-xl space-y-4">
+              <div className="p-5 bg-bg-surface border border-border-subtle rounded-xl space-y-4">
                 <div className="flex items-start justify-between gap-4 flex-col sm:flex-row">
                   <div>
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-[#00D2FF]"></span>
+                      <span className="w-2 h-2 rounded-full bg-accent-primary"></span>
                       Cadangan Basis Data Spasial Penuh (Full Snapshot)
                     </h3>
-                    <p className="text-xs text-[#8B9BB4] mt-1 max-w-xl leading-relaxed">
+                    <p className="text-xs text-text-secondary mt-1 max-w-xl leading-relaxed">
                       Mengunduh seluruh konfigurasi layer aktif, batas koordinat polygon asli (PostGIS WGS84
                       EPSG:4326), perhitungan luas geodesik Hektar, dan atribut lengkap DBF ke dalam berkas standar
                       GeoJSON / JSON yang dapat diimpor kembali atau dibuka di QGIS/ArcGIS Pro.
@@ -399,35 +425,35 @@ export default function SettingsModal({
                     type="button"
                     onClick={handleDownloadBackup}
                     disabled={isExporting}
-                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#00A3FF] to-[#00D2FF] hover:from-[#0090E0] hover:to-[#00BDE6] text-black font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-[#00D2FF]/20 transition-all cursor-pointer disabled:opacity-50"
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-accent-primary to-accent-secondary hover:brightness-110 text-black font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-accent-primary/20 transition-all cursor-pointer disabled:opacity-50"
                   >
                     <IconDownload className={`w-4 h-4 ${isExporting ? 'animate-bounce' : ''}`} />
                     <span>{isExporting ? 'Mengemas Cadangan...' : 'Unduh Cadangan (.json)'}</span>
                   </button>
                 </div>
 
-                <div className="pt-3 border-t border-[#1E2942] grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-[#8B9BB4]">
+                <div className="pt-3 border-t border-border-subtle grid grid-cols-1 sm:grid-cols-2 gap-2 text-caption text-text-secondary">
                   <div className="flex items-center gap-2">
-                    <span className="text-[#00D2FF]">✓</span> Kompatibel dengan ArcGIS Pro & QGIS GeoJSON
+                    <span className="text-accent-primary">✓</span> Kompatibel dengan ArcGIS Pro & QGIS GeoJSON
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[#00D2FF]">✓</span> Mencakup seluruh histori atribut & luas legal
+                    <span className="text-accent-primary">✓</span> Mencakup seluruh histori atribut & luas legal
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[#00D2FF]">✓</span> Dilengkapi stempel waktu ekspor ISO 8601
+                    <span className="text-accent-primary">✓</span> Dilengkapi stempel waktu ekspor ISO 8601
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[#00D2FF]">✓</span> Tidak memotong poligon yang sedang aktif
+                    <span className="text-accent-primary">✓</span> Tidak memotong poligon yang sedang aktif
                   </div>
                 </div>
               </div>
 
               {/* Info Panduan Keamanan Data */}
-              <div className="p-4 bg-[#090D18] border border-[#1E2942] rounded-xl text-xs text-[#8B9BB4] space-y-2">
+              <div className="p-4 bg-bg-ground border border-border-subtle rounded-xl text-xs text-text-secondary space-y-2">
                 <div className="font-semibold text-white flex items-center gap-2">
-                  <span className="text-[#10B981]">●</span> Protokol Perlindungan Data Spasial:
+                  <span className="text-status-success">●</span> Protokol Perlindungan Data Spasial:
                 </div>
-                <p className="leading-relaxed text-[11px]">
+                <p className="leading-relaxed text-caption">
                   Setiap penghapusan lahan dari peta menggunakan mekanisme <strong>Soft Delete</strong> (penghapusan
                   logis). Data geometri fisik di server PostgreSQL tetap tersimpan aman di tempat sampah dan dapat
                   dipulihkan sewaktu-waktu melalui tab <strong>History & Tempat Sampah</strong>.
@@ -440,20 +466,20 @@ export default function SettingsModal({
           {activeTab === 'history' && (
             <div className="space-y-4">
               {/* Header Toolbar History */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#12192B] p-3 rounded-xl border border-[#1E2942]">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-bg-surface p-3 rounded-xl border border-border-subtle">
                 <div className="relative flex-1">
                   <input
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Cari lahan terhapus berdasarkan nama blok, afdeling, kebun..."
-                    className="w-full bg-[#0D1322] border border-[#1E2942] rounded-lg pl-3 pr-8 py-1.5 text-xs text-white placeholder-[#566680] focus:outline-none focus:border-[#00D2FF]"
+                    className="w-full bg-bg-nav border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-xs text-white placeholder:text-text-muted nusa-focus focus:border-border-active"
                   />
                   {searchTerm && (
                     <button
                       type="button"
                       onClick={() => setSearchTerm('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[#8B9BB4] hover:text-white"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-text-secondary hover:text-white"
                     >
                       ✕
                     </button>
@@ -466,8 +492,8 @@ export default function SettingsModal({
                     onClick={() => setViewAuditLog(!viewAuditLog)}
                     className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
                       viewAuditLog
-                        ? 'bg-[#00D2FF]/10 border-[#00D2FF] text-[#00D2FF]'
-                        : 'bg-[#0D1322] border-[#1E2942] text-[#8B9BB4] hover:text-white'
+                        ? 'bg-accent-primary/10 border-border-active text-accent-primary'
+                        : 'bg-bg-nav border-border-subtle text-text-secondary hover:text-white'
                     }`}
                   >
                     <IconHistory className="w-3.5 h-3.5" />
@@ -480,7 +506,7 @@ export default function SettingsModal({
                         type="button"
                         onClick={handleRestoreAll}
                         disabled={loading}
-                        className="px-3 py-1.5 rounded-lg bg-[#10B981]/20 hover:bg-[#10B981]/30 border border-[#10B981]/50 text-[#10B981] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        className="px-3 py-1.5 rounded-lg bg-status-success/20 hover:bg-status-success/30 border border-status-success/50 text-status-success text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                         title="Pulihkan seluruh data terhapus kembali ke peta"
                       >
                         <IconRotateCcw className="w-3.5 h-3.5" />
@@ -491,7 +517,7 @@ export default function SettingsModal({
                         type="button"
                         onClick={() => setShowConfirmPermanent('all')}
                         disabled={loading}
-                        className="px-3 py-1.5 rounded-lg bg-[#EF4444]/20 hover:bg-[#EF4444]/30 border border-[#EF4444]/50 text-[#EF4444] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        className="px-3 py-1.5 rounded-lg bg-status-danger/20 hover:bg-status-danger/30 border border-status-danger/50 text-status-danger text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                         title="Hapus permanen semua item dari database"
                       >
                         <IconTrash className="w-3.5 h-3.5" />
@@ -506,22 +532,22 @@ export default function SettingsModal({
               {!viewAuditLog && (
                 <div className="space-y-3">
                   {filteredDeleted.length === 0 ? (
-                    <div className="py-12 px-4 text-center bg-[#12192B]/50 border border-dashed border-[#1E2942] rounded-xl">
-                      <div className="w-12 h-12 mx-auto rounded-full bg-[#10B981]/10 text-[#10B981] flex items-center justify-center mb-3">
+                    <div className="py-12 px-4 text-center bg-bg-surface/50 border border-dashed border-border-subtle rounded-xl">
+                      <div className="w-12 h-12 mx-auto rounded-full bg-status-success/10 text-status-success flex items-center justify-center mb-3">
                         <IconCheck className="w-6 h-6" />
                       </div>
                       <h4 className="text-sm font-semibold text-white">Tempat Sampah Spasial Bersih</h4>
-                      <p className="text-xs text-[#8B9BB4] mt-1 max-w-sm mx-auto">
+                      <p className="text-xs text-text-secondary mt-1 max-w-sm mx-auto">
                         {searchTerm
                           ? 'Tidak ada data terhapus yang cocok dengan kata kunci pencarian Anda.'
                           : 'Tidak ada lahan yang sedang terhapus. Semua data lahan aktif dan aman ditampilkan di peta.'}
                       </p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto border border-[#1E2942] rounded-xl bg-[#090D18]">
+                    <div className="overflow-x-auto border border-border-subtle rounded-xl bg-bg-ground">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead>
-                          <tr className="bg-[#12192B] text-[#8B9BB4] border-b border-[#1E2942]">
+                          <tr className="bg-bg-surface text-text-secondary border-b border-border-subtle">
                             <th className="py-2.5 px-3 font-semibold">Nama Lahan / Blok</th>
                             <th className="py-2.5 px-3 font-semibold">Layer & Kebun</th>
                             <th className="py-2.5 px-3 font-semibold">Luas GIS</th>
@@ -529,7 +555,7 @@ export default function SettingsModal({
                             <th className="py-2.5 px-3 font-semibold text-right">Tindakan</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-[#1E2942]">
+                        <tbody className="divide-y divide-border-subtle">
                           {filteredDeleted.map((item) => {
                             const name = String(
                               item.atribut?.Name ||
@@ -551,24 +577,24 @@ export default function SettingsModal({
                             return (
                               <tr
                                 key={item.id}
-                                className="hover:bg-[#12192B]/60 transition-colors group"
+                                className="hover:bg-bg-surface/60 transition-colors group"
                               >
                                 <td className="py-2.5 px-3 font-medium text-white">
                                   <div className="flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-[#EF4444]"></span>
+                                    <span className="w-2 h-2 rounded-full bg-status-danger"></span>
                                     <span>{name}</span>
                                   </div>
                                 </td>
-                                <td className="py-2.5 px-3 text-[#8B9BB4]">
-                                  <div className="text-white text-[11px] font-mono">{item.nama_layer}</div>
-                                  <div className="text-[10px] text-[#566680]">
+                                <td className="py-2.5 px-3 text-text-secondary">
+                                  <div className="text-white text-caption font-mono">{item.nama_layer}</div>
+                                  <div className="text-2xs text-text-muted">
                                     {item.nama_kebun} • {item.nama_afdeling}
                                   </div>
                                 </td>
-                                <td className="py-2.5 px-3 font-mono text-[#00D2FF]">
+                                <td className="py-2.5 px-3 font-mono text-accent-primary">
                                   {item.luas_ha ? `${item.luas_ha.toFixed(2)} Ha` : '-'}
                                 </td>
-                                <td className="py-2.5 px-3 text-[#8B9BB4] text-[11px] font-mono">
+                                <td className="py-2.5 px-3 text-text-secondary text-caption font-mono">
                                   {deleteDate}
                                 </td>
                                 <td className="py-2.5 px-3 text-right">
@@ -577,7 +603,7 @@ export default function SettingsModal({
                                       type="button"
                                       onClick={() => handleRestore(item.id)}
                                       disabled={isProcessing}
-                                      className="px-2.5 py-1 rounded bg-[#10B981]/15 hover:bg-[#10B981]/25 border border-[#10B981]/40 text-[#10B981] hover:text-[#34D399] transition-all cursor-pointer font-medium flex items-center gap-1"
+                                      className="px-2.5 py-1 rounded bg-status-success/15 hover:bg-status-success/25 border border-status-success/40 text-status-success hover:text-emerald-400 transition-all cursor-pointer font-medium flex items-center gap-1"
                                       title="Pulihkan kembali ke peta aktif"
                                     >
                                       <IconRotateCcw className={`w-3 h-3 ${isProcessing ? 'animate-spin' : ''}`} />
@@ -588,7 +614,7 @@ export default function SettingsModal({
                                       type="button"
                                       onClick={() => setShowConfirmPermanent(item.id)}
                                       disabled={isProcessing}
-                                      className="px-2.5 py-1 rounded bg-[#EF4444]/15 hover:bg-[#EF4444]/25 border border-[#EF4444]/40 text-[#EF4444] hover:text-[#F87171] transition-all cursor-pointer font-medium flex items-center gap-1"
+                                      className="px-2.5 py-1 rounded bg-status-danger/15 hover:bg-status-danger/25 border border-status-danger/40 text-status-danger hover:text-red-400 transition-all cursor-pointer font-medium flex items-center gap-1"
                                       title="Hapus permanen dari basis data"
                                     >
                                       <IconTrash className="w-3 h-3" />
@@ -609,15 +635,15 @@ export default function SettingsModal({
               {/* View 2: AUDIT LOG RIWAYAT AKTIVITAS */}
               {viewAuditLog && (
                 <div className="space-y-3">
-                  <div className="text-xs text-[#8B9BB4] flex items-center justify-between">
+                  <div className="text-xs text-text-secondary flex items-center justify-between">
                     <span>Daftar 100 aktivitas pengguna terbaru dalam sistem:</span>
-                    <span className="font-mono text-[#00D2FF]">Total: {data?.activity_logs.length || 0} Log</span>
+                    <span className="font-mono text-accent-primary">Total: {data?.activity_logs.length || 0} Log</span>
                   </div>
 
-                  <div className="border border-[#1E2942] rounded-xl bg-[#090D18] overflow-hidden">
-                    <div className="max-h-[360px] overflow-y-auto divide-y divide-[#1E2942] custom-scrollbar">
+                  <div className="border border-border-subtle rounded-xl bg-bg-ground overflow-hidden">
+                    <div className="divide-y divide-border-subtle">
                       {(data?.activity_logs || []).length === 0 ? (
-                        <div className="p-6 text-center text-xs text-[#8B9BB4]">
+                        <div className="p-6 text-center text-xs text-text-secondary">
                           Belum ada catatan aktivitas riwayat pengguna di sistem.
                         </div>
                       ) : (
@@ -631,20 +657,20 @@ export default function SettingsModal({
                           });
 
                           return (
-                            <div key={log.id} className="p-3 hover:bg-[#12192B]/50 transition-colors text-xs flex items-start justify-between gap-4">
+                            <div key={log.id} className="p-3 hover:bg-bg-surface/50 transition-colors text-xs flex items-start justify-between gap-4">
                               <div className="space-y-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-[#12192B] text-[#00D2FF] border border-[#1E2942]">
+                                  <span className="px-1.5 py-0.5 rounded text-2xs font-mono font-semibold bg-bg-surface text-accent-primary border border-border-subtle">
                                     {log.aktivitas}
                                   </span>
                                   <span className="font-medium text-white">{log.nama_pengguna}</span>
-                                  <span className="text-[10px] text-[#566680]">({log.role})</span>
+                                  <span className="text-2xs text-text-muted">({log.role})</span>
                                 </div>
-                                <p className="text-[#8B9BB4] text-[11px] leading-relaxed">
+                                <p className="text-text-secondary text-caption leading-relaxed">
                                   {log.keterangan || '-'}
                                 </p>
                               </div>
-                              <span className="text-[10px] text-[#566680] font-mono whitespace-nowrap">
+                              <span className="text-2xs text-text-muted font-mono whitespace-nowrap">
                                 {logDate}
                               </span>
                             </div>
@@ -661,15 +687,15 @@ export default function SettingsModal({
 
         {/* Confirmation Modal for Permanent Delete */}
         {showConfirmPermanent !== null && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 animate-fadeIn">
-            <div className="w-full max-w-md bg-[#12192B] border border-[#EF4444]/50 rounded-2xl p-5 shadow-2xl text-center space-y-4">
-              <div className="w-12 h-12 mx-auto rounded-full bg-[#EF4444]/15 border border-[#EF4444]/40 flex items-center justify-center text-[#EF4444]">
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-fadeIn">
+            <div className="w-full max-w-md bg-bg-surface border border-status-danger/50 rounded-2xl p-5 shadow-2xl text-center space-y-4">
+              <div className="w-12 h-12 mx-auto rounded-full bg-status-danger/15 border border-status-danger/40 flex items-center justify-center text-status-danger">
                 <IconTrash className="w-6 h-6" />
               </div>
 
               <div>
                 <h3 className="text-base font-bold text-white">Konfirmasi Hapus Permanen</h3>
-                <p className="text-xs text-[#8B9BB4] mt-1.5 leading-relaxed">
+                <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">
                   {showConfirmPermanent === 'all'
                     ? 'Apakah Anda yakin ingin MENGOSONGKAN seluruh tempat sampah? Seluruh poligon terhapus akan dimusnahkan secara permanen dari server database PostGIS dan TIDAK DAPAT DIPULIHKAN KEMBALI.'
                     : 'Apakah Anda yakin ingin menghapus permanen lahan ini dari basis data? Poligon fisik spasial akan dimusnahkan selamanya dan tidak dapat dipulihkan.'}
@@ -680,7 +706,7 @@ export default function SettingsModal({
                 <button
                   type="button"
                   onClick={() => setShowConfirmPermanent(null)}
-                  className="px-4 py-2 rounded-xl bg-[#0D1322] hover:bg-[#1E2942] border border-[#1E2942] text-xs font-semibold text-[#8B9BB4] hover:text-white transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-bg-nav hover:bg-bg-surface-hover border border-border-subtle text-xs font-semibold text-text-secondary hover:text-white transition-colors cursor-pointer"
                 >
                   Batal
                 </button>
@@ -694,7 +720,7 @@ export default function SettingsModal({
                       handlePermanentDelete(showConfirmPermanent);
                     }
                   }}
-                  className="px-4 py-2 rounded-xl bg-[#EF4444] hover:bg-[#DC2626] text-white text-xs font-bold shadow-lg shadow-[#EF4444]/30 transition-all cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-status-danger hover:bg-red-700 text-white text-xs font-bold shadow-lg shadow-status-danger/30 transition-all cursor-pointer"
                 >
                   Ya, Hapus Permanen
                 </button>
@@ -704,15 +730,15 @@ export default function SettingsModal({
         )}
 
         {/* Modal Footer */}
-        <div className="p-3 bg-[#090D18] border-t border-[#1E2942] flex items-center justify-between text-[11px] text-[#8B9BB4]">
+        <div className="p-3 bg-bg-ground border-t border-border-subtle flex items-center justify-between text-caption text-text-secondary">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
+            <span className="w-2 h-2 rounded-full bg-status-success"></span>
             <span>NusaGIS Enterprise Spatial Manager</span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-[#12192B] hover:bg-[#1E2942] text-xs text-white transition-colors cursor-pointer"
+            className="px-4 py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-hover text-xs text-white transition-colors cursor-pointer"
           >
             Tutup
           </button>

@@ -7,8 +7,16 @@ import {
   IconLayers,
   IconTable,
   IconFolder,
+  IconMap,
+  IconCheck,
 } from '../GisIcons';
 import { KNOWN_CRS_WKT } from '@/lib/gis/crs';
+import {
+  DEFAULT_PERUSAHAAN,
+  NEW_PERUSAHAAN_SELECT_VALUE,
+  kebunPerusahaanLabel,
+  listAvailablePerusahaan,
+} from '@/lib/perusahaan';
 import type { DetectedDataset, LayerPeta, LayerMappingInput } from '@/types/gis';
 
 interface KebunOption {
@@ -156,12 +164,68 @@ export function GisUploadModal({
   const [selectedKebunId, setSelectedKebunId] = useState<number>(0);
   const [newKebunNama, setNewKebunNama] = useState<string>('');
   const [newKebunWilayah, setNewKebunWilayah] = useState<string>('');
-  const [newKebunPerusahaan, setNewKebunPerusahaan] = useState<string>(
-    'PT Perkebunan Nusantara I (Regional 4)'
-  );
+  const [perusahaanIsNew, setPerusahaanIsNew] = useState(false);
+  const [selectedPerusahaan, setSelectedPerusahaan] = useState(DEFAULT_PERUSAHAAN);
+  const [newPerusahaanNama, setNewPerusahaanNama] = useState('');
 
   // Mappings state per dataset
   const [mappings, setMappings] = useState<LayerMappingInput[]>([]);
+
+  const availablePerusahaan = React.useMemo(
+    () => listAvailablePerusahaan(kebunList),
+    [kebunList]
+  );
+
+  const effectivePerusahaan = React.useMemo(() => {
+    if (perusahaanIsNew) {
+      return newPerusahaanNama.trim() || DEFAULT_PERUSAHAAN;
+    }
+    return selectedPerusahaan.trim() || DEFAULT_PERUSAHAAN;
+  }, [perusahaanIsNew, newPerusahaanNama, selectedPerusahaan]);
+
+  const filteredKebunByPerusahaan = React.useMemo(
+    () =>
+      kebunList.filter(
+        (k) => kebunPerusahaanLabel(k.perusahaan) === effectivePerusahaan
+      ),
+    [kebunList, effectivePerusahaan]
+  );
+
+  const applyPerusahaanToMappings = (perusahaan: string) => {
+    setMappings((prev) =>
+      prev.map((m) => ({ ...m, new_kebun_perusahaan: perusahaan }))
+    );
+  };
+
+  const handlePerusahaanSelectChange = (value: string) => {
+    if (value === NEW_PERUSAHAAN_SELECT_VALUE) {
+      setPerusahaanIsNew(true);
+      setNewPerusahaanNama('');
+      return;
+    }
+    setPerusahaanIsNew(false);
+    setSelectedPerusahaan(value);
+    applyPerusahaanToMappings(value);
+    if (targetMode === 'existing') {
+      const stillValid = kebunList.some(
+        (k) =>
+          k.id === selectedKebunId &&
+          kebunPerusahaanLabel(k.perusahaan) === value
+      );
+      const nextList = kebunList.filter(
+        (k) => kebunPerusahaanLabel(k.perusahaan) === value
+      );
+      if (!stillValid) {
+        setSelectedKebunId(nextList[0]?.id ?? 0);
+      }
+    }
+  };
+
+  const handleNewPerusahaanInput = (value: string) => {
+    setNewPerusahaanNama(value);
+    const per = value.trim() || DEFAULT_PERUSAHAAN;
+    applyPerusahaanToMappings(per);
+  };
 
   // Load master kebun, afdeling, blok
   useEffect(() => {
@@ -213,7 +277,9 @@ export function GisUploadModal({
     setSelectedKebunId(0);
     setNewKebunNama('');
     setNewKebunWilayah('');
-    setNewKebunPerusahaan('PT Perkebunan Nusantara I (Regional 4)');
+    setPerusahaanIsNew(false);
+    setSelectedPerusahaan(DEFAULT_PERUSAHAAN);
+    setNewPerusahaanNama('');
     setErrorMessage(null);
     setIsInspecting(false);
     setIsImporting(false);
@@ -352,7 +418,7 @@ export function GisUploadModal({
       let initialKebunId = defaultKebunId;
       let initialNama = '';
       let initialWilayah = '';
-      const initialPerusahaan = 'PT Perkebunan Nusantara I (Regional 4)';
+      let initialPerusahaan = DEFAULT_PERUSAHAAN;
 
       if (firstDs?.suggestedKebunName) {
         const lowerSug = firstDs.suggestedKebunName.toLowerCase();
@@ -366,6 +432,7 @@ export function GisUploadModal({
           initialKebunId = found.id;
           initialNama = found.nama_kebun;
           initialWilayah = found.wilayah || firstDs.suggestedWilayah || '';
+          initialPerusahaan = kebunPerusahaanLabel(found.perusahaan);
         } else {
           initialTargetMode = 'new';
           initialKebunId = 0;
@@ -382,7 +449,15 @@ export function GisUploadModal({
       setSelectedKebunId(initialKebunId);
       setNewKebunNama(initialNama);
       setNewKebunWilayah(initialWilayah);
-      setNewKebunPerusahaan(initialPerusahaan);
+      const perusahaanKnown = listAvailablePerusahaan(kebunList).includes(initialPerusahaan);
+      setPerusahaanIsNew(!perusahaanKnown);
+      if (perusahaanKnown) {
+        setSelectedPerusahaan(initialPerusahaan);
+        setNewPerusahaanNama('');
+      } else {
+        setSelectedPerusahaan(DEFAULT_PERUSAHAAN);
+        setNewPerusahaanNama(initialPerusahaan);
+      }
 
       // Siapkan default mapping untuk setiap dataset
       const initialMappings = (json.datasets as DetectedDataset[]).map((ds, idx) => {
@@ -485,6 +560,11 @@ export function GisUploadModal({
       }
     }
 
+    if (perusahaanIsNew && !newPerusahaanNama.trim()) {
+      setErrorMessage('Nama perusahaan baru wajib diisi.');
+      return;
+    }
+
     // 3. Validasi nama layer aktif
     for (const m of activeMappings) {
       if (!m.nama_layer.trim()) {
@@ -500,13 +580,13 @@ export function GisUploadModal({
       const payload = {
         tempId,
         nama_data: fileName.replace(/\.[^/.]+$/, ''),
-        keterangan: 'Diimpor melalui NusaGIS Monitoring Dashboard (Standar ArcGIS Pro)',
+        keterangan: 'Diimpor melalui NusaGIS Monitoring Dashboard',
         target_kebun: {
           is_new_kebun: targetMode === 'new',
           kebun_id: targetMode === 'existing' ? selectedKebunId : null,
           new_kebun_nama: newKebunNama.trim(),
           new_kebun_wilayah: newKebunWilayah.trim() || 'Wilayah Belum Ditentukan',
-          new_kebun_perusahaan: newKebunPerusahaan.trim() || 'PT Perkebunan Nusantara I (Regional 4)',
+          new_kebun_perusahaan: effectivePerusahaan,
         },
         mappings: mappings.map((m) => ({
           datasetIndex: m.datasetIndex,
@@ -517,7 +597,7 @@ export function GisUploadModal({
           is_new_kebun: targetMode === 'new',
           new_kebun_nama: newKebunNama.trim(),
           new_kebun_wilayah: newKebunWilayah.trim(),
-          new_kebun_perusahaan: newKebunPerusahaan.trim(),
+          new_kebun_perusahaan: effectivePerusahaan,
           afdeling_id: m.afdeling_id,
           new_afdeling_nama: m.new_afdeling_nama,
           blok_id: m.blok_id,
@@ -551,23 +631,23 @@ export function GisUploadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-2000 flex items-end sm:items-center justify-center bg-black/80 p-2 sm:p-4 overflow-hidden">
       <div
-        className={`w-full ${
-          step === 'mapping' ? 'max-w-5xl' : 'max-w-3xl'
-        } bg-[#0D1322] border border-[#1E2942] rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden text-[#F0F6FC] transition-all duration-200 animate-in fade-in zoom-in-95`}
+        className={`w-full min-w-0 ${
+          step === 'mapping' ? 'sm:max-w-5xl' : 'sm:max-w-3xl'
+        } bg-bg-nav border border-border-subtle rounded-t-xl sm:rounded-xl shadow-2xl flex flex-col max-h-[min(96dvh,calc(100dvh-0.5rem))] sm:max-h-modal min-h-0 overflow-hidden text-text-primary transition-all duration-200 animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95`}
       >
         {/* Header Modal */}
-        <div className="h-12 px-5 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-[#0E3A5D] border border-[#00B4D8]/50 flex items-center justify-center text-[#00D2FF]">
+        <div className="min-h-12 py-2 sm:py-0 sm:h-12 px-3 sm:px-5 bg-bg-nav border-b border-border-subtle flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div className="w-7 h-7 rounded-lg bg-bg-accent-surface border border-accent-secondary/50 flex items-center justify-center text-accent-primary shrink-0">
               <IconAddData className="w-4 h-4" />
             </div>
-            <div>
-              <h3 className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
+            <div className="min-w-0">
+              <h3 className="text-2xs sm:text-xs font-bold text-text-primary uppercase tracking-wider truncate">
                 Import Data GIS ke PostGIS
               </h3>
-              <p className="text-[10px] text-[#8B9BB4]">
+              <p className="text-2xs text-text-secondary hidden sm:block leading-snug">
                 Mendukung ZIP multi-Shapefile (.shp, .shx, .dbf, .prj) dan GeoJSON (.geojson/.json)
               </p>
             </div>
@@ -575,7 +655,8 @@ export function GisUploadModal({
           <button
             type="button"
             onClick={handleClose}
-            className="p-1 rounded-lg hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#F0F6FC] transition-colors cursor-pointer"
+            className="min-w-11 min-h-11 flex items-center justify-center rounded-lg hover:bg-bg-surface text-text-secondary hover:text-text-primary transition-colors cursor-pointer shrink-0"
+            aria-label="Tutup dialog impor"
           >
             <IconClose className="w-4 h-4" />
           </button>
@@ -583,14 +664,14 @@ export function GisUploadModal({
 
         {/* Error Alert */}
         {errorMessage && (
-          <div className="mx-5 mt-4 p-3 bg-rose-950/80 border border-rose-800/80 rounded-lg text-rose-300 text-xs flex items-start gap-2">
+          <div className="mx-3 sm:mx-5 mt-3 sm:mt-4 p-3 bg-rose-950/80 border border-rose-800/80 rounded-lg text-rose-300 text-xs flex items-start gap-2">
             <span className="font-bold text-rose-400 shrink-0">⚠ Kesalahan:</span>
             <span>{errorMessage}</span>
           </div>
         )}
 
         {/* Body Content */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 nusa-scroll">
           {step === 'select' ? (
             <div className="space-y-4">
               {/* Dropzone Multi-Format */}
@@ -679,7 +760,7 @@ export function GisUploadModal({
                       <div className="text-sm font-semibold text-slate-100 mb-1">
                         Pilih Satu Folder Penuh atau Seret Folder/File ke Sini
                       </div>
-                      <div className="text-[11px] text-slate-400 max-w-md mx-auto leading-relaxed">
+                      <div className="text-caption text-slate-400 max-w-md mx-auto leading-relaxed">
                         Anda tidak perlu masuk ke dalam subfolder satu per satu. Cukup klik tombol <strong>Pilih Satu Folder Penuh</strong> di bawah, sistem otomatis memindai seluruh subfolder dan mendeteksi file Shapefile (.shp, .dbf, .prj).
                       </div>
                     </div>
@@ -696,7 +777,7 @@ export function GisUploadModal({
                       >
                         <IconFolder className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
                         <span>Pilih Satu Folder Penuh</span>
-                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-500/20 text-amber-300 font-normal">
+                        <span className="px-1.5 py-0.5 rounded text-3xs bg-amber-500/20 text-amber-300 font-normal">
                           Auto-Scan Subfolder
                         </span>
                       </button>
@@ -729,18 +810,18 @@ export function GisUploadModal({
                           <div className="text-xs font-bold text-slate-100 flex items-center gap-2">
                             <span>{fileSummary.isFromFolder ? `Folder: ${fileSummary.folderName}` : fileSummary.primaryName}</span>
                             {fileSummary.isFromFolder && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
+                              <span className="px-1.5 py-0.5 rounded text-3xs bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
                                 Subfolder Mode
                               </span>
                             )}
                           </div>
-                          <span className="text-[10px] text-slate-400 font-mono">
+                          <span className="text-2xs text-slate-400 font-mono">
                             {fileSummary.fileCount} file terkumpul ({(fileSummary.totalSize / 1024).toFixed(1)} KB)
                           </span>
                         </div>
                       </div>
                       <div className="text-right">
-                        <span className="text-[10px] text-emerald-400 font-semibold block">
+                        <span className="text-2xs text-emerald-400 font-semibold block">
                           {fileSummary.hasShp ? '✓ Siap Diperiksa' : '⚠ Perlu .shp'}
                         </span>
                         <button
@@ -749,7 +830,7 @@ export function GisUploadModal({
                             e.stopPropagation();
                             setFiles([]);
                           }}
-                          className="text-[10px] text-slate-400 hover:text-rose-400 underline cursor-pointer"
+                          className="text-2xs text-slate-400 hover:text-rose-400 underline cursor-pointer"
                         >
                           Ganti Folder / File
                         </button>
@@ -759,7 +840,7 @@ export function GisUploadModal({
                     {/* Chips komponen Shapefile yang terdeteksi */}
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
+                        className={`text-2xs px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
                           fileSummary.shpCount > 0
                             ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
                             : 'bg-rose-950 text-rose-300 border border-rose-800'
@@ -768,7 +849,7 @@ export function GisUploadModal({
                         {fileSummary.shpCount > 0 ? '✓' : '✗'} .shp ({fileSummary.shpCount} layer)
                       </span>
                       <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
+                        className={`text-2xs px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
                           fileSummary.dbfCount > 0
                             ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
                             : 'bg-amber-950 text-amber-300 border border-amber-800'
@@ -777,7 +858,7 @@ export function GisUploadModal({
                         {fileSummary.dbfCount > 0 ? '✓' : '−'} .dbf ({fileSummary.dbfCount})
                       </span>
                       <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
+                        className={`text-2xs px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
                           fileSummary.prjCount > 0
                             ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
                             : 'bg-slate-800 text-slate-400 border border-slate-700'
@@ -786,7 +867,7 @@ export function GisUploadModal({
                         {fileSummary.prjCount > 0 ? '✓' : '−'} .prj ({fileSummary.prjCount})
                       </span>
                       <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
+                        className={`text-2xs px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
                           fileSummary.shxCount > 0
                             ? 'bg-sky-950 text-sky-300 border border-sky-800'
                             : 'bg-slate-800 text-slate-400 border border-slate-700'
@@ -797,7 +878,7 @@ export function GisUploadModal({
                     </div>
 
                     {fileSummary.shpList && fileSummary.shpList.length > 0 && (
-                      <div className="text-[10px] text-slate-400 pt-1 border-t border-slate-800 flex items-center gap-1.5">
+                      <div className="text-2xs text-slate-400 pt-1 border-t border-slate-800 flex items-center gap-1.5">
                         <span className="text-slate-500 font-medium">Layer ditemukan:</span>
                         <span className="text-slate-300 font-mono truncate">
                           {fileSummary.shpList.slice(0, 3).join(', ')}
@@ -811,7 +892,7 @@ export function GisUploadModal({
                     <div className="text-xs font-bold text-emerald-300">
                       {files[0].name}
                     </div>
-                    <div className="text-[11px] text-slate-400">
+                    <div className="text-caption text-slate-400">
                       Ukuran: {(files[0].size / 1024 / 1024).toFixed(2)} MB · Format:{' '}
                       {files[0].name.toLowerCase().endsWith('.tif') || files[0].name.toLowerCase().endsWith('.tiff')
                         ? 'Citra Raster GeoTIFF'
@@ -819,7 +900,7 @@ export function GisUploadModal({
                         ? 'Arsip ZIP Shapefile'
                         : 'GeoJSON'}
                     </div>
-                    <div className="text-[10px] text-slate-500 pt-1">
+                    <div className="text-2xs text-slate-500 pt-1">
                       Klik untuk mengganti file
                     </div>
                   </div>
@@ -828,19 +909,17 @@ export function GisUploadModal({
 
               {/* Smart Auto-Detect CRS Banner & Opsi Manual Lanjutan (Zero-Config untuk Karyawan) */}
               <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xs">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xs shrink-0">
                       ✓
                     </div>
-                    <div>
-                      <div className="text-xs font-semibold text-slate-200 flex items-center gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-slate-200 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span>Sistem Koordinat Otomatis (Smart Auto-Detect)</span>
-                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-500/20 text-emerald-300 font-mono font-bold">
-                          AKTIF
-                        </span>
+                        <span className="text-2xs text-emerald-400 font-medium">(otomatis)</span>
                       </div>
-                      <div className="text-[10px] text-slate-400 leading-relaxed">
+                      <div className="text-2xs text-slate-400 leading-relaxed">
                         Sistem otomatis membaca berkas proyeksi (.prj) atau mendeteksi rentang koordinat (WGS84 / UTM). Bebas risiko salah pilih bagi karyawan pemula.
                       </div>
                     </div>
@@ -848,7 +927,7 @@ export function GisUploadModal({
                   <button
                     type="button"
                     onClick={() => setShowManualCrs((prev) => !prev)}
-                    className="text-[10px] text-cyan-400 hover:text-cyan-300 hover:underline cursor-pointer shrink-0 ml-2"
+                    className="text-2xs text-cyan-400 hover:text-cyan-300 hover:underline cursor-pointer shrink-0 self-start sm:ml-2 min-h-11 sm:min-h-0 px-1"
                   >
                     {showManualCrs ? 'Tutup Opsi Manual' : 'Opsi Lanjutan'}
                   </button>
@@ -856,14 +935,14 @@ export function GisUploadModal({
 
                 {showManualCrs && (
                   <div className="pt-2 border-t border-slate-800 space-y-1.5">
-                    <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                    <label className="text-caption font-semibold text-slate-300 flex items-center justify-between">
                       <span>Ubah Manual CRS Fallback (Khusus Ahli GIS):</span>
-                      <span className="text-[10px] text-slate-500 font-mono">WGS84 / UTM</span>
+                      <span className="text-2xs text-slate-500 font-mono">WGS84 / UTM</span>
                     </label>
                     <select
                       value={fallbackCrs}
                       onChange={(e) => setFallbackCrs(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-mono"
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 nusa-focus focus:border-emerald-500 font-mono"
                     >
                       {Object.entries(KNOWN_CRS_WKT).map(([key, val]) => (
                         <option key={key} value={key} className="bg-slate-900">
@@ -879,53 +958,52 @@ export function GisUploadModal({
             /* STEP 2: Preview & Data Mapping Standar ArcGIS Pro */
             <div className="space-y-4">
               {/* Header Info File */}
-              <div className="p-3 bg-[#0A1A2F]/80 border border-[#00B4D8]/30 rounded-lg flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="w-2 h-2 rounded-full bg-[#00D2FF] animate-pulse" />
-                  <span className="text-[#8B9BB4]">Sumber File / Folder:</span>
-                  <span className="font-bold text-[#00D2FF]">{fileName}</span>
-                  <span className="text-slate-400 font-mono text-[11px]">
+              <div className="p-3 bg-bg-accent-surface/80 border border-accent-secondary/30 rounded-lg flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <span className="w-2 h-2 rounded-full bg-accent-primary animate-pulse shrink-0" />
+                  <span className="text-text-secondary shrink-0">Sumber File / Folder:</span>
+                  <span className="font-bold text-accent-primary truncate max-w-full" title={fileName}>
+                    {fileName}
+                  </span>
+                  <span className="text-slate-400 font-mono text-caption shrink-0">
                     ({detectedDatasets.length} dataset spasial ditemukan)
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setStep('select')}
-                  className="text-[11px] text-[#00D2FF] hover:underline cursor-pointer shrink-0"
+                  className="text-caption text-accent-primary hover:underline cursor-pointer shrink-0 self-start sm:self-auto min-h-11 sm:min-h-0 px-1"
                 >
                   ← Ganti File / Folder
                 </button>
               </div>
 
               {/* 1. BLOK TARGET INDUK DATASET (Set 1 Kali untuk Seluruh Folder) */}
-              <div className="p-4 bg-[#12192B]/90 border border-[#1E2942] rounded-xl space-y-3 shadow-md">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1E2942] pb-2.5">
+              <div className="p-4 bg-bg-surface/90 border border-border-subtle rounded-xl space-y-3 shadow-md">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border-subtle pb-2.5">
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded bg-[#00D2FF]/10 border border-[#00D2FF]/30 flex items-center justify-center text-[#00D2FF] text-xs">
-                      📍
+                    <div className="w-6 h-6 rounded bg-bg-surface border border-border-subtle flex items-center justify-center text-emerald-500">
+                      <IconMap className="w-3.5 h-3.5" aria-hidden />
                     </div>
                     <div>
-                      <h4 className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider flex items-center gap-2">
-                        <span>Target Lokasi Dataset (Geodatabase Workspace)</span>
-                        <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 font-normal">
-                          Standar ArcGIS
-                        </span>
+                      <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider">
+                        Target lokasi dataset
                       </h4>
-                      <p className="text-[10px] text-[#8B9BB4]">
+                      <p className="text-2xs text-text-secondary">
                         Ditetapkan 1 kali untuk mengelompokkan seluruh layer dari folder ini
                       </p>
                     </div>
                   </div>
 
                   {/* Tab Switcher: Buat Kebun Baru vs Pilih Kebun Ada */}
-                  <div className="flex items-center bg-[#0D1322] p-0.5 rounded-lg border border-[#1E2942] shrink-0">
+                  <div className="flex flex-col sm:flex-row w-full sm:w-auto items-stretch bg-bg-nav p-0.5 rounded-lg border border-border-subtle shrink-0 gap-0.5 sm:gap-0">
                     <button
                       type="button"
                       onClick={() => setTargetMode('new')}
-                      className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                      className={`px-3 py-2 sm:py-1 rounded-md text-caption font-semibold transition-all cursor-pointer text-center ${
                         targetMode === 'new'
-                          ? 'bg-[#00D2FF] text-[#0A0E1A] shadow-xs'
-                          : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
+                          ? 'bg-accent-primary text-background shadow-xs'
+                          : 'text-text-secondary hover:text-text-primary'
                       }`}
                     >
                       + Buat Kebun Baru
@@ -934,14 +1012,21 @@ export function GisUploadModal({
                       type="button"
                       onClick={() => {
                         setTargetMode('existing');
-                        if (kebunList.length > 0 && (!selectedKebunId || selectedKebunId === 0)) {
-                          setSelectedKebunId(kebunList[0].id);
+                        if (filteredKebunByPerusahaan.length > 0) {
+                          const stillOk = filteredKebunByPerusahaan.some(
+                            (k) => k.id === selectedKebunId
+                          );
+                          if (!stillOk) {
+                            setSelectedKebunId(filteredKebunByPerusahaan[0].id);
+                          }
+                        } else if (!selectedKebunId || selectedKebunId === 0) {
+                          setSelectedKebunId(0);
                         }
                       }}
-                      className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                      className={`px-3 py-2 sm:py-1 rounded-md text-caption font-semibold transition-all cursor-pointer text-center ${
                         targetMode === 'existing'
-                          ? 'bg-[#00D2FF] text-[#0A0E1A] shadow-xs'
-                          : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
+                          ? 'bg-accent-primary text-background shadow-xs'
+                          : 'text-text-secondary hover:text-text-primary'
                       }`}
                     >
                       Pilih Kebun yang Ada
@@ -949,83 +1034,131 @@ export function GisUploadModal({
                   </div>
                 </div>
 
+                {/* Perusahaan induk (wajib untuk pengelompokan di dashboard) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-b border-border-subtle/60 pb-3">
+                  <div>
+                    <label className="text-caption font-semibold text-text-secondary block mb-1">
+                      Perusahaan <span className="text-rose-400">*</span>
+                    </label>
+                    <select
+                      value={perusahaanIsNew ? NEW_PERUSAHAAN_SELECT_VALUE : selectedPerusahaan}
+                      onChange={(e) => handlePerusahaanSelectChange(e.target.value)}
+                      className="w-full bg-bg-nav border border-border-subtle focus:border-border-active rounded-lg px-3 py-1.5 text-xs text-text-primary nusa-focus transition-colors"
+                    >
+                      {availablePerusahaan.map((p) => (
+                        <option key={p} value={p} className="bg-bg-nav">
+                          {p}
+                        </option>
+                      ))}
+                      <option value={NEW_PERUSAHAAN_SELECT_VALUE} className="bg-bg-nav">
+                        + Tambah perusahaan baru
+                      </option>
+                    </select>
+                  </div>
+                  {perusahaanIsNew ? (
+                    <div>
+                      <label className="text-caption font-semibold text-text-secondary block mb-1">
+                        Nama perusahaan baru <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="misal: PT Perkebunan Nusantara I"
+                        value={newPerusahaanNama}
+                        onChange={(e) => handleNewPerusahaanInput(e.target.value)}
+                        className="w-full bg-bg-nav border border-border-active/50 focus:border-border-active rounded-lg px-3 py-1.5 text-xs text-text-primary nusa-focus transition-colors"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-end">
+                      <p className="text-2xs text-text-secondary bg-bg-nav/60 rounded-lg p-2.5 border border-border-subtle w-full">
+                        Layer dan kebun baru akan dikelompokkan di filter dashboard perusahaan{' '}
+                        <span className="text-accent-primary font-semibold">{effectivePerusahaan}</span>.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 {/* Form Input Target Kebun */}
                 {targetMode === 'new' ? (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                     <div>
-                      <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1 flex items-center justify-between">
+                      <label className="text-caption font-semibold text-text-secondary block mb-1 flex items-center justify-between">
                         <span>
                           Nama Unit Kebun Baru <span className="text-rose-400">*</span>
                         </span>
-                        <span className="text-[9px] text-[#00D2FF]">Auto-Detected</span>
+                        <span className="text-3xs text-accent-primary">Auto-Detected</span>
                       </label>
                       <input
                         type="text"
                         placeholder="misal: Kebun Sarongge"
                         value={newKebunNama}
                         onChange={(e) => setNewKebunNama(e.target.value)}
-                        className="w-full bg-[#0D1322] border border-[#00D2FF]/50 focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+                        className="w-full bg-bg-nav border border-border-active/50 focus:border-border-active rounded-lg px-3 py-1.5 text-xs text-text-primary nusa-focus transition-colors"
                       />
                     </div>
                     <div>
-                      <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1 flex items-center justify-between">
+                      <label className="text-caption font-semibold text-text-secondary block mb-1 flex items-center justify-between">
                         <span>
                           Wilayah Administratif <span className="text-rose-400">*</span>
                         </span>
-                        <span className="text-[9px] text-emerald-400">Dari Koordinat GIS</span>
+                        <span className="text-3xs text-emerald-400">Dari Koordinat GIS</span>
                       </label>
                       <input
                         type="text"
                         placeholder="misal: Kabupaten Cianjur, Jawa Barat"
                         value={newKebunWilayah}
                         onChange={(e) => setNewKebunWilayah(e.target.value)}
-                        className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1">
-                        Perusahaan Induk
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="PT Perkebunan Nusantara I"
-                        value={newKebunPerusahaan}
-                        onChange={(e) => setNewKebunPerusahaan(e.target.value)}
-                        className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+                        className="w-full bg-bg-nav border border-border-subtle focus:border-border-active rounded-lg px-3 py-1.5 text-xs text-text-primary nusa-focus transition-colors"
                       />
                     </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                     <div>
-                      <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1">
+                      <label className="text-caption font-semibold text-text-secondary block mb-1">
                         Pilih Unit Kebun Tujuan <span className="text-rose-400">*</span>
                       </label>
                       <select
                         value={selectedKebunId || ''}
-                        onChange={(e) => setSelectedKebunId(Number(e.target.value))}
-                        className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+                        onChange={(e) => {
+                          const id = Number(e.target.value);
+                          setSelectedKebunId(id);
+                          const cur = kebunList.find((k) => k.id === id);
+                          if (cur) {
+                            const per = kebunPerusahaanLabel(cur.perusahaan);
+                            setPerusahaanIsNew(false);
+                            setSelectedPerusahaan(per);
+                            applyPerusahaanToMappings(per);
+                          }
+                        }}
+                        className="w-full bg-bg-nav border border-border-subtle focus:border-border-active rounded-lg px-3 py-1.5 text-xs text-text-primary nusa-focus transition-colors"
                       >
                         <option value="" disabled>
                           Pilih Kebun yang Ada...
                         </option>
-                        {kebunList.map((k) => (
-                          <option key={k.id} value={k.id} className="bg-[#0D1322]">
-                            {k.nama_kebun} — ({k.wilayah || 'Wilayah Belum Diset'})
+                        {filteredKebunByPerusahaan.length === 0 ? (
+                          <option value="" disabled className="bg-bg-nav">
+                            Tidak ada kebun di perusahaan ini. Gunakan tab Buat Kebun Baru.
                           </option>
-                        ))}
+                        ) : (
+                          filteredKebunByPerusahaan.map((k) => (
+                            <option key={k.id} value={k.id} className="bg-bg-nav">
+                              {k.nama_kebun} ({k.wilayah || 'Wilayah Belum Diset'})
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
-                    <div className="flex items-center text-xs text-[#8B9BB4] bg-[#0D1322]/60 rounded-lg p-2.5 border border-[#1E2942]">
+                    <div className="flex items-center text-xs text-text-secondary bg-bg-nav/60 rounded-lg p-2.5 border border-border-subtle">
                       {selectedKebunId ? (
                         (() => {
                           const cur = kebunList.find((k) => k.id === selectedKebunId);
                           return (
                             <div className="space-y-0.5">
-                              <span className="text-[#F0F6FC] font-semibold">
+                              <span className="text-text-primary font-semibold">
                                 {cur?.nama_kebun}
                               </span>
-                              <div className="text-[10px] text-slate-400">
+                              <div className="text-2xs text-slate-400">
                                 Wilayah:{' '}
                                 <span className="text-emerald-400">{cur?.wilayah || '-'}</span> |
                                 Perusahaan: {cur?.perusahaan || 'PTPN I'}
@@ -1044,14 +1177,14 @@ export function GisUploadModal({
               </div>
 
               {/* 2. TABEL MATRIKS STANDAR ARCGIS PRO: DAFTAR LAYER SPASIAL */}
-              <div className="bg-[#12192B]/90 border border-[#1E2942] rounded-xl overflow-hidden shadow-md">
+              <div className="bg-bg-surface/90 border border-border-subtle rounded-xl overflow-hidden shadow-md">
                 {/* Toolbar Tabel */}
-                <div className="p-3 bg-[#0D1322] border-b border-[#1E2942] flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
+                <div className="p-3 bg-bg-nav border-b border-border-subtle flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="text-2xs sm:text-xs font-bold text-text-primary uppercase tracking-wider leading-tight">
                       Daftar Layer Spasial Terdeteksi
                     </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#00D2FF]/10 text-[#00D2FF] border border-[#00D2FF]/30">
+                    <span className="px-2 py-0.5 rounded-full text-2xs font-mono bg-accent-primary/10 text-accent-primary border border-border-active/30">
                       {mappings.filter((m) => m.selected !== false).length} dari{' '}
                       {mappings.length} Layer Dipilih
                     </span>
@@ -1061,14 +1194,14 @@ export function GisUploadModal({
                     <button
                       type="button"
                       onClick={() => toggleAllSelection(true)}
-                      className="px-2.5 py-1 rounded bg-[#1A2338] hover:bg-[#25324E] border border-[#2A3958] text-[#8B9BB4] hover:text-[#F0F6FC] text-[10px] font-semibold transition-colors cursor-pointer"
+                      className="px-2.5 py-1 rounded bg-bg-surface-hover hover:bg-bg-surface-hover border border-border-subtle text-text-secondary hover:text-text-primary text-2xs font-semibold transition-colors cursor-pointer"
                     >
                       ✓ Centang Semua
                     </button>
                     <button
                       type="button"
                       onClick={() => toggleAllSelection(false)}
-                      className="px-2.5 py-1 rounded bg-[#1A2338] hover:bg-[#25324E] border border-[#2A3958] text-[#8B9BB4] hover:text-[#F0F6FC] text-[10px] font-semibold transition-colors cursor-pointer"
+                      className="px-2.5 py-1 rounded bg-bg-surface-hover hover:bg-bg-surface-hover border border-border-subtle text-text-secondary hover:text-text-primary text-2xs font-semibold transition-colors cursor-pointer"
                     >
                       ✕ Batal Semua
                     </button>
@@ -1076,19 +1209,21 @@ export function GisUploadModal({
                 </div>
 
                 {/* Tabel Matrix */}
-                <div className="overflow-x-auto max-h-[380px]">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead className="bg-[#0A0E1A] text-[10px] uppercase font-bold text-[#8B9BB4] tracking-wider sticky top-0 z-10 border-b border-[#1E2942]">
+                <div className="overflow-x-auto overscroll-x-contain -mx-px">
+                  <table className="w-full min-w-[42rem] text-left border-collapse text-2xs sm:text-xs">
+                    <thead className="bg-bg-ground text-2xs uppercase font-bold text-text-secondary tracking-wider sticky top-0 z-10 border-b border-border-subtle">
                       <tr>
                         <th className="py-2.5 px-3 w-12 text-center">Pilih</th>
-                        <th className="py-2.5 px-3 min-w-[210px]">File Sumber &amp; Geometri</th>
-                        <th className="py-2.5 px-3 min-w-[210px]">Nama Layer di Peta</th>
-                        <th className="py-2.5 px-3 min-w-[130px]">Kategori Layer</th>
-                        <th className="py-2.5 px-3 min-w-[150px]">Afdeling (Opsional)</th>
-                        <th className="py-2.5 px-3 min-w-[160px]">Proyeksi CRS</th>
+                        <th className="py-2.5 px-3 min-w-52.5">File Sumber &amp; Geometri</th>
+                        <th className="py-2.5 px-3 min-w-52.5">
+                          Nama layer di peta <span className="text-rose-400">*</span>
+                        </th>
+                        <th className="py-2.5 px-3 min-w-32.5">Kategori Layer</th>
+                        <th className="py-2.5 px-3 min-w-37.5">Afdeling (Opsional)</th>
+                        <th className="py-2.5 px-3 min-w-40">Proyeksi CRS</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#1E2942]/60">
+                    <tbody className="divide-y divide-border-subtle/60">
                       {detectedDatasets.map((ds, idx) => {
                         const m = mappings.find((item) => item.datasetIndex === idx) || mappings[idx];
                         const isChecked = m?.selected !== false;
@@ -1102,8 +1237,8 @@ export function GisUploadModal({
                             key={ds.index}
                             className={`transition-colors ${
                               isChecked
-                                ? 'bg-[#12192B]/50 hover:bg-[#162138]'
-                                : 'bg-[#0D1322]/50 opacity-40 hover:opacity-70'
+                                ? 'bg-bg-surface/50 hover:bg-bg-surface-hover'
+                                : 'bg-bg-nav/50 opacity-40 hover:opacity-70'
                             }`}
                           >
                             {/* 1. Checkbox */}
@@ -1112,29 +1247,29 @@ export function GisUploadModal({
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={(e) => updateMapping(idx, 'selected', e.target.checked)}
-                                className="w-4 h-4 rounded border-[#1E2942] text-[#00D2FF] focus:ring-0 focus:ring-offset-0 bg-[#0D1322] cursor-pointer"
+                                className="w-4 h-4 rounded border-border-subtle text-accent-primary focus:ring-0 focus:ring-offset-0 bg-bg-nav cursor-pointer"
                               />
                             </td>
 
                             {/* 2. File Sumber & Geometri */}
                             <td className="py-3 px-3 align-middle">
                               <div
-                                className="font-semibold text-xs text-[#F0F6FC] truncate max-w-[220px]"
+                                className="font-semibold text-xs text-text-primary truncate max-w-55"
                                 title={ds.sourceFileName}
                               >
                                 {ds.sourceFileName}
                               </div>
                               <div className="flex items-center gap-1.5 pt-0.5">
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-950/80 border border-emerald-700/60 text-emerald-300">
+                                <span className="px-1.5 py-0.5 rounded text-3xs font-semibold bg-emerald-950/80 border border-emerald-700/60 text-emerald-300">
                                   {ds.geometryType}
                                 </span>
-                                <span className="text-[10px] text-[#8B9BB4] font-mono">
+                                <span className="text-2xs text-text-secondary font-mono">
                                   {ds.featureCount} fitur
                                 </span>
                               </div>
                               {ds.attributes && ds.attributes.length > 0 && (
                                 <div
-                                  className="text-[9px] text-[#566680] truncate max-w-[220px] pt-0.5"
+                                  className="text-3xs text-text-muted truncate max-w-55 pt-0.5"
                                   title={ds.attributes.join(', ')}
                                 >
                                   Atribut: {ds.attributes.slice(0, 4).join(', ')}
@@ -1151,7 +1286,7 @@ export function GisUploadModal({
                                 value={m?.nama_layer || ''}
                                 onChange={(e) => updateMapping(idx, 'nama_layer', e.target.value)}
                                 placeholder="Nama layer..."
-                                className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none disabled:opacity-40 transition-colors"
+                                className="w-full bg-bg-nav border border-border-subtle focus:border-border-active rounded-lg px-2.5 py-1.5 text-xs text-text-primary nusa-focus disabled:opacity-40 transition-colors"
                               />
                             </td>
 
@@ -1161,10 +1296,10 @@ export function GisUploadModal({
                                 disabled={!isChecked}
                                 value={m?.kategori || 'Lainnya'}
                                 onChange={(e) => updateMapping(idx, 'kategori', e.target.value)}
-                                className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2 py-1.5 text-xs text-[#F0F6FC] focus:outline-none disabled:opacity-40 transition-colors"
+                                className="w-full bg-bg-nav border border-border-subtle focus:border-border-active rounded-lg px-2 py-1.5 text-xs text-text-primary nusa-focus disabled:opacity-40 transition-colors"
                               >
                                 {LAYER_CATEGORIES.map((c) => (
-                                  <option key={c} value={c} className="bg-[#0D1322]">
+                                  <option key={c} value={c} className="bg-bg-nav">
                                     {c}
                                   </option>
                                 ))}
@@ -1183,13 +1318,13 @@ export function GisUploadModal({
                                     onChange={(e) =>
                                       updateMapping(idx, 'new_afdeling_nama', e.target.value)
                                     }
-                                    className="w-full bg-[#0D1322] border border-cyan-500/80 rounded-lg px-2 py-1.5 text-xs text-[#F0F6FC] focus:outline-none disabled:opacity-40"
+                                    className="w-full bg-bg-nav border border-cyan-500/80 rounded-lg px-2 py-1.5 text-xs text-text-primary nusa-focus disabled:opacity-40"
                                   />
                                   <button
                                     type="button"
                                     disabled={!isChecked}
                                     onClick={() => updateMapping(idx, 'new_afdeling_nama', null)}
-                                    className="text-[9px] text-slate-400 hover:text-white px-1"
+                                    className="text-3xs text-slate-400 hover:text-white px-1"
                                     title="Pilih dari daftar"
                                   >
                                     ✕
@@ -1207,12 +1342,12 @@ export function GisUploadModal({
                                         e.target.value ? Number(e.target.value) : null
                                       )
                                     }
-                                    className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2 py-1.5 text-xs text-[#F0F6FC] focus:outline-none disabled:opacity-40 transition-colors"
+                                    className="w-full bg-bg-nav border border-border-subtle focus:border-border-active rounded-lg px-2 py-1.5 text-xs text-text-primary nusa-focus disabled:opacity-40 transition-colors"
                                   >
                                     <option value="">Semua Afdeling</option>
                                     {filteredAfdeling.map((a) => (
-                                      <option key={a.id} value={a.id} className="bg-[#0D1322]">
-                                        {a.kode_afdeling} — {a.nama_afdeling}
+                                      <option key={a.id} value={a.id} className="bg-bg-nav">
+                                        {a.kode_afdeling}: {a.nama_afdeling}
                                       </option>
                                     ))}
                                   </select>
@@ -1220,7 +1355,7 @@ export function GisUploadModal({
                                     type="button"
                                     disabled={!isChecked}
                                     onClick={() => updateMapping(idx, 'new_afdeling_nama', 'Afdeling Baru')}
-                                    className="text-[9px] text-[#00D2FF] hover:underline px-1 shrink-0"
+                                    className="text-3xs text-accent-primary hover:underline px-1 shrink-0"
                                     title="Ketik Afdeling Baru"
                                   >
                                     + Baru
@@ -1231,9 +1366,9 @@ export function GisUploadModal({
 
                             {/* 6. Proyeksi CRS */}
                             <td className="py-3 px-3 align-middle">
-                              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-mono bg-emerald-950/80 border border-emerald-700/60 text-emerald-300">
+                              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-2xs font-mono bg-emerald-950/80 border border-emerald-700/60 text-emerald-300">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                                <span className="truncate max-w-[150px]" title={ds.crsAsal || 'WGS 84'}>
+                                <span className="truncate max-w-37.5" title={ds.crsAsal || 'WGS 84'}>
                                   {ds.crsAsal || 'WGS 84'}
                                 </span>
                               </span>
@@ -1250,11 +1385,11 @@ export function GisUploadModal({
         </div>
 
         {/* Footer Actions */}
-        <div className="h-14 px-5 bg-[#0D1322] border-t border-[#1E2942] flex items-center justify-between shrink-0">
+        <div className="shrink-0 px-3 sm:px-5 py-2.5 sm:py-0 sm:h-14 bg-bg-nav border-t border-border-subtle flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
           <button
             type="button"
             onClick={handleClose}
-            className="px-3.5 py-1.5 rounded-lg border border-[#1E2942] bg-[#12192B] hover:bg-[#19233A] text-xs text-[#8B9BB4] hover:text-[#F0F6FC] transition-colors cursor-pointer"
+            className="w-full sm:w-auto min-h-11 sm:min-h-0 px-3.5 py-2 sm:py-1.5 rounded-lg border border-border-subtle bg-bg-surface hover:bg-bg-surface-hover text-xs text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
           >
             Batal
           </button>
@@ -1264,41 +1399,54 @@ export function GisUploadModal({
               type="button"
               onClick={handleInspectFile}
               disabled={files.length === 0 || isInspecting}
-              className="px-4 py-1.5 rounded-lg bg-[#00D2FF] hover:bg-[#38BDF8] disabled:opacity-50 text-xs font-bold text-[#0A0E1A] shadow-lg shadow-[#00D2FF]/20 transition-all flex items-center gap-1.5 cursor-pointer"
+              className="w-full sm:w-auto min-h-11 px-4 py-2 sm:py-1.5 rounded-lg bg-accent-primary hover:brightness-110 disabled:opacity-50 text-xs font-bold text-background shadow-lg shadow-accent-primary/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
             >
               {isInspecting ? (
                 <>
-                  <span className="w-3.5 h-3.5 border-2 border-[#0A0E1A]/30 border-t-[#0A0E1A] rounded-full animate-spin" />
+                  <span className="w-3.5 h-3.5 border-2 border-background/30 border-t-background rounded-full animate-spin" />
                   <span>Memeriksa Spasial...</span>
                 </>
               ) : (
                 <>
-                  <IconAddData className="w-3.5 h-3.5" />
-                  <span>Periksa &amp; Deteksi Layer</span>
+                  <IconAddData className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">
+                    <span className="sm:hidden">Periksa Layer</span>
+                    <span className="hidden sm:inline">Periksa &amp; Deteksi Layer</span>
+                  </span>
                 </>
               )}
             </button>
           ) : (
-            <div className="flex items-center gap-3">
-              <span className="text-[11px] text-[#8B9BB4] hidden sm:inline font-mono">
-                {mappings.filter((m) => m.selected !== false).length} dari {mappings.length} layer aktif
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+              <span className="text-caption text-text-secondary text-center sm:text-left font-mono tabular-nums">
+                <span className="sm:hidden">
+                  {mappings.filter((m) => m.selected !== false).length}/{mappings.length} layer aktif
+                </span>
+                <span className="hidden sm:inline">
+                  {mappings.filter((m) => m.selected !== false).length} dari {mappings.length} layer aktif
+                </span>
               </span>
               <button
                 type="button"
                 onClick={handleConfirmImport}
                 disabled={isImporting || mappings.filter((m) => m.selected !== false).length === 0}
-                className="px-4 py-2 rounded-lg bg-[#00D2FF] hover:bg-[#38BDF8] disabled:opacity-40 text-xs font-bold text-[#0A0E1A] shadow-lg shadow-[#00D2FF]/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                className="w-full sm:w-auto min-h-11 px-4 py-2 rounded-lg bg-accent-primary hover:brightness-110 disabled:opacity-40 text-xs font-bold text-background shadow-lg shadow-accent-primary/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 {isImporting ? (
                   <>
-                    <span className="w-3.5 h-3.5 border-2 border-[#0A0E1A]/30 border-t-[#0A0E1A] rounded-full animate-spin" />
-                    <span>Menyimpan ke PostGIS...</span>
+                    <span className="w-3.5 h-3.5 border-2 border-background/30 border-t-background rounded-full animate-spin" />
+                    <span className="truncate">Menyimpan ke PostGIS...</span>
                   </>
                 ) : (
                   <>
-                    <IconAddData className="w-3.5 h-3.5" />
-                    <span>
-                      Konfirmasi &amp; Import ({mappings.filter((m) => m.selected !== false).length} Layer)
+                    <IconAddData className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">
+                      <span className="sm:hidden">
+                        Import ({mappings.filter((m) => m.selected !== false).length})
+                      </span>
+                      <span className="hidden sm:inline">
+                        Konfirmasi &amp; Import ({mappings.filter((m) => m.selected !== false).length} Layer)
+                      </span>
                     </span>
                   </>
                 )}

@@ -233,11 +233,11 @@ export function ShapefileInsightPanel({
 
   const renderBody = () => {
     if (loading) {
-      return <div className="flex-1 flex items-center justify-center text-xs text-[#8B9BB4]">Memuat atribut layer dari PostGIS…</div>;
+      return <div className="flex-1 flex items-center justify-center text-xs text-text-secondary">Memuat atribut layer dari PostGIS…</div>;
     }
     if (records.length === 0) {
       return (
-        <div className="flex-1 flex items-center justify-center text-xs text-[#566680] text-center px-6">
+        <div className="flex-1 flex items-center justify-center text-xs text-text-muted text-center px-6">
           Belum ada layer poligon yang aktif. Unggah shapefile atau aktifkan layer untuk melihat analisis atributnya.
         </div>
       );
@@ -246,14 +246,14 @@ export function ShapefileInsightPanel({
     if (tab === 'luas') {
       const selisih = summary.totalUkur - summary.totalBaku;
       return (
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-hidden">
-          <div className="md:col-span-8 bg-[#12192B] border border-[#1E2942] rounded-xl p-2.5 flex flex-col min-h-0">
-            <div className="flex items-center justify-between text-[11px] px-1 mb-1">
-              <span className="font-bold text-[#F0F6FC]">Luas per Blok ({records.length} poligon)</span>
-              <div className="flex items-center gap-3 text-[10px]">
-                <span className="flex items-center gap-1 text-[#8B9BB4]"><span className="w-2.5 h-2.5 rounded-sm bg-[#00D2FF]" />Luas Ukur GIS</span>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 p-3">
+          <div className="md:col-span-8 bg-bg-surface border border-border-subtle rounded-xl p-2.5 flex flex-col min-h-35">
+            <div className="flex items-center justify-between text-caption px-1 mb-1">
+              <span className="font-bold text-text-primary">Luas per Blok ({records.length} poligon)</span>
+              <div className="flex items-center gap-3 text-2xs">
+                <span className="flex items-center gap-1 text-text-secondary"><span className="w-2.5 h-2.5 rounded-sm bg-accent-primary" />Luas Ukur GIS</span>
                 {summary.hasBaku && (
-                  <span className="flex items-center gap-1 text-[#8B9BB4]"><span className="w-2.5 h-2.5 rounded-sm bg-[#F59E0B]" />Luas Baku</span>
+                  <span className="flex items-center gap-1 text-text-secondary"><span className="w-2.5 h-2.5 rounded-sm bg-status-warning" />Luas Baku</span>
                 )}
               </div>
             </div>
@@ -303,18 +303,18 @@ export function ShapefileInsightPanel({
                 const r = records.find((x) => x.id === hoverId);
                 if (!r) return null;
                 return (
-                  <div className="absolute top-0 right-1 bg-[#0D1322] border border-[#00D2FF] rounded-md px-2 py-1 text-[10px] space-y-0.5 pointer-events-none shadow-xl">
-                    <div className="font-bold text-[#F0F6FC]">{r.name}</div>
-                    <div className="text-[#00D2FF] tabular-nums">Luas ukur: {fmt(r.luasUkur)} Ha</div>
-                    {r.luasBaku !== null && <div className="text-[#F59E0B] tabular-nums">Luas baku: {fmt(r.luasBaku)} Ha</div>}
-                    <div className="text-[#566680]">Klik untuk zoom ke blok</div>
+                  <div className="absolute top-0 right-1 bg-bg-nav border border-border-active rounded-md px-2 py-1 text-2xs space-y-0.5 pointer-events-none shadow-xl">
+                    <div className="font-bold text-text-primary">{r.name}</div>
+                    <div className="text-accent-primary tabular-nums">Luas ukur: {fmt(r.luasUkur)} Ha</div>
+                    {r.luasBaku !== null && <div className="text-status-warning tabular-nums">Luas baku: {fmt(r.luasBaku)} Ha</div>}
+                    <div className="text-text-muted">Klik untuk zoom ke blok</div>
                   </div>
                 );
               })()}
             </div>
           </div>
 
-          <div className="md:col-span-4 grid grid-cols-2 gap-2 content-start overflow-y-auto">
+          <div className="md:col-span-4 grid grid-cols-2 gap-2 content-start">
             <StatCard label="Total Luas Ukur" value={`${fmt(summary.totalUkur)} Ha`} accent />
             {summary.hasBaku ? (
               <StatCard
@@ -328,8 +328,8 @@ export function ShapefileInsightPanel({
             <StatCard label="Blok Terluas" value={`${fmt(summary.largest?.luasUkur || 0)} Ha`} note={summary.largest?.name} />
             <StatCard label="Blok Terkecil" value={`${fmt(summary.smallest?.luasUkur || 0)} Ha`} note={summary.smallest?.name} />
             <StatCard label="Rata-rata / Blok" value={`${fmt(summary.avg)} Ha`} note={`${records.length} blok`} />
-            <div className="col-span-2 text-[9.5px] text-[#566680] leading-snug px-1">
-              Luas ukur dari kolom <code className="text-[#8B9BB4]">luas</code> (ArcGIS Calculate Geometry). Luas baku dari catatan <code className="text-[#8B9BB4]">PopupInfo</code>.
+            <div className="col-span-2 text-3xs text-text-muted leading-snug px-1">
+              Luas ukur dari kolom <code className="text-text-secondary">luas</code> (ArcGIS Calculate Geometry). Luas baku dari catatan <code className="text-text-secondary">PopupInfo</code>.
             </div>
           </div>
         </div>
@@ -338,10 +338,10 @@ export function ShapefileInsightPanel({
 
     if (tab === 'status') {
       return (
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-hidden">
-          <div className="md:col-span-5 bg-[#12192B] border border-[#1E2942] rounded-xl p-3 flex flex-col gap-3">
-            <span className="text-[11px] font-bold text-[#F0F6FC]">Komposisi Luas per Status Lahan</span>
-            <div className="h-5 w-full rounded-md overflow-hidden flex border border-[#1E2942]">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 p-3">
+          <div className="md:col-span-5 bg-bg-surface border border-border-subtle rounded-xl p-3 flex flex-col gap-3">
+            <span className="text-caption font-bold text-text-primary">Komposisi Luas per Status Lahan</span>
+            <div className="h-5 w-full rounded-md overflow-hidden flex border border-border-subtle">
               {summary.statusGroups.map((g) => (
                 <div
                   key={g.status}
@@ -354,13 +354,13 @@ export function ShapefileInsightPanel({
               {summary.statusGroups.map((g) => {
                 const pct = (g.luas / (summary.totalUkur || 1)) * 100;
                 return (
-                  <div key={g.status} className="flex items-center justify-between text-[11px]">
+                  <div key={g.status} className="flex items-center justify-between text-caption">
                     <span className="flex items-center gap-2 min-w-0">
                       <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: g.color }} />
-                      <span className="text-[#F0F6FC] font-semibold truncate">{g.status}</span>
+                      <span className="text-text-primary font-semibold truncate">{g.status}</span>
                     </span>
-                    <span className="font-mono tabular-nums text-[#8B9BB4] shrink-0">
-                      <span className="text-[#F0F6FC] font-bold">{fmt(g.luas)} Ha</span> · {fmt(pct, 1)}% · {g.items.length} blok
+                    <span className="font-mono tabular-nums text-text-secondary shrink-0">
+                      <span className="text-text-primary font-bold">{fmt(g.luas)} Ha</span> · {fmt(pct, 1)}% · {g.items.length} blok
                     </span>
                   </div>
                 );
@@ -368,22 +368,22 @@ export function ShapefileInsightPanel({
             </div>
           </div>
 
-          <div className="md:col-span-7 grid gap-2 overflow-y-auto content-start" style={{ gridTemplateColumns: `repeat(${Math.min(summary.statusGroups.length, 2)}, minmax(0, 1fr))` }}>
+          <div className="md:col-span-7 grid gap-2 content-start" style={{ gridTemplateColumns: `repeat(${Math.min(summary.statusGroups.length, 2)}, minmax(0, 1fr))` }}>
             {summary.statusGroups.map((g) => (
-              <div key={g.status} className="bg-[#12192B] border border-[#1E2942] rounded-xl p-2.5" style={{ borderTopColor: g.color, borderTopWidth: 2 }}>
-                <div className="text-[11px] font-bold text-[#F0F6FC] mb-1.5 truncate" title={g.status}>{g.status}</div>
+              <div key={g.status} className="bg-bg-surface border border-border-subtle rounded-xl p-2.5" style={{ borderTopColor: g.color, borderTopWidth: 2 }}>
+                <div className="text-caption font-bold text-text-primary mb-1.5 truncate" title={g.status}>{g.status}</div>
                 <div className="flex flex-wrap gap-1">
                   {g.items.map((r) => (
                     <button
                       key={r.id}
                       type="button"
                       onClick={() => selectBlok(r)}
-                      className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors cursor-pointer tabular-nums ${
+                      className={`px-1.5 py-0.5 rounded text-2xs border transition-colors cursor-pointer tabular-nums ${
                         r.id === selectedFeatureId
-                          ? 'bg-[#0E3A5D] border-[#00D2FF] text-[#00D2FF]'
-                          : 'bg-[#0A0E1A] border-[#1E2942] text-[#8B9BB4] hover:text-[#F0F6FC] hover:border-[#2C3B59]'
+                          ? 'bg-bg-accent-surface border-border-active text-accent-primary'
+                          : 'bg-bg-ground border-border-subtle text-text-secondary hover:text-text-primary hover:border-border-subtle'
                       }`}
-                      title={`${r.name} — klik untuk zoom`}
+                      title={`${r.name}: klik untuk zoom`}
                     >
                       {r.shortName} · {fmt(r.luasUkur)} Ha
                     </button>
@@ -398,31 +398,31 @@ export function ShapefileInsightPanel({
 
     // tab === 'varietas'
     return (
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-hidden">
-        <div className="md:col-span-4 flex flex-col gap-2 overflow-y-auto">
-          <div className="bg-[#0E3A5D] border border-[#00B4D8] rounded-xl p-2.5">
-            <div className="text-[10px] text-[#7DD3FC] font-semibold">Blok dengan data tanam</div>
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 p-3">
+        <div className="md:col-span-4 flex flex-col gap-2">
+          <div className="bg-bg-accent-surface border border-accent-secondary rounded-xl p-2.5">
+            <div className="text-2xs text-sky-300 font-semibold">Blok dengan data tanam</div>
             <div className="text-xl font-black text-white tabular-nums">
-              {summary.planted.length} <span className="text-xs font-semibold text-[#7DD3FC]">dari {records.length} blok</span>
+              {summary.planted.length} <span className="text-xs font-semibold text-sky-300">dari {records.length} blok</span>
             </div>
             {summary.planted.map((r) => (
-              <div key={r.id} className="text-[10px] text-[#F0F6FC] mt-1">
-                {r.name}: <span className="text-[#00D2FF] font-bold">{r.varietas || '—'}</span>
+              <div key={r.id} className="text-2xs text-text-primary mt-1">
+                {r.name}: <span className="text-accent-primary font-bold">{r.varietas || '-'}</span>
                 {r.mt && <> · MT {formatMT(r.mt)}</>}
               </div>
             ))}
           </div>
-          <div className="bg-[#12192B] border border-[#1E2942] rounded-xl p-2.5 space-y-1.5">
-            <div className="text-[10px] font-bold text-[#8B9BB4]">Kelengkapan atribut</div>
+          <div className="bg-bg-surface border border-border-subtle rounded-xl p-2.5 space-y-1.5">
+            <div className="text-2xs font-bold text-text-secondary">Kelengkapan atribut</div>
             {summary.fields.map((f) => {
               const pct = records.length ? (f.filled / records.length) * 100 : 0;
               return (
-                <div key={f.label} className="text-[10px]">
-                  <div className="flex justify-between text-[#8B9BB4]">
+                <div key={f.label} className="text-2xs">
+                  <div className="flex justify-between text-text-secondary">
                     <span>{f.label}</span>
-                    <span className="tabular-nums text-[#F0F6FC]">{f.filled}/{records.length}</span>
+                    <span className="tabular-nums text-text-primary">{f.filled}/{records.length}</span>
                   </div>
-                  <div className="h-1 bg-[#0A0E1A] rounded mt-0.5">
+                  <div className="h-1 bg-bg-ground rounded mt-0.5">
                     <div className="h-1 rounded" style={{ width: `${pct}%`, background: pct >= 80 ? '#10B981' : pct >= 40 ? '#F59E0B' : '#EF4444' }} />
                   </div>
                 </div>
@@ -431,30 +431,30 @@ export function ShapefileInsightPanel({
           </div>
         </div>
 
-        <div className="md:col-span-8 bg-[#12192B] border border-[#1E2942] rounded-xl overflow-auto min-h-0">
-          <table className="w-full text-[10.5px]">
-            <thead className="sticky top-0 bg-[#0D1322] text-[#8B9BB4]">
+        <div className="md:col-span-8 bg-bg-surface border border-border-subtle rounded-xl min-h-0">
+          <table className="w-full text-2xs">
+            <thead className="sticky top-0 bg-bg-nav text-text-secondary">
               <tr>
                 {['Blok', 'Status Lahan', 'Varietas', 'Masa Tanam', 'Luas Tanam', 'Luas Ukur'].map((h) => (
-                  <th key={h} className="text-left font-semibold px-2.5 py-1.5 border-b border-[#1E2942] whitespace-nowrap">{h}</th>
+                  <th key={h} className="text-left font-semibold px-2.5 py-1.5 border-b border-border-subtle whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {records.map((r) => {
-                const empty = <span className="text-[#566680] italic">belum diisi</span>;
+                const empty = <span className="text-text-muted italic">belum diisi</span>;
                 return (
                   <tr
                     key={r.id}
                     onClick={() => selectBlok(r)}
-                    className={`cursor-pointer border-b border-[#1E2942]/50 ${r.id === selectedFeatureId ? 'bg-[#0E3A5D]' : 'hover:bg-[#19233A]'}`}
+                    className={`cursor-pointer border-b border-border-subtle/50 ${r.id === selectedFeatureId ? 'bg-bg-accent-surface' : 'hover:bg-bg-surface-hover'}`}
                   >
-                    <td className="px-2.5 py-1 text-[#F0F6FC] font-semibold whitespace-nowrap">{r.name}</td>
-                    <td className="px-2.5 py-1 text-[#8B9BB4] whitespace-nowrap">{r.status}</td>
-                    <td className="px-2.5 py-1 text-[#00D2FF] font-bold">{r.varietas || empty}</td>
-                    <td className="px-2.5 py-1 text-[#F0F6FC] whitespace-nowrap">{r.mt ? `${r.mt} (${formatMT(r.mt)})` : empty}</td>
-                    <td className="px-2.5 py-1 tabular-nums text-[#F0F6FC]">{r.luasTanam !== null ? `${fmt(r.luasTanam)} Ha` : empty}</td>
-                    <td className="px-2.5 py-1 tabular-nums text-[#F0F6FC]">{fmt(r.luasUkur)} Ha</td>
+                    <td className="px-2.5 py-1 text-text-primary font-semibold whitespace-nowrap">{r.name}</td>
+                    <td className="px-2.5 py-1 text-text-secondary whitespace-nowrap">{r.status}</td>
+                    <td className="px-2.5 py-1 text-accent-primary font-bold">{r.varietas || empty}</td>
+                    <td className="px-2.5 py-1 text-text-primary whitespace-nowrap">{r.mt ? `${r.mt} (${formatMT(r.mt)})` : empty}</td>
+                    <td className="px-2.5 py-1 tabular-nums text-text-primary">{r.luasTanam !== null ? `${fmt(r.luasTanam)} Ha` : empty}</td>
+                    <td className="px-2.5 py-1 tabular-nums text-text-primary">{fmt(r.luasUkur)} Ha</td>
                   </tr>
                 );
               })}
@@ -467,25 +467,27 @@ export function ShapefileInsightPanel({
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {renderBody()}
-      <div className="h-9 px-4 bg-[#0D1322] border-t border-[#1E2942] flex items-center justify-between shrink-0 overflow-x-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto nusa-scroll">
+        {renderBody()}
+      </div>
+      <div className="h-9 px-4 bg-bg-nav border-t border-border-subtle flex items-center justify-between shrink-0 overflow-x-auto">
         <div className="flex items-center gap-1.5">
           {tabs.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`px-3 py-1 rounded text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-1 rounded text-caption font-medium transition-all whitespace-nowrap cursor-pointer ${
                 tab === t.id
-                  ? 'bg-[#132238] border border-[#00D2FF] text-[#00D2FF] font-bold'
-                  : 'text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B]'
+                  ? 'bg-bg-surface-hover border border-border-active text-accent-primary font-bold'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-surface'
               }`}
             >
               {t.label}
             </button>
           ))}
         </div>
-        <div className="text-[10px] text-[#566680] font-mono hidden lg:block">
+        <div className="text-2xs text-text-muted font-mono hidden lg:block">
           Sumber: atribut DBF layer · {records.length} poligon · {fmt(summary.totalUkur)} Ha
         </div>
       </div>
@@ -495,10 +497,10 @@ export function ShapefileInsightPanel({
 
 function StatCard({ label, value, note, accent }: { label: string; value: string; note?: string; accent?: boolean }) {
   return (
-    <div className={`rounded-xl p-2 border ${accent ? 'bg-[#0E3A5D] border-[#00B4D8]' : 'bg-[#12192B] border-[#1E2942]'}`}>
-      <div className={`text-[9.5px] font-semibold ${accent ? 'text-[#7DD3FC]' : 'text-[#8B9BB4]'}`}>{label}</div>
-      <div className="text-sm font-black text-[#F0F6FC] tabular-nums leading-tight">{value}</div>
-      {note && <div className="text-[9px] text-[#566680] truncate" title={note}>{note}</div>}
+    <div className={`rounded-xl p-2 border ${accent ? 'bg-bg-accent-surface border-accent-secondary' : 'bg-bg-surface border-border-subtle'}`}>
+      <div className={`text-3xs font-semibold ${accent ? 'text-sky-300' : 'text-text-secondary'}`}>{label}</div>
+      <div className="text-sm font-black text-text-primary tabular-nums leading-tight">{value}</div>
+      {note && <div className="text-3xs text-text-muted truncate" title={note}>{note}</div>}
     </div>
   );
 }

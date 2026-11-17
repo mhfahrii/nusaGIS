@@ -31,14 +31,14 @@ export function MonitoringRightPanel({
 }: MonitoringRightPanelProps) {
   if (!isOpen) {
     return (
-      <div className="w-10 bg-[#0D1322] border-l border-[#1E2942] flex flex-col items-center py-3 select-none shrink-0 z-20">
+      <div className="w-10 bg-bg-nav border-l border-border-subtle flex flex-col items-center py-3 select-none shrink-0 z-20">
         <button
           type="button"
           onClick={onToggle}
-          className="p-2 rounded-lg bg-[#12192B] border border-[#1E2942] hover:border-[#00D2FF] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors shadow-md cursor-pointer"
+          className="p-2 rounded-lg bg-bg-surface border border-border-subtle hover:border-border-active text-text-secondary hover:text-accent-primary transition-colors shadow-md cursor-pointer"
           title="Buka Panel Ringkasan Spasial & Atribut Shapefile"
         >
-          <span className="text-[10px] font-bold text-[#00D2FF] font-mono">GIS</span>
+          <span className="text-2xs font-bold text-accent-primary font-mono">GIS</span>
         </button>
       </div>
     );
@@ -64,14 +64,17 @@ export function MonitoringRightPanel({
       : null;
 
   return (
-    <aside className="w-64 sm:w-72 bg-[#0D1322] border-l border-[#1E2942] flex flex-col select-none shrink-0 z-20 h-full overflow-hidden text-[#F0F6FC]">
+    <aside
+      data-nusa-chrome
+      className="w-[min(100vw-2.5rem,18rem)] sm:w-72 bg-bg-nav border-l border-border-subtle flex flex-col select-none shrink-0 z-20 max-lg:z-40 h-full overflow-hidden text-text-primary max-lg:fixed max-lg:right-0 max-lg:top-13 max-lg:bottom-0 max-lg:shadow-2xl lg:relative"
+    >
       {/* 1. Header Panel */}
-      <div className="h-12 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between shrink-0">
+      <div className="h-12 px-4 bg-bg-nav border-b border-border-subtle flex items-center justify-between shrink-0">
         <div>
-          <div className="text-sm font-bold text-[#F0F6FC] font-mono tracking-tight tabular-nums">
+          <div className="text-sm font-bold text-text-primary font-mono tracking-tight tabular-nums">
             {periodMonth} {periodYear}
           </div>
-          <div className="text-[10px] text-[#00D2FF] font-medium">
+          <div className="text-2xs text-accent-primary font-medium">
             Ringkasan Atribut Shapefile (ArcGIS)
           </div>
         </div>
@@ -79,7 +82,7 @@ export function MonitoringRightPanel({
         <button
           type="button"
           onClick={onToggle}
-          className="p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
+          className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors cursor-pointer"
           title="Sembunyikan Panel Informasi"
         >
           <IconChevronRight className="w-3.5 h-3.5" />
@@ -87,49 +90,49 @@ export function MonitoringRightPanel({
       </div>
 
       {/* 2. Body Panel — 100% Data Riil dari Shapefile & PostGIS */}
-      <div className="flex-1 overflow-y-auto p-3.5 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3 nusa-scroll">
         {/* CARD A: Unit Administrasi & Sistem Koordinat (CRS) */}
-        <div className="p-3 bg-[#12192B] border border-[#1E2942] rounded-xl space-y-2 shadow-xs">
-          <div className="flex items-center justify-between text-[11px] text-[#8B9BB4] font-medium">
+        <div className="p-3 bg-bg-surface border border-border-subtle rounded-xl space-y-2 shadow-xs">
+          <div className="flex items-center justify-between text-caption text-text-secondary font-medium">
             <span>Unit &amp; Proyeksi Peta</span>
-            <span className="text-[10px] text-[#00D2FF] font-mono font-semibold">Metadata .PRJ</span>
+            <span className="text-2xs text-accent-primary font-mono font-semibold">Metadata .PRJ</span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#1E2942]/60">
+          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border-subtle/60">
             <div>
-              <div className="text-[10px] text-[#8B9BB4] uppercase">Kebun</div>
+              <div className="text-2xs text-text-secondary uppercase">Kebun</div>
               <div
-                className="text-lg font-black text-[#F0F6FC] font-mono leading-none mt-1 truncate tabular-nums"
+                className="text-lg font-black text-text-primary font-mono leading-none mt-1 truncate tabular-nums"
                 title={activeKebunName || 'Semua Kebun'}
               >
                 {activeKebunName ? (
-                  <span className="text-xs font-bold text-[#00D2FF]">{activeKebunName}</span>
+                  <span className="text-xs font-bold text-accent-primary">{activeKebunName}</span>
                 ) : (
                   stats?.total_kebun ?? 0
                 )}
               </div>
             </div>
             <div>
-              <div className="text-[10px] text-[#8B9BB4] uppercase">Layer Aktif</div>
+              <div className="text-2xs text-text-secondary uppercase">Layer Aktif</div>
               <div
-                className="text-lg font-black text-[#F0F6FC] font-mono leading-none mt-1 truncate tabular-nums"
+                className="text-lg font-black text-text-primary font-mono leading-none mt-1 truncate tabular-nums"
                 title={activeAfdelingName || 'Layer Vektor'}
               >
-                {stats?.total_layer ?? 0} <span className="text-[10px] font-normal text-[#8B9BB4]">SHP</span>
+                {stats?.total_layer ?? 0} <span className="text-2xs font-normal text-text-secondary">SHP</span>
               </div>
             </div>
           </div>
 
-          <div className="pt-2 border-t border-[#1E2942]/60 space-y-1 text-[10px]">
+          <div className="pt-2 border-t border-border-subtle/60 space-y-1 text-2xs">
             <div className="flex items-center justify-between">
-              <span className="text-[#8B9BB4]">Komoditas:</span>
-              <span className="font-bold text-[#00D2FF] bg-[#0E3A5D]/60 border border-[#00B4D8]/50 px-1.5 py-0.5 rounded truncate max-w-[145px]">
+              <span className="text-text-secondary">Komoditas:</span>
+              <span className="font-bold text-accent-primary bg-bg-accent-surface/60 border border-accent-secondary/50 px-1.5 py-0.5 rounded truncate max-w-[145px]">
                 {komoditas}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[#8B9BB4]">CRS:</span>
-              <span className="font-mono text-[#F0F6FC] truncate max-w-[155px]" title={crsAsal}>
+              <span className="text-text-secondary">CRS:</span>
+              <span className="font-mono text-text-primary truncate max-w-[155px]" title={crsAsal}>
                 {crsAsal}
               </span>
             </div>
@@ -137,38 +140,38 @@ export function MonitoringRightPanel({
         </div>
 
         {/* CARD B: Rekapitulasi Luas Spasial (Signature Highlighted KPI Panel) */}
-        <div className="p-3 bg-[#0E3A5D] border border-[#00B4D8] rounded-xl space-y-2 shadow-md shadow-[#00B4D8]/10">
+        <div className="p-3 bg-bg-accent-surface border border-accent-secondary rounded-xl space-y-2 shadow-md shadow-accent-secondary/10">
           <div className="flex items-center justify-between">
-            <div className="text-xs font-bold text-[#FFFFFF]">Luas Wilayah Kelola (Ha)</div>
-            <span className="text-[9px] font-semibold text-[#7DD3FC] uppercase tracking-wider bg-[#0284C7]/40 px-1.5 py-0.5 rounded">
+            <div className="text-xs font-bold text-white">Luas Wilayah Kelola (Ha)</div>
+            <span className="text-3xs font-semibold text-sky-300 uppercase tracking-wider bg-accent-secondary/40 px-1.5 py-0.5 rounded">
               DBF + PostGIS
             </span>
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-1">
             <div>
-              <div className="text-[10px] text-[#7DD3FC] font-medium">Luas Ukur GIS</div>
-              <div className="text-2xl font-extrabold text-[#FFFFFF] font-mono leading-none mt-1 tabular-nums">
+              <div className="text-2xs text-sky-300 font-medium">Luas Ukur GIS</div>
+              <div className="text-2xl font-extrabold text-white font-mono leading-none mt-1 tabular-nums">
                 {fmt(luasUkurHa)}
               </div>
-              <div className="text-[9.5px] text-[#7DD3FC]/80 mt-0.5">Kolom luas (.dbf)</div>
+              <div className="text-3xs text-sky-300/80 mt-0.5">Kolom luas (.dbf)</div>
             </div>
             <div>
-              <div className="text-[10px] text-[#7DD3FC] font-medium">
+              <div className="text-2xs text-sky-300 font-medium">
                 {luasBakuHa ? 'Luas Baku' : 'Jumlah Blok'}
               </div>
-              <div className="text-2xl font-extrabold text-[#00D2FF] font-mono leading-none mt-1 tabular-nums">
+              <div className="text-2xl font-extrabold text-accent-primary font-mono leading-none mt-1 tabular-nums">
                 {luasBakuHa ? fmt(luasBakuHa) : totalBlok}
               </div>
-              <div className="text-[9.5px] text-[#7DD3FC]/80 mt-0.5">
+              <div className="text-3xs text-sky-300/80 mt-0.5">
                 {luasBakuHa ? 'Catatan PopupInfo' : 'Poligon terpetakan'}
               </div>
             </div>
           </div>
 
-          <div className="pt-2 border-t border-[#00B4D8]/40 flex items-center justify-between text-[10px]">
-            <span className="text-[#7DD3FC]">Total Poligon Blok:</span>
-            <span className="font-mono font-bold text-[#10B981] tabular-nums">
+          <div className="pt-2 border-t border-accent-secondary/40 flex items-center justify-between text-2xs">
+            <span className="text-sky-300">Total Poligon Blok:</span>
+            <span className="font-mono font-bold text-status-success tabular-nums">
               {totalBlok} Blok {akurasiSpasial ? `· ${akurasiSpasial}% Sesuai Baku` : ''}
             </span>
           </div>
@@ -176,42 +179,42 @@ export function MonitoringRightPanel({
 
         {/* CARD C: Komposisi Status Pengelolaan Areal (KS GPA vs KTG) */}
         {(ksGpaCount > 0 || ktgCount > 0) && (
-          <div className="p-3 bg-[#12192B] border border-[#1E2942] rounded-xl space-y-2 shadow-xs">
-            <div className="flex items-center justify-between text-xs font-bold text-[#F0F6FC]">
+          <div className="p-3 bg-bg-surface border border-border-subtle rounded-xl space-y-2 shadow-xs">
+            <div className="flex items-center justify-between text-xs font-bold text-text-primary">
               <span>Status Pengelolaan Areal</span>
-              <span className="text-[9.5px] font-mono text-[#8B9BB4]">PopupInfo</span>
+              <span className="text-3xs font-mono text-text-secondary">PopupInfo</span>
             </div>
 
-            <div className="h-2 w-full bg-[#0A0E1A] rounded-full overflow-hidden flex border border-[#1E2942]">
+            <div className="h-2 w-full bg-bg-ground rounded-full overflow-hidden flex border border-border-subtle">
               <div
                 style={{ width: `${ksGpaPct}%` }}
-                className="bg-[#00D2FF] h-full"
+                className="bg-accent-primary h-full"
                 title={`KS GPA 2023: ${fmt(ksGpaLuas)} Ha (${ksGpaPct}%)`}
               />
               <div
                 style={{ width: `${ktgPct}%` }}
-                className="bg-[#10B981] h-full"
+                className="bg-status-success h-full"
                 title={`KTG: ${fmt(ktgLuas)} Ha (${ktgPct}%)`}
               />
             </div>
 
-            <div className="space-y-1.5 pt-0.5 text-[11px]">
+            <div className="space-y-1.5 pt-0.5 text-caption">
               <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-[#8B9BB4]">
-                  <span className="w-2 h-2 rounded-xs bg-[#00D2FF]" />
+                <span className="flex items-center gap-1.5 text-text-secondary">
+                  <span className="w-2 h-2 rounded-xs bg-accent-primary" />
                   <span>KS GPA 2023 ({ksGpaCount} blok)</span>
                 </span>
-                <span className="font-mono font-bold text-[#F0F6FC] tabular-nums">
-                  {fmt(ksGpaLuas)} Ha <span className="text-[10px] text-[#00D2FF]">({ksGpaPct}%)</span>
+                <span className="font-mono font-bold text-text-primary tabular-nums">
+                  {fmt(ksGpaLuas)} Ha <span className="text-2xs text-accent-primary">({ksGpaPct}%)</span>
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-[#8B9BB4]">
-                  <span className="w-2 h-2 rounded-xs bg-[#10B981]" />
+                <span className="flex items-center gap-1.5 text-text-secondary">
+                  <span className="w-2 h-2 rounded-xs bg-status-success" />
                   <span>KTG Tebu ({ktgCount} blok)</span>
                 </span>
-                <span className="font-mono font-bold text-[#F0F6FC] tabular-nums">
-                  {fmt(ktgLuas)} Ha <span className="text-[10px] text-[#10B981]">({ktgPct}%)</span>
+                <span className="font-mono font-bold text-text-primary tabular-nums">
+                  {fmt(ktgLuas)} Ha <span className="text-2xs text-status-success">({ktgPct}%)</span>
                 </span>
               </div>
             </div>
@@ -219,36 +222,36 @@ export function MonitoringRightPanel({
         )}
 
         {/* CARD D: Statistik Dimensi Poligon Blok */}
-        <div className="p-3 bg-[#12192B] border border-[#1E2942] rounded-xl space-y-2 shadow-xs">
-          <div className="flex items-center justify-between text-xs font-bold text-[#F0F6FC]">
+        <div className="p-3 bg-bg-surface border border-border-subtle rounded-xl space-y-2 shadow-xs">
+          <div className="flex items-center justify-between text-xs font-bold text-text-primary">
             <span>Dimensi Geometri Blok</span>
-            <span className="text-[9.5px] font-mono text-[#00D2FF]">PostGIS</span>
+            <span className="text-3xs font-mono text-accent-primary">PostGIS</span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#1E2942]/60 text-[11px]">
+          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border-subtle/60 text-caption">
             <div>
-              <div className="text-[10px] text-[#8B9BB4]">Blok Terluas</div>
-              <div className="text-sm font-extrabold text-[#F0F6FC] font-mono tabular-nums">
+              <div className="text-2xs text-text-secondary">Blok Terluas</div>
+              <div className="text-sm font-extrabold text-text-primary font-mono tabular-nums">
                 {stats?.max_blok_luas_ha ? `${fmt(stats.max_blok_luas_ha)} Ha` : '-'}
               </div>
-              <div className="text-[9.5px] text-[#566680] truncate" title={stats?.max_blok_name}>
+              <div className="text-3xs text-text-muted truncate" title={stats?.max_blok_name}>
                 {stats?.max_blok_name || '-'}
               </div>
             </div>
             <div>
-              <div className="text-[10px] text-[#8B9BB4]">Blok Terkecil</div>
-              <div className="text-sm font-extrabold text-[#00D2FF] font-mono tabular-nums">
+              <div className="text-2xs text-text-secondary">Blok Terkecil</div>
+              <div className="text-sm font-extrabold text-accent-primary font-mono tabular-nums">
                 {stats?.min_blok_luas_ha ? `${fmt(stats.min_blok_luas_ha)} Ha` : '-'}
               </div>
-              <div className="text-[9.5px] text-[#566680] truncate" title={stats?.min_blok_name}>
+              <div className="text-3xs text-text-muted truncate" title={stats?.min_blok_name}>
                 {stats?.min_blok_name || '-'}
               </div>
             </div>
           </div>
 
-          <div className="pt-1.5 border-t border-[#1E2942]/60 flex items-center justify-between text-[10px] text-[#8B9BB4]">
+          <div className="pt-1.5 border-t border-border-subtle/60 flex items-center justify-between text-2xs text-text-secondary">
             <span>Rata-rata / Keliling:</span>
-            <span className="font-mono text-[#F0F6FC] font-semibold tabular-nums">
+            <span className="font-mono text-text-primary font-semibold tabular-nums">
               {stats?.avg_blok_luas_ha ? `${fmt(stats.avg_blok_luas_ha)} Ha` : '-'} ·{' '}
               {stats?.total_keliling_km ? `${fmt(stats.total_keliling_km)} km` : '-'}
             </span>
@@ -256,23 +259,23 @@ export function MonitoringRightPanel({
         </div>
 
         {/* CARD E: Info Budidaya & Tanam dari PopupInfo Shapefile */}
-        <div className="p-3 bg-[#12192B] border border-[#1E2942] rounded-xl space-y-1.5 text-center shadow-xs">
-          <div className="text-xs font-bold text-[#8B9BB4] flex items-center justify-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00D2FF]" />
+        <div className="p-3 bg-bg-surface border border-border-subtle rounded-xl space-y-1.5 text-center shadow-xs">
+          <div className="text-xs font-bold text-text-secondary flex items-center justify-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent-primary" />
             <span>Atribut Budidaya &amp; Tanam</span>
           </div>
           <div className="pt-0.5">
-            <div className="text-xl font-black text-[#00D2FF] font-mono tracking-tight leading-none tabular-nums">
+            <div className="text-xl font-black text-accent-primary font-mono tracking-tight leading-none tabular-nums">
               {stats?.varietas_dominan || 'Belum Diisi'}
             </div>
-            <div className="text-[11px] text-[#F0F6FC] font-semibold mt-1">
+            <div className="text-caption text-text-primary font-semibold mt-1">
               {stats?.masa_tanam ? `Masa Tanam (MT): ${stats.masa_tanam}` : 'MT belum diisi di DBF'}
             </div>
           </div>
           {stats?.luas_tanam_ha !== undefined && stats.luas_tanam_ha > 0 && (
-            <div className="text-[10px] text-[#8B9BB4] pt-1 border-t border-[#1E2942]/60 flex items-center justify-between">
+            <div className="text-2xs text-text-secondary pt-1 border-t border-border-subtle/60 flex items-center justify-between">
               <span>Luas Tanam Tercatat:</span>
-              <span className="text-[#10B981] font-mono font-bold tabular-nums">
+              <span className="text-status-success font-mono font-bold tabular-nums">
                 {fmt(stats.luas_tanam_ha)} Ha
               </span>
             </div>
@@ -281,12 +284,12 @@ export function MonitoringRightPanel({
       </div>
 
       {/* Footer Info */}
-      <div className="p-2.5 bg-[#0D1322] border-t border-[#1E2942] text-[10px] text-[#8B9BB4] flex items-center justify-between shrink-0">
+      <div className="p-2.5 bg-bg-nav border-t border-border-subtle text-2xs text-text-secondary flex items-center justify-between shrink-0">
         <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
+          <span className="w-2 h-2 rounded-full bg-status-success animate-pulse" />
           <span>100% Data Asli Shapefile</span>
         </span>
-        <span className="text-[#566680] font-mono">PostGIS</span>
+        <span className="text-text-muted font-mono">PostGIS</span>
       </div>
     </aside>
   );

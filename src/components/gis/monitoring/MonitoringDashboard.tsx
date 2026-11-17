@@ -9,6 +9,13 @@ import { MonitoringMap } from './MonitoringMap';
 import { GisUploadModal } from './GisUploadModal';
 import SettingsModal from './SettingsModal';
 import type { LayerPeta, LayerRaster, MonitoringStats } from '@/types/gis';
+import { kebunPerusahaanLabel } from '@/lib/perusahaan';
+import { toMasterId } from '@/lib/ids';
+import {
+  loadMonitoringUiTheme,
+  saveMonitoringUiTheme,
+  type MonitoringUiTheme,
+} from '@/lib/monitoring/uiTheme';
 
 interface KebunItem {
   id: number;
@@ -40,6 +47,11 @@ export function MonitoringDashboard() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [deletedCount, setDeletedCount] = useState<number>(0);
+  const [uiTheme, setUiTheme] = useState<MonitoringUiTheme>('dark');
+
+  useEffect(() => {
+    setUiTheme(loadMonitoringUiTheme());
+  }, []);
 
   // Time & Period state (matching screenshot: January 2021)
   const [selectedYear, setSelectedYear] = useState('2026');
@@ -204,54 +216,128 @@ export function MonitoringDashboard() {
     };
   }, [selectedKebunId]);
 
-  // 2. Filter layers based on cascading filter
-  const displayedLayers = useMemo(() => {
-    return rawLayers.filter((l) => {
-      // Filter Perusahaan
+  const allowedKebunIdsForHierarchy = useMemo(() => {
+    let scoped = kebunList;
+    if (selectedPerusahaan) {
+      scoped = scoped.filter(
+        (k) => kebunPerusahaanLabel(k.perusahaan) === selectedPerusahaan
+      );
+    }
+    if (selectedWilayah) {
+      scoped = scoped.filter((k) => k.wilayah?.trim() === selectedWilayah);
+    }
+    if (selectedKebunId) {
+      scoped = scoped.filter((k) => toMasterId(k.id) === selectedKebunId);
+    }
+    return new Set(
+      scoped
+        .map((k) => toMasterId(k.id))
+        .filter((id): id is number => id !== null)
+    );
+  }, [kebunList, selectedPerusahaan, selectedWilayah, selectedKebunId]);
+
+  const layerMatchesHierarchyFilters = useCallback(
+    (layer: LayerPeta) => {
       if (selectedPerusahaan) {
-        const allowedKebunIds = kebunList
-          .filter(
-            (k) =>
-              (k.perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)') ===
-              selectedPerusahaan
-          )
-          .map((k) => k.id);
-        if (l.kebun_id && !allowedKebunIds.includes(l.kebun_id)) {
-          return false;
-        }
+        const matchKebun = kebunList.find(
+          (k) => toMasterId(k.id) === toMasterId(layer.kebun_id)
+        );
+        const perusahaan = kebunPerusahaanLabel(
+          matchKebun?.perusahaan ?? layer.perusahaan
+        );
+        if (perusahaan !== selectedPerusahaan) return false;
       }
-      // Filter Wilayah
       if (selectedWilayah) {
-        const allowedWilayahKebunIds = kebunList
-          .filter((k) => k.wilayah?.trim() === selectedWilayah)
-          .map((k) => k.id);
-        if (l.kebun_id && !allowedWilayahKebunIds.includes(l.kebun_id)) {
+        const matchKebun = kebunList.find(
+          (k) => toMasterId(k.id) === toMasterId(layer.kebun_id)
+        );
+        const wil = (layer.wilayah || matchKebun?.wilayah || '').trim();
+        if (wil !== selectedWilayah) return false;
+      }
+      if (selectedKebunId) {
+        if (toMasterId(layer.kebun_id) !== selectedKebunId) return false;
+      }
+      return true;
+    },
+    [kebunList, selectedPerusahaan, selectedWilayah, selectedKebunId]
+  );
+
+  const hierarchyFilterActive = Boolean(
+    selectedPerusahaan || selectedWilayah || selectedKebunId
+  );
+
+  const filterLayerOrRaster = <
+    T extends {
+      kebun_id: number | null;
+      afdeling_id?: number | null;
+      blok_id?: number | null;
+    },
+  >(
+    items: T[]
+  ): T[] => {
+    return items.filter((l) => {
+      if (hierarchyFilterActive) {
+        const kebunId = toMasterId(l.kebun_id);
+        if (kebunId === null || !allowedKebunIdsForHierarchy.has(kebunId)) {
           return false;
         }
       }
-      // Filter Kebun
-      if (selectedKebunId && l.kebun_id && l.kebun_id !== selectedKebunId) {
-        return false;
-      }
-      // Filter Afdeling: Hanya sembunyikan jika layer ini memang eksplisit milik afdeling lain
       if (selectedAfdelingId && l.afdeling_id && l.afdeling_id !== selectedAfdelingId) {
         return false;
       }
-      // Filter Blok
       if (selectedBlokId && l.blok_id && l.blok_id !== selectedBlokId) {
         return false;
       }
       return true;
     });
+  };
+
+  const displayedLayers = useMemo(
+    () => filterLayerOrRaster(rawLayers),
+    [
+      rawLayers,
+      hierarchyFilterActive,
+      allowedKebunIdsForHierarchy,
+      selectedAfdelingId,
+      selectedBlokId,
+    ]
+  );
+
+  /** Daftar layer di sidebar: ikut filter perusahaan/wilayah/kebun, tanpa afdeling/blok */
+  const managementLayers = useMemo(() => {
+    const hierarchyActive = Boolean(
+      selectedPerusahaan || selectedWilayah || selectedKebunId
+    );
+    if (!hierarchyActive) return rawLayers;
+    return rawLayers.filter((l) => layerMatchesHierarchyFilters(l));
   }, [
     rawLayers,
-    kebunList,
     selectedPerusahaan,
     selectedWilayah,
     selectedKebunId,
-    selectedAfdelingId,
-    selectedBlokId,
+    layerMatchesHierarchyFilters,
   ]);
+
+  const displayedRasters = useMemo(
+    () => filterLayerOrRaster(rasterLayers),
+    [
+      rasterLayers,
+      hierarchyFilterActive,
+      allowedKebunIdsForHierarchy,
+      selectedAfdelingId,
+      selectedBlokId,
+    ]
+  );
+
+  useEffect(() => {
+    if (selectedLayerId && !displayedLayers.some((l) => l.id === selectedLayerId)) {
+      const fallback =
+        displayedLayers.find((l) => l.terlihat && l.bbox) ||
+        displayedLayers[0] ||
+        null;
+      setSelectedLayerId(fallback?.id ?? null);
+    }
+  }, [displayedLayers, selectedLayerId]);
 
   // Reset filters
   const handleResetFilters = () => {
@@ -460,7 +546,9 @@ export function MonitoringDashboard() {
   };
 
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#0A0E1A] text-[#F0F6FC] font-sans antialiased select-none">
+    <div
+      className={`monitoring-theme-${uiTheme} h-screen w-screen overflow-hidden flex flex-col bg-bg-ground text-text-primary font-sans antialiased select-none`}
+    >
       {/* 1. TOP HEADER (RPN Monitoring Dashboard Style) */}
       <MonitoringHeader
         kebunList={kebunList}
@@ -472,6 +560,17 @@ export function MonitoringDashboard() {
 
       {/* 2. MAIN WORKSPACE BODY */}
       <div className="flex-1 flex min-h-0 relative overflow-hidden">
+        {(isSidebarOpen || isRightPanelOpen) && (
+          <button
+            type="button"
+            className="lg:hidden fixed inset-0 top-13 z-30 bg-black/55 cursor-pointer border-0 p-0"
+            aria-label="Tutup panel samping"
+            onClick={() => {
+              if (isSidebarOpen) setIsSidebarOpen(false);
+              if (isRightPanelOpen) setIsRightPanelOpen(false);
+            }}
+          />
+        )}
         {/* Left Filter Sidebar */}
         <MonitoringSidebar
           isOpen={isSidebarOpen}
@@ -489,7 +588,9 @@ export function MonitoringDashboard() {
             setSelectedAfdelingId(null);
             setSelectedBlokId(null);
             if (id) {
-              const kebunLayers = rawLayers.filter((l) => l.kebun_id === id && l.bbox);
+              const kebunLayers = rawLayers.filter(
+                (l) => toMasterId(l.kebun_id) === id && l.bbox
+              );
               if (kebunLayers.length > 0 && kebunLayers[0].bbox) {
                 setFitBoundsTarget(kebunLayers[0].bbox);
               }
@@ -500,7 +601,7 @@ export function MonitoringDashboard() {
           selectedBlokId={selectedBlokId}
           onSelectBlok={setSelectedBlokId}
           onResetFilters={handleResetFilters}
-          layers={displayedLayers}
+          layers={managementLayers}
           selectedLayerId={selectedLayerId}
           onSelectLayer={(id) => setSelectedLayerId(id)}
           onToggleLayerVisibility={handleToggleLayerVisibility}
@@ -518,7 +619,7 @@ export function MonitoringDashboard() {
           <div className="flex-1 min-h-0 relative">
             <MonitoringMap
               layers={displayedLayers}
-              rasterLayers={rasterLayers}
+              rasterLayers={displayedRasters}
               stats={stats}
               selectedLayerId={selectedLayerId}
               statusFilter={selectedStatusFilter}
@@ -589,6 +690,11 @@ export function MonitoringDashboard() {
         onDataChanged={() => {
           setDataRevision((prev) => prev + 1);
           refreshStatsAndLayers();
+        }}
+        uiTheme={uiTheme}
+        onUiThemeChange={(theme) => {
+          setUiTheme(theme);
+          saveMonitoringUiTheme(theme);
         }}
       />
     </div>

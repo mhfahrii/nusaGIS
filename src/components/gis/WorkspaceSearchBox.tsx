@@ -98,7 +98,7 @@ export function WorkspaceSearchBox({ onSelectResult }: WorkspaceSearchBoxProps) 
             }
           }}
           placeholder="Cari kebun, layer, kode blok, afdeling..."
-          className="w-full bg-slate-900/95 border border-slate-700/80 focus:border-emerald-500 rounded-md pl-8 pr-16 py-1 text-[11px] text-slate-100 placeholder-slate-400 focus:outline-none transition-colors"
+          className="w-full bg-slate-900/95 border border-slate-700/80 focus:border-emerald-500 rounded-md pl-8 pr-16 py-1 text-caption text-slate-100 placeholder-slate-400 focus:outline-none transition-colors"
         />
         {query && (
           <button
@@ -108,7 +108,7 @@ export function WorkspaceSearchBox({ onSelectResult }: WorkspaceSearchBoxProps) 
               setResults([]);
               setIsOpen(false);
             }}
-            className="absolute right-2 text-[10px] text-slate-400 hover:text-slate-200 px-1"
+            className="absolute right-2 text-2xs text-slate-400 hover:text-slate-200 px-1"
             title="Bersihkan pencarian"
           >
             ✕
@@ -118,7 +118,7 @@ export function WorkspaceSearchBox({ onSelectResult }: WorkspaceSearchBoxProps) 
 
       {isOpen && query.trim().length > 0 && (
         <div className="absolute left-0 right-0 mt-1.5 bg-slate-950 border border-slate-700/90 rounded-lg shadow-2xl overflow-hidden max-h-96 flex flex-col">
-          <div className="px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
+          <div className="px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-2xs text-slate-400">
             <span>
               Hasil Pencarian Spasial &amp; Atribut ({results.length})
             </span>
@@ -126,7 +126,7 @@ export function WorkspaceSearchBox({ onSelectResult }: WorkspaceSearchBoxProps) 
           </div>
 
           {results.length === 0 && !loading ? (
-            <div className="p-4 text-center text-[11px] text-slate-400">
+            <div className="p-4 text-center text-caption text-slate-400">
               Tidak ditemukan kebun, layer, atau atribut fitur untuk &ldquo;{query}&rdquo;.
             </div>
           ) : (
@@ -144,23 +144,23 @@ export function WorkspaceSearchBox({ onSelectResult }: WorkspaceSearchBoxProps) 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span
-                        className={`px-1.5 py-0.2 rounded text-[9px] font-bold border shrink-0 ${badgeStyle(
+                        className={`px-1.5 py-0.2 rounded text-3xs font-bold border shrink-0 ${badgeStyle(
                           item.type
                         )}`}
                       >
                         {badgeLabel(item.type)}
                       </span>
-                      <span className="font-semibold text-[11px] text-slate-100 group-hover:text-emerald-300 truncate">
+                      <span className="font-semibold text-caption text-slate-100 group-hover:text-emerald-300 truncate">
                         {item.title}
                       </span>
                     </div>
-                    <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                    <div className="text-2xs text-slate-400 truncate mt-0.5">
                       {item.subtitle}
                     </div>
                   </div>
                   {item.bbox && (
                     <span
-                      className="shrink-0 mt-0.5 px-1.5 py-0.5 rounded bg-slate-900 group-hover:bg-emerald-950 border border-slate-800 group-hover:border-emerald-700 text-[9px] text-slate-300 group-hover:text-emerald-300 flex items-center gap-1"
+                      className="shrink-0 mt-0.5 px-1.5 py-0.5 rounded bg-slate-900 group-hover:bg-emerald-950 border border-slate-800 group-hover:border-emerald-700 text-3xs text-slate-300 group-hover:text-emerald-300 flex items-center gap-1"
                       title="Klik untuk Auto-Zoom ke lokasi"
                     >
                       <IconZoomTo className="w-2.5 h-2.5" />

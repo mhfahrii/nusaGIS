@@ -317,7 +317,7 @@ export function GisWorkspace() {
             <button
               type="button"
               onClick={() => setIsTableOpen(true)}
-              className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-emerald-500 text-slate-300 hover:text-emerald-400 shadow-xl flex items-center gap-1.5 z-30 text-[11px] font-semibold transition-all hover:scale-105"
+              className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-emerald-500 text-slate-300 hover:text-emerald-400 shadow-xl flex items-center gap-1.5 z-30 text-caption font-semibold transition-all hover:scale-105"
               title="Buka Tabel Atribut"
             >
               <IconChevronUp className="w-3.5 h-3.5" />

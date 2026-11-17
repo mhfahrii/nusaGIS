@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { requireUser, catatAktivitas } from '@/lib/auth/guard';
+import { DEFAULT_PERUSAHAAN } from '@/lib/perusahaan';
 
 interface CreateFeatureBody {
   layer_id: number;
@@ -108,12 +109,14 @@ export async function POST(req: NextRequest) {
     if ((!finalKebunId || body.new_kebun_nama) && body.new_kebun_nama?.trim()) {
       const kNama = body.new_kebun_nama.trim();
       const kWil = body.new_kebun_wilayah?.trim() || 'Wilayah Belum Ditentukan';
-      const kPer = body.new_kebun_perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)';
+      const kPer = body.new_kebun_perusahaan?.trim() || DEFAULT_PERUSAHAAN;
       const kKode = `KBN-${kNama.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'NEW'}-${Date.now().toString().slice(-4)}`;
 
-      const existingK = await query<{ id: number; nama_kebun: string; kode_kebun: string }>(
-        'SELECT id, nama_kebun, kode_kebun FROM public.kebun WHERE LOWER(nama_kebun) = LOWER($1);',
-        [kNama]
+      const existingK = await query<{ id: number }>(
+        `SELECT id FROM public.kebun
+         WHERE LOWER(nama_kebun) = LOWER($1)
+           AND COALESCE(NULLIF(BTRIM(perusahaan), ''), $2) = $2;`,
+        [kNama, kPer]
       );
       if (existingK.rowCount && existingK.rowCount > 0) {
         finalKebunId = Number(existingK.rows[0].id);

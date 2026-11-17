@@ -75,7 +75,7 @@ export function PropertiesPanel({
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center border-b border-slate-800/80 bg-slate-950/40 text-[11px] px-2 pt-1 shrink-0">
+      <div className="flex items-center border-b border-slate-800/80 bg-slate-950/40 text-caption px-2 pt-1 shrink-0">
         {[
           { id: 'properties', label: 'General' },
           { id: 'symbology', label: 'Symbology' },
@@ -104,7 +104,7 @@ export function PropertiesPanel({
             {activeTab === 'properties' && (
               <div className="space-y-3">
                 <div>
-                  <label className="text-[10px] uppercase font-semibold text-slate-500 block">
+                  <label className="text-2xs uppercase font-semibold text-slate-500 block">
                     Nama Layer
                   </label>
                   <div className="text-sm font-bold text-slate-100 mt-0.5">
@@ -112,7 +112,7 @@ export function PropertiesPanel({
                   </div>
                 </div>
 
-                <div className="p-2.5 rounded bg-slate-900/60 border border-slate-800/80 space-y-2 text-[11px]">
+                <div className="p-2.5 rounded bg-slate-900/60 border border-slate-800/80 space-y-2 text-caption">
                   <div className="flex justify-between">
                     <span className="text-slate-400">Data Source:</span>
                     <span className="font-mono text-emerald-400">PostGIS 3.6</span>
@@ -142,11 +142,11 @@ export function PropertiesPanel({
                 </div>
 
                 {selectedLayer.bbox && (
-                  <div className="space-y-1 text-[11px]">
-                    <span className="text-[10px] uppercase font-semibold text-slate-500 block">
+                  <div className="space-y-1 text-caption">
+                    <span className="text-2xs uppercase font-semibold text-slate-500 block">
                       Bounding Box Extent (BBOX)
                     </span>
-                    <div className="p-2 bg-slate-900/40 rounded border border-slate-800 font-mono text-[10px] text-slate-400 leading-relaxed">
+                    <div className="p-2 bg-slate-900/40 rounded border border-slate-800 font-mono text-2xs text-slate-400 leading-relaxed">
                       MinX: {selectedLayer.bbox[0].toFixed(5)}, MinY: {selectedLayer.bbox[1].toFixed(5)}<br />
                       MaxX: {selectedLayer.bbox[2].toFixed(5)}, MaxY: {selectedLayer.bbox[3].toFixed(5)}
                     </div>
@@ -157,12 +157,12 @@ export function PropertiesPanel({
 
             {activeTab === 'symbology' && (
               <div className="space-y-4">
-                <div className="text-[11px] font-semibold text-slate-300">
+                <div className="text-caption font-semibold text-slate-300">
                   Vector Symbology
                 </div>
 
                 <div>
-                  <label className="text-[10px] uppercase font-semibold text-slate-500 block mb-1">
+                  <label className="text-2xs uppercase font-semibold text-slate-500 block mb-1">
                     Layer Color
                   </label>
                   <div className="flex items-center gap-2">
@@ -182,8 +182,8 @@ export function PropertiesPanel({
                 </div>
 
                 <div>
-                  <div className="flex justify-between text-[11px] mb-1">
-                    <label className="text-[10px] uppercase font-semibold text-slate-500">
+                  <div className="flex justify-between text-caption mb-1">
+                    <label className="text-2xs uppercase font-semibold text-slate-500">
                       Fill Opacity
                     </label>
                     <span className="font-mono text-slate-300">{opacity}%</span>
@@ -201,7 +201,7 @@ export function PropertiesPanel({
             )}
 
             {activeTab === 'labels' && (
-              <div className="space-y-3 text-[11px]">
+              <div className="space-y-3 text-caption">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -214,8 +214,8 @@ export function PropertiesPanel({
             )}
 
             {activeTab === 'geoprocessing' && (
-              <div className="space-y-3 text-[11px]">
-                <div className="text-[11px] font-semibold text-slate-300 flex items-center gap-2">
+              <div className="space-y-3 text-caption">
+                <div className="text-caption font-semibold text-slate-300 flex items-center gap-2">
                   <IconDatabase className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Geoprocessing Tools</span>
                 </div>

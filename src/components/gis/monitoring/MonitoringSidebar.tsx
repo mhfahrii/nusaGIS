@@ -12,8 +12,13 @@ import {
   IconPencil,
   IconSettings,
   IconTrash,
+  IconMap,
+  IconCheck,
+  IconClose,
 } from '../GisIcons';
 import type { LayerPeta } from '@/types/gis';
+import { kebunPerusahaanLabel, listAvailablePerusahaan } from '@/lib/perusahaan';
+import { toMasterId } from '@/lib/ids';
 
 interface KebunItem {
   id: number;
@@ -118,7 +123,8 @@ export function MonitoringSidebar({
     const result: Record<string, Record<string, LayerPeta[]>> = {};
 
     layers.forEach((layer) => {
-      const matchKebun = kebunList.find((k) => k.id === layer.kebun_id);
+      const layerKebunId = toMasterId(layer.kebun_id);
+      const matchKebun = kebunList.find((k) => toMasterId(k.id) === layerKebunId);
       const wil = (layer.wilayah || matchKebun?.wilayah || 'Wilayah Belum Ditentukan').trim();
       const kbn = (layer.nama_kebun || matchKebun?.nama_kebun || 'Kebun Umum').trim();
 
@@ -129,29 +135,15 @@ export function MonitoringSidebar({
 
     return result;
   }, [layers, kebunList]);
-  // 1. Ekstraksi daftar unik Perusahaan dari master kebun / DB
-  const rawPerusahaan = Array.from(
-    new Set(
-      kebunList
-        .map((k) => k.perusahaan?.trim())
-        .filter((p): p is string => Boolean(p && p.length > 0))
-    )
-  );
-  // Default list mencakup PTPN I & P3GI jika belum ada di database
-  const availablePerusahaan = Array.from(
-    new Set([
-      ...rawPerusahaan,
-      'PT Perkebunan Nusantara I (Regional 4)',
-      'Pusat Penelitian Perkebunan Gula Indonesia (P3GI)',
-    ])
+  const availablePerusahaan = useMemo(
+    () => listAvailablePerusahaan(kebunList),
+    [kebunList]
   );
 
   // 2. Cascading Wilayah berdasarkan Perusahaan terpilih
   const filteredByPerusahaanKebun = selectedPerusahaan
     ? kebunList.filter(
-        (k) =>
-          (k.perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)') ===
-          selectedPerusahaan
+        (k) => kebunPerusahaanLabel(k.perusahaan) === selectedPerusahaan
       )
     : kebunList;
 
@@ -170,9 +162,11 @@ export function MonitoringSidebar({
 
   // 4. Afdeling berdasarkan Kebun terpilih
   const filteredAfdeling = selectedKebunId
-    ? afdelingList.filter((a) => a.kebun_id === selectedKebunId)
+    ? afdelingList.filter((a) => toMasterId(a.kebun_id) === selectedKebunId)
     : (selectedWilayah || selectedPerusahaan)
-    ? afdelingList.filter((a) => filteredKebun.some((k) => k.id === a.kebun_id))
+    ? afdelingList.filter((a) =>
+        filteredKebun.some((k) => toMasterId(k.id) === toMasterId(a.kebun_id))
+      )
     : afdelingList;
 
   // 5. Blok berdasarkan Afdeling terpilih
@@ -181,17 +175,17 @@ export function MonitoringSidebar({
     : selectedKebunId
     ? blokList.filter((b) => {
         const parentAfd = afdelingList.find((a) => a.id === b.afdeling_id);
-        return parentAfd?.kebun_id === selectedKebunId;
+        return toMasterId(parentAfd?.kebun_id) === selectedKebunId;
       })
     : blokList;
 
   if (!isOpen) {
     return (
-      <div className="w-10 bg-[#0D1322] border-r border-[#1E2942] flex flex-col items-center py-3 select-none shrink-0 z-20">
+      <div className="w-10 bg-bg-nav border-r border-border-subtle flex flex-col items-center py-3 select-none shrink-0 z-20">
         <button
           type="button"
           onClick={onToggle}
-          className="p-2 rounded-lg bg-[#12192B] border border-[#1E2942] hover:border-[#00D2FF] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors shadow-md cursor-pointer"
+          className="p-2 rounded-lg bg-bg-surface border border-border-subtle hover:border-border-active text-text-secondary hover:text-accent-primary transition-colors shadow-md cursor-pointer"
           title="Buka Panel Filter"
         >
           <IconFilter className="w-4 h-4" />
@@ -201,11 +195,14 @@ export function MonitoringSidebar({
   }
 
   return (
-    <aside className="w-64 sm:w-72 bg-[#0D1322] border-r border-[#1E2942] flex flex-col select-none shrink-0 z-20 h-full overflow-hidden text-[#F0F6FC]">
+    <aside
+      data-nusa-chrome
+      className="w-[min(100vw-2.5rem,18rem)] sm:w-72 bg-bg-nav border-r border-border-subtle flex flex-col select-none shrink-0 z-20 max-lg:z-40 h-full overflow-hidden text-text-primary max-lg:fixed max-lg:left-0 max-lg:top-13 max-lg:bottom-0 max-lg:shadow-2xl lg:relative"
+    >
       {/* Header Panel Filter */}
-      <div className="h-11 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2 font-bold text-xs text-[#F0F6FC] uppercase tracking-wider">
-          <IconFilter className="w-3.5 h-3.5 text-[#00D2FF]" />
+      <div className="h-11 px-4 bg-bg-nav border-b border-border-subtle flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 font-bold text-xs text-text-primary uppercase tracking-wider">
+          <IconFilter className="w-3.5 h-3.5 text-accent-primary" />
           <span>Filter Monitoring</span>
         </div>
 
@@ -213,7 +210,7 @@ export function MonitoringSidebar({
           <button
             type="button"
             onClick={onResetFilters}
-            className="p-1 rounded text-[#8B9BB4] hover:text-[#00D2FF] hover:bg-[#12192B] text-[10px] flex items-center gap-1 transition-colors cursor-pointer"
+            className="p-1 rounded text-text-secondary hover:text-accent-primary hover:bg-bg-surface text-2xs flex items-center gap-1 transition-colors cursor-pointer"
             title="Reset Seluruh Filter"
           >
             <IconRefresh className="w-3 h-3" />
@@ -222,7 +219,7 @@ export function MonitoringSidebar({
           <button
             type="button"
             onClick={onToggle}
-            className="p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
+            className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors cursor-pointer"
             title="Sembunyikan Panel Filter"
           >
             <IconChevronRight className="w-3.5 h-3.5" />
@@ -230,11 +227,12 @@ export function MonitoringSidebar({
         </div>
       </div>
 
-      {/* Form Cascading Filter */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs">
+      <div className="flex-1 flex flex-col min-h-0">
+      {/* Form Cascading Filter — tidak scroll; daftar layer memakai sisa tinggi */}
+      <div className="shrink-0 p-4 space-y-3.5 text-xs border-b border-border-subtle">
         {/* 1. Perusahaan (Induk Holding / Entitas Kebun) */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold text-[#8B9BB4] flex items-center justify-between">
+          <label className="text-caption font-semibold text-text-secondary flex items-center justify-between">
             <span>Perusahaan</span>
           </label>
           <select
@@ -246,11 +244,11 @@ export function MonitoringSidebar({
               onSelectAfdeling(null);
               onSelectBlok(null);
             }}
-            className="w-full bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+            className="w-full bg-bg-surface border border-border-subtle hover:border-border-subtle focus:border-border-subtle rounded-md px-2.5 py-2 min-h-11 text-xs text-text-primary nusa-focus transition-colors"
           >
-            <option value="" className="bg-[#0D1322]">Semua Perusahaan</option>
+            <option value="" className="bg-bg-nav">Semua Perusahaan</option>
             {availablePerusahaan.map((p) => (
-              <option key={p} value={p} className="bg-[#0D1322]">
+              <option key={p} value={p} className="bg-bg-nav">
                 {p}
               </option>
             ))}
@@ -260,7 +258,7 @@ export function MonitoringSidebar({
         {/* 2. Wilayah Geografis */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-[11px] font-semibold text-[#8B9BB4] block">
+            <label className="text-caption font-semibold text-text-secondary block">
               Wilayah
             </label>
             {selectedWilayah && onDeleteWilayah && (
@@ -272,7 +270,7 @@ export function MonitoringSidebar({
                     name: selectedWilayah,
                   })
                 }
-                className="text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors cursor-pointer"
+                className="text-2xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors cursor-pointer"
                 title={`Hapus seluruh data wilayah "${selectedWilayah}"`}
               >
                 <IconTrash className="w-2.5 h-2.5" />
@@ -288,11 +286,11 @@ export function MonitoringSidebar({
               onSelectAfdeling(null);
               onSelectBlok(null);
             }}
-            className="w-full bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+            className="w-full bg-bg-surface border border-border-subtle hover:border-border-subtle focus:border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary nusa-focus transition-colors"
           >
-            <option value="" className="bg-[#0D1322]">Semua Wilayah</option>
+            <option value="" className="bg-bg-nav">Semua Wilayah</option>
             {availableWilayah.map((w) => (
-              <option key={w} value={w} className="bg-[#0D1322]">
+              <option key={w} value={w} className="bg-bg-nav">
                 {w}
               </option>
             ))}
@@ -301,7 +299,7 @@ export function MonitoringSidebar({
 
         {/* 3. Kebun */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold text-[#8B9BB4] block">
+          <label className="text-caption font-semibold text-text-secondary block">
             Kebun
           </label>
           <select
@@ -312,11 +310,11 @@ export function MonitoringSidebar({
               onSelectAfdeling(null);
               onSelectBlok(null);
             }}
-            className="w-full bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+            className="w-full bg-bg-surface border border-border-subtle hover:border-border-subtle focus:border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary nusa-focus transition-colors"
           >
-            <option value="" className="bg-[#0D1322]">Semua Kebun</option>
+            <option value="" className="bg-bg-nav">Semua Kebun</option>
             {filteredKebun.map((k) => (
-              <option key={k.id} value={k.id} className="bg-[#0D1322]">
+              <option key={k.id} value={k.id} className="bg-bg-nav">
                 {k.nama_kebun} ({k.kode_kebun})
               </option>
             ))}
@@ -325,7 +323,7 @@ export function MonitoringSidebar({
 
         {/* 4. Afdeling (Cascading dari Kebun) */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold text-[#8B9BB4] block">
+          <label className="text-caption font-semibold text-text-secondary block">
             Afdeling
           </label>
           <select
@@ -335,11 +333,11 @@ export function MonitoringSidebar({
               onSelectAfdeling(val);
               onSelectBlok(null);
             }}
-            className="w-full bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors disabled:opacity-40"
+            className="w-full bg-bg-surface border border-border-subtle hover:border-border-subtle focus:border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary nusa-focus transition-colors disabled:opacity-40"
           >
-            <option value="" className="bg-[#0D1322]">Semua Afdeling</option>
+            <option value="" className="bg-bg-nav">Semua Afdeling</option>
             {filteredAfdeling.map((a) => (
-              <option key={a.id} value={a.id} className="bg-[#0D1322]">
+              <option key={a.id} value={a.id} className="bg-bg-nav">
                 {a.nama_afdeling} ({a.kode_afdeling})
               </option>
             ))}
@@ -348,7 +346,7 @@ export function MonitoringSidebar({
 
         {/* 5. Blok (Cascading dari Afdeling) */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold text-[#8B9BB4] block">
+          <label className="text-caption font-semibold text-text-secondary block">
             Blok
           </label>
           <select
@@ -356,35 +354,36 @@ export function MonitoringSidebar({
             onChange={(e) =>
               onSelectBlok(e.target.value ? Number(e.target.value) : null)
             }
-            className="w-full bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors disabled:opacity-40"
+            className="w-full bg-bg-surface border border-border-subtle hover:border-border-subtle focus:border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary nusa-focus transition-colors disabled:opacity-40"
           >
-            <option value="" className="bg-[#0D1322]">Semua Blok</option>
+            <option value="" className="bg-bg-nav">Semua Blok</option>
             {filteredBlok.map((b) => (
-              <option key={b.id} value={b.id} className="bg-[#0D1322]">
+              <option key={b.id} value={b.id} className="bg-bg-nav">
                 {b.nama_blok} ({b.kode_blok})
               </option>
             ))}
           </select>
         </div>
+      </div>
 
         {/* 7. MANAJEMEN LAYER GIS */}
-        <div className="space-y-2 pt-2.5 border-t border-[#1E2942]">
+        <div className="flex-1 min-h-0 flex flex-col p-4 pt-3 space-y-2 text-xs">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#F0F6FC] uppercase tracking-wider">
-              <IconLayers className="w-3.5 h-3.5 text-[#00D2FF]" />
+            <div className="flex items-center gap-1.5 text-caption font-bold text-text-primary uppercase tracking-wider">
+              <IconLayers className="w-3.5 h-3.5 text-accent-primary" />
               <span>Manajemen Layer</span>
             </div>
-            <span className="text-[10px] bg-[#12192B] border border-[#1E2942] text-[#8B9BB4] px-1.5 py-0.5 rounded font-mono">
+            <span className="text-2xs bg-bg-surface border border-border-subtle text-text-secondary px-1.5 py-0.5 rounded font-mono">
               {layers.length} Layer
             </span>
           </div>
 
           {layers.length === 0 ? (
-            <div className="text-[11px] text-[#566680] italic p-2 bg-[#12192B]/50 rounded border border-[#1E2942] text-center">
+            <div className="text-caption text-text-muted italic p-2 bg-bg-surface/50 rounded border border-border-subtle text-center">
               Belum ada layer spasial aktif.
             </div>
           ) : (
-            <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+            <div className="flex-1 min-h-0 space-y-2.5 nusa-scroll pr-1">
               {Object.entries(groupedLayers).map(([wilayahName, kebunMap]) => {
                 const totalLayersInWilayah = Object.values(kebunMap).reduce(
                   (acc, curr) => acc + curr.length,
@@ -394,12 +393,12 @@ export function MonitoringSidebar({
                 return (
                   <div
                     key={wilayahName}
-                    className="space-y-1.5 pb-2 border-b border-[#1E2942]/60 last:border-b-0"
+                    className="space-y-1.5 pb-2 border-b border-border-subtle/60 last:border-b-0"
                   >
                     {/* Header Wilayah */}
                     <div className="flex items-center justify-between px-1 py-0.5 group">
-                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#00D2FF] uppercase tracking-wider min-w-0">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#00D2FF] shrink-0" />
+                      <div className="flex items-center gap-1.5 text-2xs font-bold text-accent-primary uppercase tracking-wider min-w-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent-primary shrink-0" />
                         <span className="truncate">{wilayahName}</span>
                       </div>
                       {onDeleteWilayah && (
@@ -413,7 +412,7 @@ export function MonitoringSidebar({
                               totalFiles: totalLayersInWilayah,
                             });
                           }}
-                          className="p-1 rounded text-[#8B9BB4] hover:text-[#EF4444] hover:bg-[#1E1420] transition-colors cursor-pointer"
+                          className="p-1 rounded text-text-secondary hover:text-status-danger hover:bg-bg-ground transition-colors cursor-pointer"
                           title={`Hapus seluruh data wilayah "${wilayahName}" (${totalLayersInWilayah} file/layer)`}
                         >
                           <IconTrash className="w-3 h-3" />
@@ -424,8 +423,8 @@ export function MonitoringSidebar({
                     {/* Sub-grup per Kebun */}
                     {Object.entries(kebunMap).map(([kebunName, layerItems]) => (
                       <div key={kebunName} className="pl-1.5 space-y-1">
-                        <div className="text-[10px] font-semibold text-[#8B9BB4] flex items-center gap-1">
-                          <span className="text-[#10B981]">🌱</span>
+                        <div className="text-2xs font-semibold text-text-secondary flex items-center gap-1">
+                          <IconMap className="w-3 h-3 text-status-success shrink-0" aria-hidden />
                           <span className="truncate">{kebunName}</span>
                         </div>
 
@@ -441,8 +440,8 @@ export function MonitoringSidebar({
                                 onClick={() => onSelectLayer?.(layer.id)}
                                 className={`p-1.5 rounded-lg border text-xs transition-all cursor-pointer flex flex-col gap-1.5 ${
                                   isSelected
-                                    ? 'bg-[#132238] border-[#00D2FF] text-[#00D2FF] shadow-xs'
-                                    : 'bg-[#12192B] border-[#1E2942] text-[#F0F6FC] hover:border-[#2C3B59] hover:bg-[#19233A]'
+                                    ? 'bg-bg-surface-hover border-border-active text-accent-primary shadow-xs'
+                                    : 'bg-bg-surface border-border-subtle text-text-primary hover:border-border-subtle hover:bg-bg-surface-hover'
                                 }`}
                               >
                                 <div className="flex items-center justify-between gap-1.5">
@@ -452,7 +451,7 @@ export function MonitoringSidebar({
                                       style={{ backgroundColor: layer.warna || '#00D2FF' }}
                                     />
                                     {!isRenaming ? (
-                                      <span className="font-semibold truncate text-[11px] leading-tight">
+                                      <span className="font-semibold truncate text-caption leading-tight">
                                         {layer.nama_layer}
                                       </span>
                                     ) : (
@@ -475,7 +474,7 @@ export function MonitoringSidebar({
                                             }
                                           }}
                                           autoFocus
-                                          className="w-full bg-[#0D1322] border border-[#00D2FF] rounded px-1.5 py-0.5 text-xs text-[#F0F6FC] focus:outline-none"
+                                          className="w-full bg-bg-nav border border-border-active rounded px-1.5 py-0.5 text-xs text-text-primary nusa-focus"
                                         />
                                         <button
                                           type="button"
@@ -485,18 +484,18 @@ export function MonitoringSidebar({
                                             }
                                             setRenamingLayerId(null);
                                           }}
-                                          className="px-1 text-[#10B981] hover:text-white font-bold"
+                                          className="px-1 text-status-success hover:text-white font-bold"
                                           title="Simpan Nama"
                                         >
-                                          ✓
+                                          <IconCheck className="w-3.5 h-3.5" aria-hidden />
                                         </button>
                                         <button
                                           type="button"
                                           onClick={() => setRenamingLayerId(null)}
-                                          className="px-1 text-[#8B9BB4] hover:text-white font-bold"
+                                          className="px-1 text-text-secondary hover:text-white font-bold"
                                           title="Batal"
                                         >
-                                          ✕
+                                          <IconClose className="w-3.5 h-3.5" aria-hidden />
                                         </button>
                                       </div>
                                     )}
@@ -513,7 +512,7 @@ export function MonitoringSidebar({
                                         setRenamingLayerId(layer.id);
                                         setRenamingText(layer.nama_layer);
                                       }}
-                                      className="p-1 rounded hover:bg-[#0D1322] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors"
+                                      className="p-1 rounded hover:bg-bg-nav text-text-secondary hover:text-accent-primary transition-colors"
                                       title="Ganti Nama Layer"
                                     >
                                       <IconPencil className="w-3 h-3" />
@@ -533,7 +532,7 @@ export function MonitoringSidebar({
                                             totalFiles: totalLayersInWilayah,
                                           })
                                         }
-                                        className="p-1 rounded hover:bg-[#1E1420] text-[#8B9BB4] hover:text-[#EF4444] transition-colors cursor-pointer"
+                                        className="p-1 rounded hover:bg-bg-ground text-text-secondary hover:text-status-danger transition-colors cursor-pointer"
                                         title={
                                           totalLayersInWilayah <= 1
                                             ? `Hapus file "${layer.nama_layer}" (File terakhir, wilayah "${wilayahName}" akan otomatis ikut terhapus)`
@@ -551,7 +550,7 @@ export function MonitoringSidebar({
                                         onClick={() => {
                                           if (layer.bbox) onZoomToLayer?.(layer.bbox);
                                         }}
-                                        className="p-1 rounded hover:bg-[#0D1322] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors cursor-pointer"
+                                        className="p-1 rounded hover:bg-bg-nav text-text-secondary hover:text-accent-primary transition-colors cursor-pointer"
                                         title="Fokus Zoom ke Layer ini"
                                       >
                                         <IconZoomTo className="w-3 h-3" />
@@ -566,8 +565,8 @@ export function MonitoringSidebar({
                                       }
                                       className={`p-1 rounded transition-colors cursor-pointer ${
                                         layer.terlihat
-                                          ? 'text-[#00D2FF] hover:bg-[#0E3A5D]/50'
-                                          : 'text-[#566680] hover:bg-[#0D1322]'
+                                          ? 'text-accent-primary hover:bg-bg-accent-surface/50'
+                                          : 'text-text-muted hover:bg-bg-nav'
                                       }`}
                                       title={layer.terlihat ? 'Sembunyikan Layer' : 'Tampilkan Layer'}
                                     >
@@ -581,8 +580,8 @@ export function MonitoringSidebar({
                                 </div>
 
                                 {/* Badge Tipe Geometri & Jumlah Fitur */}
-                                <div className="flex items-center justify-between text-[9px] text-[#8B9BB4] font-mono px-0.5">
-                                  <span className="bg-[#0D1322] px-1 py-0.5 rounded border border-[#1E2942]">
+                                <div className="flex items-center justify-between text-3xs text-text-secondary font-mono px-0.5">
+                                  <span className="bg-bg-nav px-1 py-0.5 rounded border border-border-subtle">
                                     {layer.tipe_geometri || 'Polygon'}
                                   </span>
                                   <span>{layer.jumlah_fitur || 0} fitur</span>
@@ -602,43 +601,43 @@ export function MonitoringSidebar({
       </div>
 
       {/* Footer Info & Settings */}
-      <div className="p-2.5 bg-[#0D1322] border-t border-[#1E2942] flex items-center justify-between gap-2">
+      <div className="p-2.5 bg-bg-nav border-t border-border-subtle flex items-center justify-between gap-2">
         <button
           type="button"
           onClick={onOpenSettings}
-          className="flex-1 flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[#12192B] hover:bg-[#1A2338] border border-[#1E2942] hover:border-[#00D2FF]/50 text-xs text-[#E2E8F0] transition-all cursor-pointer group shadow-sm"
+          className="flex-1 flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-bg-surface hover:bg-bg-surface-hover border border-border-subtle hover:border-border-active/50 text-xs text-text-primary transition-all cursor-pointer group shadow-sm"
           title="Buka Pengaturan Sistem, Cadangan Data & Riwayat Sampah Spasial"
         >
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-[#00D2FF]/10 text-[#00D2FF] flex items-center justify-center group-hover:scale-105 transition-transform">
+            <div className="w-6 h-6 rounded-md bg-accent-primary/10 text-accent-primary flex items-center justify-center group-hover:scale-105 transition-transform">
               <IconSettings className="w-3.5 h-3.5" />
             </div>
             <div className="text-left">
-              <div className="font-semibold text-[11px] group-hover:text-[#00D2FF] transition-colors leading-tight">
+              <div className="font-semibold text-caption group-hover:text-accent-primary transition-colors leading-tight">
                 Settings
               </div>
-              <div className="text-[9px] text-[#8B9BB4] leading-tight">Backup & Riwayat</div>
+              <div className="text-3xs text-text-secondary leading-tight">Backup & Riwayat</div>
             </div>
           </div>
           {typeof deletedCount === 'number' && deletedCount > 0 ? (
-            <span className="px-1.5 py-0.5 rounded-full bg-[#EF4444] text-white text-[9px] font-bold shadow-xs">
+            <span className="px-1.5 py-0.5 rounded-full bg-status-danger text-white text-3xs font-bold shadow-xs">
               {deletedCount}
             </span>
           ) : (
-            <span className="text-[10px] text-[#566680] group-hover:text-[#8B9BB4]">Buka</span>
+            <span className="text-2xs text-text-muted group-hover:text-text-secondary">Buka</span>
           )}
         </button>
 
-        <div className="text-right text-[10px] text-[#8B9BB4] pl-1 font-mono flex-shrink-0">
-          <div className="text-[9px] text-[#566680]">Proyeksi</div>
-          <span className="text-[#00D2FF] font-semibold">EPSG:4326</span>
+        <div className="text-right text-2xs text-text-secondary pl-1 font-mono flex-shrink-0">
+          <div className="text-3xs text-text-muted">Proyeksi</div>
+          <span className="text-accent-primary font-semibold">EPSG:4326</span>
         </div>
       </div>
 
       {/* MODAL KONFIRMASI PENGHAPUSAN (WILAYAH ATAU LAYER TUNGGAL) */}
       {deleteModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-[#0D1322] border border-[#1E2942] rounded-xl shadow-2xl max-w-sm w-full p-5 text-[#F0F6FC] animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+          <div className="bg-bg-nav border border-border-subtle rounded-xl shadow-2xl max-w-sm w-full p-5 text-text-primary animate-in fade-in duration-200">
             <div className="flex items-start gap-3">
               <div
                 className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
@@ -650,14 +649,14 @@ export function MonitoringSidebar({
                 <IconTrash className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-bold text-[#F0F6FC]">
+                <h3 className="text-sm font-bold text-text-primary">
                   {deleteModal.type === 'wilayah'
                     ? 'Hapus Seluruh Data Wilayah?'
                     : deleteModal.isLastFile
                     ? 'Hapus File Terakhir & Wilayah?'
                     : 'Hapus File / Layer Spasial?'}
                 </h3>
-                <div className="mt-2 text-xs text-[#8B9BB4] leading-relaxed space-y-2">
+                <div className="mt-2 text-xs text-text-secondary leading-relaxed space-y-2">
                   {deleteModal.type === 'wilayah' ? (
                     <p>
                       Anda akan menghapus seluruh data pada wilayah{' '}
@@ -669,9 +668,9 @@ export function MonitoringSidebar({
                     <>
                       <p>
                         Anda akan menghapus file/layer{' '}
-                        <strong className="text-[#00D2FF]">{deleteModal.name}</strong>.
+                        <strong className="text-accent-primary">{deleteModal.name}</strong>.
                       </p>
-                      <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] leading-normal">
+                      <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-caption leading-normal">
                         ⚠️ <strong>Peringatan File Terakhir:</strong> Ini adalah <strong>satu-satunya file/layer yang tersisa</strong> di wilayah{' '}
                         <strong>{deleteModal.parentName}</strong>. Karena seluruh file di wilayah ini habis,{' '}
                         <strong className="underline">wilayah {deleteModal.parentName} dan unit kebunnya akan otomatis ikut terhapus dari sistem</strong>.
@@ -681,7 +680,7 @@ export function MonitoringSidebar({
                     <p>
                       Anda akan menghapus layer/file{' '}
                       <strong className="text-red-400">{deleteModal.name}</strong> dari wilayah{' '}
-                      <strong className="text-[#00D2FF]">{deleteModal.parentName || 'Terkait'}</strong>.
+                      <strong className="text-accent-primary">{deleteModal.parentName || 'Terkait'}</strong>.
                       Hanya file ini saja yang akan terhapus, data wilayah dan {deleteModal.totalFiles ? deleteModal.totalFiles - 1 : ''} layer lainnya tetap aman.
                     </p>
                   )}
@@ -694,7 +693,7 @@ export function MonitoringSidebar({
                 type="button"
                 disabled={isDeleting}
                 onClick={() => setDeleteModal(null)}
-                className="px-3 py-1.5 rounded-lg bg-[#12192B] border border-[#1E2942] hover:bg-[#19233A] text-xs font-semibold text-[#8B9BB4] hover:text-[#F0F6FC] transition-colors cursor-pointer disabled:opacity-50"
+                className="px-3 py-1.5 rounded-lg bg-bg-surface border border-border-subtle hover:bg-bg-surface-hover text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors cursor-pointer disabled:opacity-50"
               >
                 Batal
               </button>

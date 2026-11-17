@@ -167,14 +167,14 @@ export function AttributeTablePanel({
           <div className="h-3.5 w-px bg-slate-700 shrink-0" />
 
           {/* Selected Layer Indicator */}
-          <div className="text-[11px] text-slate-400 shrink-0">
+          <div className="text-caption text-slate-400 shrink-0">
             Selected Layer:{' '}
             <span className="font-semibold text-emerald-400">
               {selectedLayerName || 'Belum ada layer'}
             </span>
           </div>
 
-          <span className="text-[10px] text-slate-500 font-mono shrink-0">
+          <span className="text-2xs text-slate-500 font-mono shrink-0">
             ({totalRecords} total · {displayedRecords.length} tampil ·{' '}
             {selectedFeatureId ? '1 dipilih' : '0 dipilih'})
           </span>
@@ -190,12 +190,12 @@ export function AttributeTablePanel({
               placeholder="Filter atribut DBF..."
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded pl-6 pr-2 py-0.5 text-[10px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className="w-full bg-slate-950 border border-slate-800 rounded pl-6 pr-2 py-0.5 text-2xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
           </div>
 
           {/* Pagination Controls */}
-          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[10px]">
+          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-2xs">
             <select
               value={pageSize}
               onChange={(e) => {
@@ -236,7 +236,7 @@ export function AttributeTablePanel({
           <button
             type="button"
             onClick={() => setShowSelectedOnly(!showSelectedOnly)}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+            className={`px-2 py-0.5 rounded text-2xs font-medium border transition-colors ${
               showSelectedOnly
                 ? 'bg-emerald-950 border-emerald-700 text-emerald-300'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -249,7 +249,7 @@ export function AttributeTablePanel({
             type="button"
             onClick={exportCsv}
             disabled={records.length === 0}
-            className="px-2 py-0.5 rounded text-[10px] font-medium border bg-slate-950 border-slate-800 text-slate-300 hover:text-emerald-400 hover:border-emerald-700 disabled:opacity-40 transition-colors"
+            className="px-2 py-0.5 rounded text-2xs font-medium border bg-slate-950 border-slate-800 text-slate-300 hover:text-emerald-400 hover:border-emerald-700 disabled:opacity-40 transition-colors"
             title="Ekspor Atribut ke File CSV"
           >
             Export CSV
@@ -298,7 +298,7 @@ export function AttributeTablePanel({
           </div>
         ) : (
           <table className="w-full text-left font-mono border-collapse">
-            <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold tracking-wider z-10">
+            <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-caption text-slate-400 font-semibold tracking-wider z-10">
               <tr>
                 <th
                   onClick={() => handleSortColumn('id')}
@@ -325,7 +325,7 @@ export function AttributeTablePanel({
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 text-[11px] text-slate-300">
+            <tbody className="divide-y divide-slate-800/60 text-caption text-slate-300">
               {displayedRecords.map((rec, idx) => {
                 const isSelected = selectedFeatureId === rec.id;
                 const rowNumber = (page - 1) * pageSize + idx + 1;
@@ -345,7 +345,7 @@ export function AttributeTablePanel({
                         : 'hover:bg-slate-900/80'
                     }`}
                   >
-                    <td className="py-1.5 px-2.5 text-center text-slate-500 font-sans text-[10px]">
+                    <td className="py-1.5 px-2.5 text-center text-slate-500 font-sans text-2xs">
                       {rowNumber}
                     </td>
                     <td className="py-1 px-2 text-center">

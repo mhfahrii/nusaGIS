@@ -15,6 +15,8 @@ import {
 } from '@/lib/gis/shapefile';
 import { parseGeoTiffMetadata } from '@/lib/gis/geotiff';
 import type { DataUnggahan, LayerPeta, ExtentBox, LayerMappingInput } from '@/types/gis';
+import { DEFAULT_PERUSAHAAN } from '@/lib/perusahaan';
+import { enrichFeaturePropertiesFromPopup } from '@/lib/gis/popupInfo';
 
 export async function POST(req: NextRequest) {
   // 1. Otorisasi Pengguna (Admin atau Pengguna aktif diizinkan mengunggah data GIS)
@@ -438,12 +440,22 @@ export async function POST(req: NextRequest) {
         if ((!targetKebunId || effectiveIsNewKebun) && effectiveNewKebunNama?.trim()) {
           const kNama = effectiveNewKebunNama.trim();
           const kWil = effectiveNewKebunWilayah?.trim() || 'Wilayah Belum Ditentukan';
-          const kPer = effectiveNewKebunPerusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)';
+          const kPer = effectiveNewKebunPerusahaan?.trim() || DEFAULT_PERUSAHAAN;
           const kKode = `KBN-${kNama.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'NEW'}-${Date.now().toString().slice(-4)}`;
 
-          const existingK = await client.query('SELECT id FROM public.kebun WHERE LOWER(nama_kebun) = LOWER($1);', [kNama]);
+          const existingK = await client.query<{ id: number }>(
+            `SELECT id FROM public.kebun
+             WHERE LOWER(nama_kebun) = LOWER($1)
+               AND COALESCE(NULLIF(BTRIM(perusahaan), ''), $2) = $2;`,
+            [kNama, kPer]
+          );
           if (existingK.rowCount && existingK.rowCount > 0) {
             targetKebunId = Number(existingK.rows[0].id);
+            await client.query(
+              `UPDATE public.kebun SET wilayah = COALESCE(NULLIF(BTRIM($1), ''), wilayah)
+               WHERE id = $2;`,
+              [kWil, targetKebunId]
+            );
           } else {
             const insK = await client.query(
               `INSERT INTO public.kebun (kode_kebun, nama_kebun, wilayah, perusahaan)
@@ -545,7 +557,11 @@ export async function POST(req: NextRequest) {
         for (const feat of ds.features) {
           if (!feat.geometry) continue;
           const geomGeoJson = JSON.stringify(feat.geometry);
-          const propertiesJson = JSON.stringify(feat.properties || {});
+          const propertiesJson = JSON.stringify(
+            enrichFeaturePropertiesFromPopup(
+              (feat.properties || {}) as Record<string, unknown>
+            )
+          );
 
           // Periksa koordinat spasial:
           // Jika koordinat GeoJSON dari shpjs sudah berupa derajat WGS 84 (-180..180 dan -90..90), JANGAN lakukan ST_Transform ulang!

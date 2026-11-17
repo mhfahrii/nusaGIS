@@ -97,7 +97,7 @@ export function GisRibbon({
       </div>
 
       {/* Ribbon Command Groups Area */}
-      <div className="h-18 px-3 py-1 flex items-center gap-4 overflow-x-auto text-[11px]">
+      <div className="h-18 px-3 py-1 flex items-center gap-4 overflow-x-auto text-caption">
         {activeTab === 'Map' && (
           <>
             {/* Group: Navigate */}
@@ -114,7 +114,7 @@ export function GisRibbon({
                   title="Explore / Pan Peta"
                 >
                   <IconPan className="w-4 h-4 mb-0.5" />
-                  <span className="text-[10px] leading-tight">Pan</span>
+                  <span className="text-2xs leading-tight">Pan</span>
                 </button>
 
                 <button
@@ -124,7 +124,7 @@ export function GisRibbon({
                   title="Zoom In (Scroll Mouse ke depan)"
                 >
                   <IconZoomIn className="w-4 h-4 mb-0.5" />
-                  <span className="text-[10px] leading-tight">Zoom In</span>
+                  <span className="text-2xs leading-tight">Zoom In</span>
                 </button>
 
                 <button
@@ -134,7 +134,7 @@ export function GisRibbon({
                   title="Zoom Out (Scroll Mouse ke belakang)"
                 >
                   <IconZoomOut className="w-4 h-4 mb-0.5" />
-                  <span className="text-[10px] leading-tight">Zoom Out</span>
+                  <span className="text-2xs leading-tight">Zoom Out</span>
                 </button>
 
                 <button
@@ -143,7 +143,7 @@ export function GisRibbon({
                   title="Full Extent (Zoom ke seluruh wilayah perkebunan)"
                 >
                   <IconFullExtent className="w-4 h-4 mb-0.5" />
-                  <span className="text-[10px] leading-tight">Full Extent</span>
+                  <span className="text-2xs leading-tight">Full Extent</span>
                 </button>
 
                 <div className="flex flex-col gap-1 ml-0.5">
@@ -165,7 +165,7 @@ export function GisRibbon({
                   </button>
                 </div>
               </div>
-              <span className="text-[9px] uppercase tracking-wider font-semibold text-slate-400">
+              <span className="text-3xs uppercase tracking-wider font-semibold text-slate-400">
                 Navigate
               </span>
             </div>
@@ -180,7 +180,7 @@ export function GisRibbon({
                   title="Add Data / Unggah Shapefile ZIP ke PostGIS"
                 >
                   <IconAddData className="w-4 h-4 mb-0.5 text-emerald-400" />
-                  <span className="text-[10px] leading-tight">Add Data</span>
+                  <span className="text-2xs leading-tight">Add Data</span>
                 </button>
 
                 <button
@@ -189,10 +189,10 @@ export function GisRibbon({
                   title="Pilih Basemap (Satelit / OpenStreetMap / Positron)"
                 >
                   <IconBasemap className="w-4 h-4 mb-0.5 text-emerald-400" />
-                  <span className="text-[10px] leading-tight">Basemap</span>
+                  <span className="text-2xs leading-tight">Basemap</span>
                 </button>
               </div>
-              <span className="text-[9px] uppercase tracking-wider font-semibold text-slate-400">
+              <span className="text-3xs uppercase tracking-wider font-semibold text-slate-400">
                 Layer & Data
               </span>
             </div>
@@ -211,7 +211,7 @@ export function GisRibbon({
                   title="Select Features (Klik fitur pada peta)"
                 >
                   <IconSelect className="w-4 h-4 mb-0.5" />
-                  <span className="text-[10px] leading-tight">Select</span>
+                  <span className="text-2xs leading-tight">Select</span>
                 </button>
 
                 <button
@@ -226,10 +226,10 @@ export function GisRibbon({
                   title="Bersihkan Seleksi Fitur"
                 >
                   <IconClearSelect className="w-4 h-4 mb-0.5" />
-                  <span className="text-[10px] leading-tight">Clear ({selectedCount})</span>
+                  <span className="text-2xs leading-tight">Clear ({selectedCount})</span>
                 </button>
               </div>
-              <span className="text-[9px] uppercase tracking-wider font-semibold text-slate-400">
+              <span className="text-3xs uppercase tracking-wider font-semibold text-slate-400">
                 Selection
               </span>
             </div>
@@ -248,7 +248,7 @@ export function GisRibbon({
                   title="Ukur Jarak dan Luas Geodesik"
                 >
                   <IconMeasure className="w-4 h-4 mb-0.5" />
-                  <span className="text-[10px] leading-tight">Measure</span>
+                  <span className="text-2xs leading-tight">Measure</span>
                 </button>
 
                 <button
@@ -258,10 +258,10 @@ export function GisRibbon({
                   title="Buka / Tutup Tabel Atribut Layer Terpilih"
                 >
                   <IconTable className="w-4 h-4 mb-0.5 text-emerald-400" />
-                  <span className="text-[10px] leading-tight">Attribute</span>
+                  <span className="text-2xs leading-tight">Attribute</span>
                 </button>
               </div>
-              <span className="text-[9px] uppercase tracking-wider font-semibold text-slate-400">
+              <span className="text-3xs uppercase tracking-wider font-semibold text-slate-400">
                 Inquire
               </span>
             </div>
@@ -275,7 +275,7 @@ export function GisRibbon({
                   title="Kelola Data Master Kebun (public.kebun)"
                 >
                   <IconDatabase className="w-4 h-4 mb-0.5 text-emerald-400" />
-                  <span className="text-[10px] leading-tight">Data Kebun</span>
+                  <span className="text-2xs leading-tight">Data Kebun</span>
                 </Link>
 
                 <Link
@@ -284,7 +284,7 @@ export function GisRibbon({
                   title="Kelola Data Master Afdeling"
                 >
                   <IconFolder className="w-4 h-4 mb-0.5 text-blue-400" />
-                  <span className="text-[10px] leading-tight">Afdeling</span>
+                  <span className="text-2xs leading-tight">Afdeling</span>
                 </Link>
 
                 <Link
@@ -293,7 +293,7 @@ export function GisRibbon({
                   title="Kelola Data Master Blok"
                 >
                   <IconLayers className="w-4 h-4 mb-0.5 text-amber-400" />
-                  <span className="text-[10px] leading-tight">Blok</span>
+                  <span className="text-2xs leading-tight">Blok</span>
                 </Link>
 
                 <Link
@@ -302,10 +302,10 @@ export function GisRibbon({
                   title="Halaman Upload Data Spasial GIS (Shapefile ZIP)"
                 >
                   <IconAddData className="w-4 h-4 mb-0.5 text-emerald-400" />
-                  <span className="text-[10px] leading-tight">Upload GIS</span>
+                  <span className="text-2xs leading-tight">Upload GIS</span>
                 </Link>
               </div>
-              <span className="text-[9px] uppercase tracking-wider font-semibold text-slate-400">
+              <span className="text-3xs uppercase tracking-wider font-semibold text-slate-400">
                 Administrasi & Impor
               </span>
             </div>
@@ -333,7 +333,7 @@ export function GisRibbon({
                   title={`${tool.name} (Modul Geoprocessing disiapkan pada Tahap I)`}
                 >
                   <Icon className="w-4 h-4 mb-0.5 text-slate-500" />
-                  <span className="text-[10px] leading-tight text-center truncate w-full">
+                  <span className="text-2xs leading-tight text-center truncate w-full">
                     {tool.name}
                   </span>
                 </button>
@@ -350,7 +350,7 @@ export function GisRibbon({
               title="Simpan Workspace Perkebunan Saat Ini"
             >
               <IconSave className="w-4 h-4 mb-0.5 text-emerald-400" />
-              <span className="text-[10px]">Save</span>
+              <span className="text-2xs">Save</span>
             </button>
             <button
               type="button"
@@ -359,7 +359,7 @@ export function GisRibbon({
               title="Fitur belum tersedia"
             >
               <IconFolder className="w-4 h-4 mb-0.5" />
-              <span className="text-[10px]">Open Project</span>
+              <span className="text-2xs">Open Project</span>
             </button>
           </div>
         )}
@@ -373,7 +373,7 @@ export function GisRibbon({
               title="Fitur belum tersedia"
             >
               <IconGlobe3D className="w-4 h-4 mb-0.5" />
-              <span className="text-[10px]">New Map View</span>
+              <span className="text-2xs">New Map View</span>
             </button>
           </div>
         )}
@@ -386,7 +386,7 @@ export function GisRibbon({
               className="flex flex-col items-center justify-center p-1.5 rounded hover:bg-slate-800 text-slate-300 w-20 h-11"
             >
               <IconTable className="w-4 h-4 mb-0.5 text-emerald-400" />
-              <span className="text-[10px]">Attribute Table</span>
+              <span className="text-2xs">Attribute Table</span>
             </button>
             <button
               type="button"
@@ -394,7 +394,7 @@ export function GisRibbon({
               className="flex flex-col items-center justify-center p-1.5 rounded hover:bg-slate-800 text-slate-300 w-20 h-11"
             >
               <IconLayers className="w-4 h-4 mb-0.5 text-emerald-400" />
-              <span className="text-[10px]">Properties Panel</span>
+              <span className="text-2xs">Properties Panel</span>
             </button>
           </div>
         )}

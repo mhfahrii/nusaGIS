@@ -166,7 +166,7 @@ export function AddDataModal({ isOpen, onClose, onUploadSuccess }: AddDataModalP
   };
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 select-none">
+    <div className="fixed inset-0 z-2000 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 select-none">
       <div className="w-full max-w-lg bg-slate-900 border border-slate-700/80 rounded-xl shadow-2xl overflow-hidden text-slate-100">
         {/* Modal Header */}
         <div className="h-11 px-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
@@ -202,7 +202,7 @@ export function AddDataModal({ isOpen, onClose, onUploadSuccess }: AddDataModalP
               </div>
 
               <div className="space-y-2">
-                <div className="text-[11px] font-semibold text-slate-400 uppercase">
+                <div className="text-caption font-semibold text-slate-400 uppercase">
                   Layer yang Ditambahkan ke Contents & Peta:
                 </div>
                 <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
@@ -218,13 +218,13 @@ export function AddDataModal({ isOpen, onClose, onUploadSuccess }: AddDataModalP
                             style={{ backgroundColor: l.warna }}
                           />
                           <span className="font-semibold text-slate-200">{l.nama_layer}</span>
-                          <span className="text-[10px] text-slate-500">({l.tipe_geometri})</span>
+                          <span className="text-2xs text-slate-500">({l.tipe_geometri})</span>
                         </div>
-                        <span className="font-mono text-[11px] text-emerald-400">
+                        <span className="font-mono text-caption text-emerald-400">
                           {l.jumlah_fitur} fitur
                         </span>
                       </div>
-                      <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                      <div className="flex items-center justify-between text-2xs text-slate-400 font-mono">
                         <span>CRS Asal: {l.crs_asal || 'EPSG:4326'}</span>
                         {l.extent && (
                           <span>
@@ -265,7 +265,7 @@ export function AddDataModal({ isOpen, onClose, onUploadSuccess }: AddDataModalP
                   </label>
                   <Link
                     href="/kebun"
-                    className="text-[11px] text-emerald-400 hover:text-emerald-300 underline"
+                    className="text-caption text-emerald-400 hover:text-emerald-300 underline"
                   >
                     + Kelola Master Kebun
                   </Link>
@@ -303,7 +303,7 @@ export function AddDataModal({ isOpen, onClose, onUploadSuccess }: AddDataModalP
                               .map((f) => f.name)
                               .join(', ') || 'Shapefile'})`}
                       </p>
-                      <p className="text-slate-400 text-[11px] mt-0.5">
+                      <p className="text-slate-400 text-caption mt-0.5">
                         Total Ukuran:{' '}
                         {(
                           files.reduce((acc, f) => acc + f.size, 0) / 1024
@@ -317,7 +317,7 @@ export function AddDataModal({ isOpen, onClose, onUploadSuccess }: AddDataModalP
                         Klik untuk memilih file <span className="text-emerald-400">.ZIP</span> atau{' '}
                         <span className="text-emerald-400">kumpulan file .shp, .dbf, .prj</span>
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-1">
+                      <p className="text-caption text-slate-400 mt-1">
                         Mendukung pemilihan langsung seluruh komponen Shapefile sekaligus (Maks. 50 MB)
                       </p>
                     </div>
@@ -378,7 +378,7 @@ export function AddDataModal({ isOpen, onClose, onUploadSuccess }: AddDataModalP
                 <select
                   value={fallbackCrs}
                   onChange={(e) => setFallbackCrs(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded bg-slate-900 border border-slate-700 text-slate-200 focus:outline-none focus:border-emerald-500 text-[11px]"
+                  className="w-full px-3 py-1.5 rounded bg-slate-900 border border-slate-700 text-slate-200 focus:outline-none focus:border-emerald-500 text-caption"
                 >
                   {CRS_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -386,7 +386,7 @@ export function AddDataModal({ isOpen, onClose, onUploadSuccess }: AddDataModalP
                     </option>
                   ))}
                 </select>
-                <p className="text-[10px] text-slate-400">
+                <p className="text-2xs text-slate-400">
                   Jika file <code>.prj</code> tersedia di dalam ZIP, sistem otomatis membaca WKT CRS
                   masing-masing Shapefile dan mentransformasikannya ke <code>EPSG:4326</code>.
                 </p>

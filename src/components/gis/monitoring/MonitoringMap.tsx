@@ -259,20 +259,20 @@ function SearchResultRow({
     <button
       type="button"
       onClick={() => onSelect(loc)}
-      className="w-full text-left px-3 py-2 hover:bg-[#19233A] transition-colors flex items-start justify-between gap-2 cursor-pointer group border-b border-[#1E2942]/50 last:border-b-0"
+      className="w-full text-left px-3 py-2 hover:bg-bg-surface-hover transition-colors flex items-start justify-between gap-2 cursor-pointer group border-b border-border-subtle/50 last:border-b-0"
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: accent }} />
-          <span className="text-xs font-semibold text-[#F0F6FC] group-hover:text-[#00D2FF] truncate transition-colors">
+          <span className="text-xs font-semibold text-text-primary group-hover:text-accent-primary truncate transition-colors">
             {loc.name}
           </span>
         </div>
         {loc.description && (
-          <div className="text-[10.5px] text-[#8B9BB4] pl-3 truncate leading-tight mt-0.5">{loc.description}</div>
+          <div className="text-2xs text-text-secondary pl-3 truncate leading-tight mt-0.5">{loc.description}</div>
         )}
       </div>
-      <span className="shrink-0 text-[9px] font-semibold text-[#8B9BB4] bg-[#12192B] border border-[#1E2942] px-1.5 py-0.5 rounded">
+      <span className="shrink-0 text-3xs font-semibold text-text-secondary bg-bg-surface border border-border-subtle px-1.5 py-0.5 rounded">
         {loc.badge}
       </span>
     </button>
@@ -1768,10 +1768,10 @@ export function MonitoringMap({
       {/* 1. MAP SEARCH & LOCATION LOCATOR BAR (Pencarian Lokasi Global & Regional Indonesia) */}
       <div
         ref={searchContainerRef}
-        className="absolute top-3 left-3 z-[1000] w-48 sm:w-56 md:w-64 select-text"
+        className="absolute top-3 left-3 z-1000 w-48 sm:w-56 md:w-64 select-text"
       >
-        <div className="relative flex items-center bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] focus-within:border-[#00D2FF] rounded-lg shadow-xl transition-all">
-          <div className="pl-2.5 text-[#00D2FF]">
+        <div className="relative flex items-center bg-bg-nav/95 backdrop-blur-md border border-border-subtle focus-within:border-border-active rounded-lg shadow-xl transition-all">
+          <div className="pl-2.5 text-accent-primary">
             {isSearching ? (
               <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -1796,13 +1796,13 @@ export function MonitoringMap({
               }
             }}
             placeholder="Cari Lokasi..."
-            className="w-full bg-transparent text-[#F0F6FC] placeholder-[#566680] text-xs py-1.5 pl-2 pr-7 focus:outline-none"
+            className="w-full bg-transparent text-text-primary placeholder:text-text-muted text-xs py-1.5 pl-2 pr-7 nusa-focus"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={handleClearLocation}
-              className="absolute right-2.5 p-1 text-[#8B9BB4] hover:text-[#EF4444] rounded transition-colors cursor-pointer"
+              className="absolute right-2.5 p-1 text-text-secondary hover:text-status-danger rounded transition-colors cursor-pointer"
               title="Bersihkan pencarian dan batas wilayah"
             >
               <IconClose className="w-3.5 h-3.5" />
@@ -1812,9 +1812,9 @@ export function MonitoringMap({
 
         {/* Dropdown hasil: data internal dulu, lalu wilayah/alamat */}
         {isSearchDropdownOpen && (
-          <div className="mt-1.5 bg-[#0D1322] border border-[#1E2942] rounded-xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto">
+          <div className="mt-1.5 bg-bg-nav border border-border-subtle rounded-xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto">
             {allSearchResults.length === 0 ? (
-              <div className="p-4 text-center text-xs text-[#566680]">
+              <div className="p-4 text-center text-xs text-text-muted">
                 {isSearching
                   ? 'Mencari…'
                   : 'Tidak ditemukan. Coba tulis bertingkat, misalnya "Kabupaten Bogor, Dramaga".'}
@@ -1823,7 +1823,7 @@ export function MonitoringMap({
               <>
                 {localResults.length > 0 && (
                   <div>
-                    <div className="px-3 py-1.5 bg-[#12192B] border-b border-[#1E2942] text-[10px] font-semibold text-[#8B9BB4] tabular-nums">
+                    <div className="px-3 py-1.5 bg-bg-surface border-b border-border-subtle text-2xs font-semibold text-text-secondary tabular-nums">
                       Data kebun Anda ({localResults.length})
                     </div>
                     {localResults.map((loc) => (
@@ -1833,7 +1833,7 @@ export function MonitoringMap({
                 )}
                 {placeResults.length > 0 && (
                   <div>
-                    <div className="px-3 py-1.5 bg-[#12192B] border-y border-[#1E2942] text-[10px] font-semibold text-[#8B9BB4] tabular-nums">
+                    <div className="px-3 py-1.5 bg-bg-surface border-y border-border-subtle text-2xs font-semibold text-text-secondary tabular-nums">
                       Wilayah &amp; alamat ({placeResults.length})
                     </div>
                     {placeResults.map((loc) => (
@@ -1842,7 +1842,7 @@ export function MonitoringMap({
                   </div>
                 )}
                 {isSearching && (
-                  <div className="px-3 py-1.5 text-[10px] text-[#566680] border-t border-[#1E2942]">Memperbarui hasil…</div>
+                  <div className="px-3 py-1.5 text-2xs text-text-muted border-t border-border-subtle">Memperbarui hasil…</div>
                 )}
               </>
             )}
@@ -1851,21 +1851,21 @@ export function MonitoringMap({
 
         {/* Active Location Banner with 1-Click "Buat Lahan di Sini" */}
         {activeLocationPin && !isDrawingMode && (
-          <div className="mt-2 bg-[#0E3A5D]/95 backdrop-blur-md border border-[#00B4D8] rounded-xl p-2.5 shadow-xl flex items-center justify-between gap-2 text-xs animate-in fade-in slide-in-from-top-1">
+          <div className="mt-2 bg-bg-accent-surface/95 backdrop-blur-md border border-accent-secondary rounded-xl p-2.5 shadow-xl flex items-center justify-between gap-2 text-xs animate-in fade-in slide-in-from-top-1">
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] text-[#7DD3FC] font-bold uppercase tracking-wider flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#00D2FF] animate-pulse" />
+              <div className="text-2xs text-sky-300 font-bold uppercase tracking-wider flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-accent-primary animate-pulse" />
                 <span>{isLoadingBoundary ? 'Memuat batas wilayah…' : 'Peta terarah ke:'}</span>
               </div>
               <div className="font-bold text-white truncate text-xs">{activeLocationPin.name}</div>
-              <div className="text-[10px] text-[#8B9BB4] truncate">{activeLocationPin.description}</div>
+              <div className="text-2xs text-text-secondary truncate">{activeLocationPin.description}</div>
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={handleStartDrawAtLocation}
-                className="bg-[#00D2FF] hover:bg-[#38BDF8] text-[#0A0E1A] font-extrabold px-3 py-1.5 rounded-lg text-xs transition-all shadow-md shadow-[#00D2FF]/20 flex items-center gap-1 cursor-pointer"
+                className="bg-accent-primary hover:brightness-110 text-background font-extrabold px-3 py-1.5 rounded-lg text-xs transition-all shadow-md shadow-accent-primary/20 flex items-center gap-1 cursor-pointer"
                 title="Mulai Digitasi Lahan di Lokasi Ini"
               >
                 <IconPencil className="w-3.5 h-3.5" />
@@ -1874,7 +1874,7 @@ export function MonitoringMap({
               <button
                 type="button"
                 onClick={handleClearLocation}
-                className="p-1 text-[#7DD3FC] hover:text-white rounded hover:bg-[#132238] transition-colors cursor-pointer"
+                className="p-1 text-sky-300 hover:text-white rounded hover:bg-bg-surface-hover transition-colors cursor-pointer"
                 title="Hapus Pin Lokasi"
               >
                 <IconClose className="w-3.5 h-3.5" />
@@ -1886,32 +1886,32 @@ export function MonitoringMap({
 
       {/* Floating Digitize Toolbar (Muncul saat Mode Gambar Lahan Aktif) */}
       {isDrawingMode && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1100] bg-[#0D1322]/95 backdrop-blur-md border border-[#00D2FF] rounded-xl shadow-2xl p-2.5 flex items-center gap-3 animate-in fade-in slide-in-from-top-3">
-          <div className="flex items-center gap-2 pr-3 border-r border-[#1E2942]">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#00D2FF] animate-ping" />
-            <div className="flex items-center gap-1.5 text-xs font-bold text-[#F0F6FC]">
-              <IconPencil className="w-4 h-4 text-[#00D2FF]" />
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-1100 bg-bg-nav/95 backdrop-blur-md border border-border-active rounded-xl shadow-2xl p-2.5 flex items-center gap-3 animate-in fade-in slide-in-from-top-3">
+          <div className="flex items-center gap-2 pr-3 border-r border-border-subtle">
+            <span className="w-2.5 h-2.5 rounded-full bg-accent-primary animate-ping" />
+            <div className="flex items-center gap-1.5 text-xs font-bold text-text-primary">
+              <IconPencil className="w-4 h-4 text-accent-primary" />
               <span>Tool Gambar Lahan</span>
             </div>
           </div>
 
-          <div className="text-[11px] text-[#8B9BB4] flex items-center gap-2">
+          <div className="text-caption text-text-secondary flex items-center gap-2">
             <span>
-              Titik: <strong className="text-[#00D2FF] font-mono tabular-nums">{drawingPoints.length}</strong>
+              Titik: <strong className="text-accent-primary font-mono tabular-nums">{drawingPoints.length}</strong>
             </span>
             {drawingPoints.length >= 3 && (
-              <span className="bg-[#12192B] border border-[#1E2942] px-2 py-0.5 rounded font-mono text-[#00D2FF] tabular-nums">
+              <span className="bg-bg-surface border border-border-subtle px-2 py-0.5 rounded font-mono text-accent-primary tabular-nums">
                 Estimasi Luas: {calculatedAreaHa} Ha
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 pl-2 border-l border-[#1E2942]">
+          <div className="flex items-center gap-1.5 pl-2 border-l border-border-subtle">
             {drawingPoints.length > 0 && (
               <button
                 type="button"
                 onClick={handleUndoPoint}
-                className="px-2.5 py-1 bg-[#12192B] hover:bg-[#19233A] border border-[#1E2942] text-[#8B9BB4] hover:text-[#F0F6FC] rounded text-xs transition-colors cursor-pointer"
+                className="px-2.5 py-1 bg-bg-surface hover:bg-bg-surface-hover border border-border-subtle text-text-secondary hover:text-text-primary rounded text-xs transition-colors cursor-pointer"
                 title="Hapus titik terakhir"
               >
                 Undo Titik
@@ -1920,7 +1920,7 @@ export function MonitoringMap({
             <button
               type="button"
               onClick={handleCancelDrawing}
-              className="px-2.5 py-1 bg-[#12192B] hover:bg-[#19233A] border border-[#1E2942] text-[#8B9BB4] hover:text-[#EF4444] rounded text-xs transition-colors cursor-pointer"
+              className="px-2.5 py-1 bg-bg-surface hover:bg-bg-surface-hover border border-border-subtle text-text-secondary hover:text-status-danger rounded text-xs transition-colors cursor-pointer"
             >
               Batal
             </button>
@@ -1928,7 +1928,7 @@ export function MonitoringMap({
               type="button"
               disabled={drawingPoints.length < 3}
               onClick={handleFinishDrawing}
-              className="px-3.5 py-1 bg-[#00D2FF] hover:bg-[#38BDF8] disabled:opacity-40 text-[#0A0E1A] font-bold rounded text-xs transition-all shadow-md shadow-[#00D2FF]/20 cursor-pointer flex items-center gap-1"
+              className="px-3.5 py-1 bg-accent-primary hover:brightness-110 disabled:opacity-40 text-background font-bold rounded text-xs transition-all shadow-md shadow-accent-primary/20 cursor-pointer flex items-center gap-1"
               title="Tutup poligon dan buka formulir data lahan"
             >
               <IconCheck className="w-3.5 h-3.5" />
@@ -1940,20 +1940,20 @@ export function MonitoringMap({
 
       {/* Top Right Quick Controls Toolbar (Buka / Tutup Collapsible) */}
       {!isToolbarOpen && !isDrawingMode ? (
-        <div className="absolute top-3 right-3 z-[1000]">
+        <div className="absolute top-3 right-3 z-1000">
           <button
             type="button"
             onClick={() => setIsToolbarOpen(true)}
-            className="flex items-center gap-2 bg-[#0D1322]/95 hover:bg-[#12192B] border border-[#1E2942] hover:border-[#00D2FF] text-[#F0F6FC] px-3 py-1.5 rounded-lg shadow-xl text-xs font-semibold backdrop-blur-md transition-all cursor-pointer group"
+            className="flex items-center gap-2 bg-bg-nav/95 hover:bg-bg-surface border border-border-subtle hover:border-border-active text-text-primary px-3 py-1.5 rounded-lg shadow-xl text-xs font-semibold backdrop-blur-md transition-all cursor-pointer group"
             title="Buka Toolbar Kontrol Peta & Gambar Lahan"
           >
-            <IconPencil className="w-3.5 h-3.5 text-[#00D2FF] group-hover:scale-110 transition-transform" />
+            <IconPencil className="w-3.5 h-3.5 text-accent-primary group-hover:scale-110 transition-transform" />
             <span>Kontrol Peta</span>
-            <span className="text-[10px] text-[#00D2FF] bg-[#0E3A5D]/70 px-1.5 py-0.2 rounded font-mono">Buka ▾</span>
+            <span className="text-2xs text-accent-primary bg-bg-accent-surface/70 px-1.5 py-0.2 rounded font-mono">Buka ▾</span>
           </button>
         </div>
       ) : (
-        <div className="absolute top-3 right-3 z-[1000] flex items-center gap-1.5 bg-[#0D1322]/95 backdrop-blur-md p-1 rounded-xl border border-[#1E2942] shadow-2xl animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute top-3 right-3 z-1000 flex items-center gap-1.5 bg-bg-nav/95 backdrop-blur-md p-1 rounded-xl border border-border-subtle shadow-2xl animate-in fade-in zoom-in-95 duration-100">
           {/* Full Extent / Home */}
           <button
             type="button"
@@ -1965,7 +1965,7 @@ export function MonitoringMap({
                 mapRef.current.setView([-7.6668, 112.9125], 15, { animate: true });
               }
             }}
-            className="p-1.5 rounded-md hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors cursor-pointer"
+            className="p-1.5 rounded-md hover:bg-bg-surface text-text-secondary hover:text-accent-primary transition-colors cursor-pointer"
             title="Zoom ke Seluruh Extent Kebun"
           >
             <IconFullExtent className="w-4 h-4" />
@@ -1982,10 +1982,10 @@ export function MonitoringMap({
                 setDrawingPoints([]);
               }
             }}
-            className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2.5 py-1 rounded-md text-2xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
               isDrawingMode
-                ? 'bg-[#00D2FF] border-[#00B4D8] text-[#0A0E1A] font-extrabold shadow-lg shadow-[#00D2FF]/20'
-                : 'bg-[#12192B] border-[#1E2942] text-[#00D2FF] hover:bg-[#19233A] hover:border-[#00D2FF]'
+                ? 'bg-accent-primary border-accent-secondary text-background font-extrabold shadow-lg shadow-accent-primary/20'
+                : 'bg-bg-surface border-border-subtle text-accent-primary hover:bg-bg-surface-hover hover:border-border-active'
             }`}
             title="Klik untuk mengaktifkan Tool Digitasi Poligon Lahan di Peta"
           >
@@ -1999,8 +1999,8 @@ export function MonitoringMap({
             onClick={() => setIsLayersPanelOpen((prev) => !prev)}
             className={`p-1.5 rounded-md transition-colors cursor-pointer flex items-center gap-1 ${
               isLayersPanelOpen
-                ? 'bg-[#132238] border border-[#00D2FF] text-[#00D2FF]'
-                : 'hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#00D2FF]'
+                ? 'bg-bg-surface-hover border border-border-active text-accent-primary'
+                : 'hover:bg-bg-surface text-text-secondary hover:text-accent-primary'
             }`}
             title="Buka Panel Layer & Konten"
           >
@@ -2011,16 +2011,16 @@ export function MonitoringMap({
           <button
             type="button"
             onClick={() => setSymbologyMode((prev) => (prev === 'default' ? 'rkap' : 'default'))}
-            className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2 py-1 rounded-md text-2xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
               symbologyMode === 'rkap'
-                ? 'bg-[#0E3A5D] border-[#00D2FF] text-[#00D2FF] shadow-md shadow-[#00D2FF]/20'
-                : 'bg-[#12192B] border-[#1E2942] text-[#8B9BB4] hover:text-[#F0F6FC]'
+                ? 'bg-bg-accent-surface border-border-active text-accent-primary shadow-md shadow-accent-primary/20'
+                : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-text-primary'
             }`}
             title="Alihkan mode pewarnaan: Warna Asli Layer vs Simbologi Tematik Status Lahan & Luas Blok (ArcGIS Standard)"
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                symbologyMode === 'rkap' ? 'bg-[#10B981] animate-pulse' : 'bg-[#8B9BB4]'
+                symbologyMode === 'rkap' ? 'bg-status-success animate-pulse' : 'bg-text-secondary'
               }`}
             />
             <span>{symbologyMode === 'rkap' ? 'Tema: Status & Luas' : 'Tema: Normal'}</span>
@@ -2030,16 +2030,16 @@ export function MonitoringMap({
           <button
             type="button"
             onClick={() => setIsOutlineOnly((prev) => !prev)}
-            className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
+            className={`px-2 py-1 rounded-md text-2xs font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
               isOutlineOnly
-                ? 'bg-[#0E3A5D] border-[#00B4D8] text-[#7DD3FC] shadow-xs'
-                : 'bg-[#12192B] border-[#1E2942] text-[#8B9BB4] hover:text-[#F0F6FC]'
+                ? 'bg-bg-accent-surface border-accent-secondary text-sky-300 shadow-xs'
+                : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-text-primary'
             }`}
             title="Alihkan antara mode Garis Batas Saja (Outline) dan Isian Berwarna (Fill + Outline) agar citra satelit tembus pandang"
           >
             <span
               className={`w-2 h-2 rounded-xs border ${
-                isOutlineOnly ? 'border-[#7DD3FC] bg-transparent' : 'border-[#00D2FF] bg-[#00D2FF]'
+                isOutlineOnly ? 'border-sky-300 bg-transparent' : 'border-border-active bg-accent-primary'
               }`}
             />
             <span>{isOutlineOnly ? 'Outline Saja' : 'Fill + Outline'}</span>
@@ -2049,10 +2049,10 @@ export function MonitoringMap({
           <button
             type="button"
             onClick={() => setShowLabels((prev) => !prev)}
-            className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-colors cursor-pointer ${
+            className={`px-2 py-1 rounded-md text-2xs font-bold border transition-colors cursor-pointer ${
               showLabels
-                ? 'bg-[#132238] border-[#00D2FF] text-[#00D2FF]'
-                : 'bg-[#12192B] border-[#1E2942] text-[#566680]'
+                ? 'bg-bg-surface-hover border-border-active text-accent-primary'
+                : 'bg-bg-surface border-border-subtle text-text-muted'
             }`}
             title="Tampilkan / Sembunyikan Label Teks pada Peta"
           >
@@ -2064,15 +2064,15 @@ export function MonitoringMap({
             <button
               type="button"
               onClick={() => setIsBasemapMenuOpen((prev) => !prev)}
-              className="p-1.5 rounded-md hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors flex items-center gap-1 cursor-pointer"
+              className="p-1.5 rounded-md hover:bg-bg-surface text-text-secondary hover:text-accent-primary transition-colors flex items-center gap-1 cursor-pointer"
               title="Pilih Peta Dasar (Basemap)"
             >
               <IconBasemap className="w-4 h-4" />
             </button>
 
             {isBasemapMenuOpen && (
-              <div className="absolute right-0 mt-1.5 w-52 bg-[#0D1322] border border-[#1E2942] rounded-xl shadow-2xl p-1 z-[1010] space-y-1">
-                <div className="text-[10px] font-bold text-[#8B9BB4] px-2 py-1 uppercase tracking-wider">
+              <div className="absolute right-0 mt-1.5 w-52 bg-bg-nav border border-border-subtle rounded-xl shadow-2xl p-1 z-1010 space-y-1">
+                <div className="text-2xs font-bold text-text-secondary px-2 py-1 uppercase tracking-wider">
                   Peta Dasar (Basemap)
                 </div>
                 {(Object.keys(BASEMAP_STYLES) as LeafletBasemapKey[]).map((key) => {
@@ -2085,15 +2085,15 @@ export function MonitoringMap({
                       onClick={() => handleSelectBasemap(key)}
                       className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
                         isActive
-                          ? 'bg-[#132238] text-[#00D2FF] font-semibold'
-                          : 'hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#F0F6FC]'
+                          ? 'bg-bg-surface-hover text-accent-primary font-semibold'
+                          : 'hover:bg-bg-surface text-text-secondary hover:text-text-primary'
                       }`}
                     >
                       <div className="min-w-0 pr-2">
                         <div className="truncate font-medium">{s.name}</div>
-                        <div className="text-[10px] text-[#566680] truncate">{s.description}</div>
+                        <div className="text-2xs text-text-muted truncate">{s.description}</div>
                       </div>
-                      {isActive && <span className="text-[#00D2FF] font-bold shrink-0">✓</span>}
+                      {isActive && <span className="text-accent-primary font-bold shrink-0">✓</span>}
                     </button>
                   );
                 })}
@@ -2105,7 +2105,7 @@ export function MonitoringMap({
           <button
             type="button"
             onClick={toggleFullscreen}
-            className="p-1.5 rounded-md hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors cursor-pointer"
+            className="p-1.5 rounded-md hover:bg-bg-surface text-text-secondary hover:text-accent-primary transition-colors cursor-pointer"
             title="Fullscreen Mode"
           >
             <IconFullscreen className="w-4 h-4" />
@@ -2118,7 +2118,7 @@ export function MonitoringMap({
               setIsToolbarOpen(false);
               setIsBasemapMenuOpen(false);
             }}
-            className="px-2 py-1 rounded-md hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#EF4444] transition-colors cursor-pointer border-l border-[#1E2942] ml-0.5 flex items-center gap-1 text-[11px] font-semibold"
+            className="px-2 py-1 rounded-md hover:bg-bg-surface text-text-secondary hover:text-status-danger transition-colors cursor-pointer border-l border-border-subtle ml-0.5 flex items-center gap-1 text-caption font-semibold"
             title="Tutup Toolbar Kontrol"
           >
             <span>✕</span>
@@ -2129,18 +2129,18 @@ export function MonitoringMap({
 
       {/* Floating Layer & Contents Panel */}
       {isLayersPanelOpen && (
-        <div className="absolute top-14 right-3 z-[1000] w-84 bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh] animate-in fade-in slide-in-from-top-2 duration-150">
-          <div className="h-10 px-3.5 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between">
+        <div className="absolute top-14 right-3 z-1000 w-84 bg-bg-nav/95 backdrop-blur-md border border-border-subtle rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-75vh animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="h-10 px-3.5 bg-bg-nav border-b border-border-subtle flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <IconLayers className="w-4 h-4 text-[#00D2FF]" />
-              <span className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
+              <IconLayers className="w-4 h-4 text-accent-primary" />
+              <span className="text-xs font-bold text-text-primary uppercase tracking-wider">
                 Manajemen Layer GIS
               </span>
             </div>
             <button
               type="button"
               onClick={() => setIsLayersPanelOpen(false)}
-              className="p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] cursor-pointer"
+              className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-bg-surface cursor-pointer"
             >
               <IconClose className="w-3.5 h-3.5" />
             </button>
@@ -2149,20 +2149,20 @@ export function MonitoringMap({
           <div className="flex-1 overflow-y-auto p-3 space-y-4">
             {/* Seksi Layer Vektor */}
             <div>
-              <div className="text-[10px] font-bold text-[#8B9BB4] uppercase tracking-wider mb-2 flex items-center justify-between">
+              <div className="text-2xs font-bold text-text-secondary uppercase tracking-wider mb-2 flex items-center justify-between">
                 <span>Layer Vektor ({layers.length})</span>
-                <span className="text-[9px] bg-[#12192B] border border-[#1E2942] px-1.5 py-0.5 rounded text-[#00D2FF] font-mono">
+                <span className="text-3xs bg-bg-surface border border-border-subtle px-1.5 py-0.5 rounded text-accent-primary font-mono">
                   PostGIS
                 </span>
               </div>
               {layers.length === 0 ? (
-                <div className="text-[11px] text-[#566680] py-2 text-center">Belum ada layer vektor</div>
+                <div className="text-caption text-text-muted py-2 text-center">Belum ada layer vektor</div>
               ) : (
                 <div className="space-y-2">
                   {layers.map((l) => (
                     <div
                       key={l.id}
-                      className="bg-[#12192B] border border-[#1E2942] rounded-lg p-2.5 space-y-1.5 text-xs shadow-xs"
+                      className="bg-bg-surface border border-border-subtle rounded-lg p-2.5 space-y-1.5 text-xs shadow-xs"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 min-w-0 pr-2">
@@ -2170,25 +2170,25 @@ export function MonitoringMap({
                             type="checkbox"
                             checked={l.terlihat}
                             onChange={(e) => onToggleLayerVisibility?.(l.id, e.target.checked)}
-                            className="rounded text-[#00D2FF] focus:ring-[#00D2FF] bg-[#0A0E1A] border-[#1E2942] cursor-pointer accent-[#00D2FF]"
+                            className="rounded text-accent-primary focus:ring-accent-primary bg-bg-ground border-border-subtle cursor-pointer accent-accent-primary"
                           />
                           <span
                             className="w-2.5 h-2.5 rounded-full shrink-0"
                             style={{ backgroundColor: l.warna || '#00D2FF' }}
                           />
-                          <span className="truncate text-[#F0F6FC] font-semibold" title={l.nama_layer}>
+                          <span className="truncate text-text-primary font-semibold" title={l.nama_layer}>
                             {l.nama_layer}
                           </span>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-[10px] font-mono text-[#8B9BB4] bg-[#0A0E1A] border border-[#1E2942] px-1.5 py-0.5 rounded tabular-nums">
+                          <span className="text-2xs font-mono text-text-secondary bg-bg-ground border border-border-subtle px-1.5 py-0.5 rounded tabular-nums">
                             {l.jumlah_fitur} fitur
                           </span>
                           {l.bbox && (
                             <button
                               type="button"
                               onClick={() => zoomToBounds(l.bbox!)}
-                              className="p-1 text-[#8B9BB4] hover:text-[#00D2FF] hover:bg-[#19233A] rounded cursor-pointer"
+                              className="p-1 text-text-secondary hover:text-accent-primary hover:bg-bg-surface-hover rounded cursor-pointer"
                               title="Zoom ke Layer"
                             >
                               <IconFullExtent className="w-3 h-3" />
@@ -2198,14 +2198,14 @@ export function MonitoringMap({
                       </div>
 
                       {/* Export Baris Layer */}
-                      <div className="flex items-center justify-between pt-1 border-t border-[#1E2942] text-[10px]">
-                        <span className="text-[#8B9BB4]">Ekspor Layer:</span>
+                      <div className="flex items-center justify-between pt-1 border-t border-border-subtle text-2xs">
+                        <span className="text-text-secondary">Ekspor Layer:</span>
                         <div className="flex items-center gap-1.5">
                           <a
                             href={`/api/gis/export?layer_id=${l.id}&format=geojson`}
                             target="_blank"
                             download={`${l.nama_layer}.geojson`}
-                            className="px-2 py-0.5 rounded bg-[#0E3A5D] hover:bg-[#0E3A5D]/80 text-[#00D2FF] border border-[#00B4D8]/50 font-semibold transition-colors flex items-center gap-1"
+                            className="px-2 py-0.5 rounded bg-bg-accent-surface hover:bg-bg-accent-surface/80 text-accent-primary border border-accent-secondary/50 font-semibold transition-colors flex items-center gap-1"
                           >
                             <IconDownload className="w-3 h-3" />
                             <span>GeoJSON</span>
@@ -2214,7 +2214,7 @@ export function MonitoringMap({
                             href={`/api/gis/export?layer_id=${l.id}&format=kml`}
                             target="_blank"
                             download={`${l.nama_layer}.kml`}
-                            className="px-2 py-0.5 rounded bg-[#132238] hover:bg-[#19233A] text-[#7DD3FC] border border-[#1E2942] font-semibold transition-colors flex items-center gap-1"
+                            className="px-2 py-0.5 rounded bg-bg-surface-hover hover:bg-bg-surface-hover text-sky-300 border border-border-subtle font-semibold transition-colors flex items-center gap-1"
                           >
                             <IconDownload className="w-3 h-3" />
                             <span>KML</span>
@@ -2229,14 +2229,14 @@ export function MonitoringMap({
 
             {/* Seksi Layer Raster */}
             <div>
-              <div className="text-[10px] font-bold text-[#F59E0B] uppercase tracking-wider mb-2 flex items-center justify-between">
+              <div className="text-2xs font-bold text-status-warning uppercase tracking-wider mb-2 flex items-center justify-between">
                 <span>Layer Raster ({rasterLayers.length})</span>
-                <span className="text-[9px] bg-amber-950/80 text-amber-300 border border-amber-800/60 px-1.5 py-0.5 rounded font-mono">
+                <span className="text-3xs bg-amber-950/80 text-amber-300 border border-amber-800/60 px-1.5 py-0.5 rounded font-mono">
                   GeoTIFF
                 </span>
               </div>
               {rasterLayers.length === 0 ? (
-                <div className="text-[11px] text-[#566680] py-2 text-center">
+                <div className="text-caption text-text-muted py-2 text-center">
                   Belum ada layer raster GeoTIFF
                 </div>
               ) : (
@@ -2244,7 +2244,7 @@ export function MonitoringMap({
                   {rasterLayers.map((r) => (
                     <div
                       key={r.id}
-                      className="bg-[#12192B] border border-[#1E2942] rounded-lg p-2.5 space-y-2 shadow-xs"
+                      className="bg-bg-surface border border-border-subtle rounded-lg p-2.5 space-y-2 shadow-xs"
                     >
                       <div className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2 min-w-0 pr-2">
@@ -2252,21 +2252,21 @@ export function MonitoringMap({
                             type="checkbox"
                             checked={r.terlihat}
                             onChange={(e) => onToggleRasterVisibility?.(r.id, e.target.checked)}
-                            className="rounded text-amber-500 focus:ring-amber-500 bg-[#0A0E1A] border-[#1E2942] cursor-pointer"
+                            className="rounded text-amber-500 focus:ring-amber-500 bg-bg-ground border-border-subtle cursor-pointer"
                           />
-                          <span className="truncate text-[#F0F6FC] font-semibold" title={r.nama_layer}>
+                          <span className="truncate text-text-primary font-semibold" title={r.nama_layer}>
                             {r.nama_layer}
                           </span>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
+                          <span className="text-3xs font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">
                             {r.tipe_raster}
                           </span>
                           {r.bbox && (
                             <button
                               type="button"
                               onClick={() => zoomToBounds(r.bbox!)}
-                              className="p-1 text-[#8B9BB4] hover:text-[#00D2FF] hover:bg-[#19233A] rounded cursor-pointer"
+                              className="p-1 text-text-secondary hover:text-accent-primary hover:bg-bg-surface-hover rounded cursor-pointer"
                               title="Zoom ke Citra Raster"
                             >
                               <IconFullExtent className="w-3 h-3" />
@@ -2276,7 +2276,7 @@ export function MonitoringMap({
                       </div>
 
                       {/* Slider Opasitas Transparansi */}
-                      <div className="flex items-center gap-2 text-[10px] text-[#8B9BB4] pt-1">
+                      <div className="flex items-center gap-2 text-2xs text-text-secondary pt-1">
                         <span className="shrink-0">Opasitas:</span>
                         <input
                           type="range"
@@ -2285,9 +2285,9 @@ export function MonitoringMap({
                           step="0.05"
                           value={r.transparansi ?? 0.85}
                           onChange={(e) => onChangeRasterOpacity?.(r.id, parseFloat(e.target.value))}
-                          className="flex-1 accent-[#00D2FF] h-1 bg-[#0A0E1A] rounded-lg cursor-pointer"
+                          className="flex-1 accent-accent-primary h-1 bg-bg-ground rounded-lg cursor-pointer"
                         />
-                        <span className="font-mono w-7 text-right tabular-nums text-[#F0F6FC]">
+                        <span className="font-mono w-7 text-right tabular-nums text-text-primary">
                           {Math.round((r.transparansi ?? 0.85) * 100)}%
                         </span>
                       </div>
@@ -2302,46 +2302,46 @@ export function MonitoringMap({
 
       {/* Indikator Inspeksi / Sinkronisasi */}
       {loadingLayers && (
-        <div className="absolute top-3 left-3 z-[1000] bg-slate-900/90 border border-slate-800 text-emerald-300 px-2.5 py-1 rounded-md text-[11px] font-medium flex items-center gap-2 shadow-lg">
+        <div className="absolute top-3 left-3 z-1000 bg-slate-900/90 border border-slate-800 text-emerald-300 px-2.5 py-1 rounded-md text-caption font-medium flex items-center gap-2 shadow-lg">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
           <span>Memuat geometri PostGIS...</span>
         </div>
       )}
 
       {inspectingPixel && (
-        <div className="absolute top-12 left-3 z-[1000] bg-slate-900/90 border border-amber-800 text-amber-300 px-2.5 py-1 rounded-md text-[11px] font-medium flex items-center gap-2 shadow-lg">
+        <div className="absolute top-12 left-3 z-1000 bg-slate-900/90 border border-amber-800 text-amber-300 px-2.5 py-1 rounded-md text-caption font-medium flex items-center gap-2 shadow-lg">
           <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
           <span>Menginspeksi nilai piksel GeoTIFF...</span>
         </div>
       )}
 
       {/* ArcGIS Standalone Legend Panel (Pojok Kiri Bawah) */}
-      <div className="absolute bottom-6 left-3 z-[1000] pointer-events-auto select-none transition-all">
+      <div className="absolute bottom-6 left-3 z-1000 pointer-events-auto select-none transition-all">
         {!isLegendOpen ? (
           <button
             type="button"
             onClick={() => setIsLegendOpen(true)}
-            className="flex items-center gap-1.5 bg-[#0D1322]/95 hover:bg-[#12192B] border border-[#1E2942] hover:border-[#00D2FF] text-[#F0F6FC] px-2.5 py-1.5 rounded-lg shadow-xl text-xs font-semibold backdrop-blur-md transition-all cursor-pointer group"
+            className="flex items-center gap-1.5 bg-bg-nav/95 hover:bg-bg-surface border border-border-subtle hover:border-border-active text-text-primary px-2.5 py-1.5 rounded-lg shadow-xl text-xs font-semibold backdrop-blur-md transition-all cursor-pointer group"
             title="Buka Legenda Peta (ArcGIS Legend)"
           >
-            <span className="w-2.5 h-2.5 rounded-xs bg-[#00D2FF] group-hover:scale-110 transition-transform" />
-            <span className="text-[11px]">Legenda</span>
-            <span className="text-[10px] text-[#00D2FF] font-mono">▲</span>
+            <span className="w-2.5 h-2.5 rounded-xs bg-accent-primary group-hover:scale-110 transition-transform" />
+            <span className="text-caption">Legenda</span>
+            <span className="text-2xs text-accent-primary font-mono">▲</span>
           </button>
         ) : (
-          <div className="w-64 bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] rounded-xl shadow-2xl p-3 text-[#F0F6FC] space-y-2.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
+          <div className="w-64 bg-bg-nav/95 backdrop-blur-md border border-border-subtle rounded-xl shadow-2xl p-3 text-text-primary space-y-2.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
             {/* Header Legenda */}
-            <div className="flex items-center justify-between pb-2 border-b border-[#1E2942]">
+            <div className="flex items-center justify-between pb-2 border-b border-border-subtle">
               <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#00D2FF]" />
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#F0F6FC]">
+                <span className="w-2 h-2 rounded-full bg-accent-primary" />
+                <span className="text-caption font-bold uppercase tracking-wider text-text-primary">
                   {symbologyMode === 'rkap' ? 'Legenda Status & Luas' : 'Legenda Layer GIS'}
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => setIsLegendOpen(false)}
-                className="text-[#8B9BB4] hover:text-[#EF4444] text-xs px-1 rounded hover:bg-[#12192B] transition-colors cursor-pointer"
+                className="text-text-secondary hover:text-status-danger text-xs px-1 rounded hover:bg-bg-surface transition-colors cursor-pointer"
                 title="Sembunyikan Legenda"
               >
                 ✕
@@ -2351,39 +2351,39 @@ export function MonitoringMap({
             {/* Konten Simbol Legenda */}
             {symbologyMode === 'rkap' ? (
               <div className="space-y-1.5 text-xs">
-                <div className="flex items-center justify-between p-1 rounded hover:bg-[#12192B]">
+                <div className="flex items-center justify-between p-1 rounded hover:bg-bg-surface">
                   <div className="flex items-center gap-2">
-                    <span className="w-3.5 h-3.5 rounded-xs border border-white/40 bg-[#10B981] shadow-xs" />
-                    <span className="text-[11px] text-[#F0F6FC] font-medium">KTG · Tebu Giling</span>
+                    <span className="w-3.5 h-3.5 rounded-xs border border-white/40 bg-status-success shadow-xs" />
+                    <span className="text-caption text-text-primary font-medium">KTG · Tebu Giling</span>
                   </div>
-                  <span className="text-[10px] font-mono text-[#10B981] font-bold tabular-nums">
+                  <span className="text-2xs font-mono text-status-success font-bold tabular-nums">
                     {legendCounts.optimal} blok
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between p-1 rounded hover:bg-[#12192B]">
+                <div className="flex items-center justify-between p-1 rounded hover:bg-bg-surface">
                   <div className="flex items-center gap-2">
-                    <span className="w-3.5 h-3.5 rounded-xs border border-white/40 bg-[#00D2FF] shadow-xs" />
-                    <span className="text-[11px] text-[#F0F6FC] font-medium">KS GPA (≥ 1,50 Ha)</span>
+                    <span className="w-3.5 h-3.5 rounded-xs border border-white/40 bg-accent-primary shadow-xs" />
+                    <span className="text-caption text-text-primary font-medium">KS GPA (≥ 1,50 Ha)</span>
                   </div>
-                  <span className="text-[10px] font-mono text-[#00D2FF] font-bold tabular-nums">
+                  <span className="text-2xs font-mono text-accent-primary font-bold tabular-nums">
                     {legendCounts.warning} blok
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between p-1 rounded hover:bg-[#12192B]">
+                <div className="flex items-center justify-between p-1 rounded hover:bg-bg-surface">
                   <div className="flex items-center gap-2">
-                    <span className="w-3.5 h-3.5 rounded-xs border border-white/40 bg-[#F59E0B] shadow-xs" />
-                    <span className="text-[11px] text-[#F0F6FC] font-medium">KS GPA (&lt; 1,50 Ha)</span>
+                    <span className="w-3.5 h-3.5 rounded-xs border border-white/40 bg-status-warning shadow-xs" />
+                    <span className="text-caption text-text-primary font-medium">KS GPA (&lt; 1,50 Ha)</span>
                   </div>
-                  <span className="text-[10px] font-mono text-[#F59E0B] font-bold tabular-nums">
+                  <span className="text-2xs font-mono text-status-warning font-bold tabular-nums">
                     {legendCounts.critical} blok
                   </span>
                 </div>
 
-                <div className="pt-1.5 border-t border-[#1E2942]/60 flex items-center justify-between text-[10px] text-[#8B9BB4]">
+                <div className="pt-1.5 border-t border-border-subtle/60 flex items-center justify-between text-2xs text-text-secondary">
                   <span>Total Unit Terpetakan</span>
-                  <span className="font-mono font-bold text-[#00D2FF] tabular-nums">
+                  <span className="font-mono font-bold text-accent-primary tabular-nums">
                     {legendCounts.total} Poligon
                   </span>
                 </div>
@@ -2391,18 +2391,18 @@ export function MonitoringMap({
             ) : (
               <div className="space-y-1.5 text-xs">
                 <div className="flex items-center gap-2 p-1">
-                  <span className="w-3.5 h-3.5 rounded-xs border border-white/30 bg-[#BE185D]" />
-                  <span className="text-[11px] text-[#F0F6FC]">Batas Kebun (Induk)</span>
+                  <span className="w-3.5 h-3.5 rounded-xs border border-white/30 bg-rose-700" />
+                  <span className="text-caption text-text-primary">Batas Kebun (Induk)</span>
                 </div>
                 <div className="flex items-center gap-2 p-1">
-                  <span className="w-3.5 h-3.5 rounded-xs border border-white/30 bg-[#65A30D]" />
-                  <span className="text-[11px] text-[#F0F6FC]">Batas Afdeling</span>
+                  <span className="w-3.5 h-3.5 rounded-xs border border-white/30 bg-lime-600" />
+                  <span className="text-caption text-text-primary">Batas Afdeling</span>
                 </div>
                 <div className="flex items-center gap-2 p-1">
-                  <span className="w-3.5 h-3.5 rounded-xs border border-white/30 bg-[#15803D]" />
-                  <span className="text-[11px] text-[#F0F6FC]">Batas Blok Lahan</span>
+                  <span className="w-3.5 h-3.5 rounded-xs border border-white/30 bg-green-700" />
+                  <span className="text-caption text-text-primary">Batas Blok Lahan</span>
                 </div>
-                <div className="pt-1.5 border-t border-[#1E2942]/60 text-[9.5px] text-[#8B9BB4] leading-tight">
+                <div className="pt-1.5 border-t border-border-subtle/60 text-3xs text-text-secondary leading-tight">
                   Aktifkan tombol <strong>Tema: Status &amp; Luas</strong> di menu atas untuk simbologi tematik sesuai atribut shapefile.
                 </div>
               </div>

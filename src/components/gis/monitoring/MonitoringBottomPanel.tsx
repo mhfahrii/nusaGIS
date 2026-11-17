@@ -8,6 +8,9 @@ import {
   IconSearch,
   IconZoomTo,
   IconDownload,
+  IconMap,
+  IconGlobe3D,
+  IconLayers,
 } from '../GisIcons';
 import type { LayerPeta, MonitoringStats } from '@/types/gis';
 import { ShapefileInsightPanel } from './ShapefileInsightPanel';
@@ -137,6 +140,7 @@ export function MonitoringBottomPanel({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Ambil record fitur yang sedang dipilih
   const selectedRecord = records.find((r) => r.id === selectedFeatureId);
@@ -167,14 +171,29 @@ export function MonitoringBottomPanel({
         }
 
         const res = await fetch(`/api/gis/features?${params.toString()}`);
-        if (res.ok && !ignore) {
-          const json = await res.json();
-          setColumns(json.columns || []);
-          setRecords(json.data || []);
-          setTotalRecords(Number(json.total || 0));
+        if (!ignore) {
+          if (res.ok) {
+            const json = await res.json();
+            setColumns(json.columns || []);
+            setRecords(json.data || []);
+            setTotalRecords(Number(json.total || 0));
+            setLoadError(null);
+          } else {
+            const json = await res.json().catch(() => ({}));
+            setLoadError(
+              (json as { message?: string }).message || 'Gagal memuat atribut layer.'
+            );
+            setRecords([]);
+            setColumns([]);
+            setTotalRecords(0);
+          }
         }
       } catch (err) {
         console.error('Fetch attributes error:', err);
+        if (!ignore) {
+          setLoadError('Koneksi gagal saat memuat atribut.');
+          setRecords([]);
+        }
       } finally {
         if (!ignore) setLoading(false);
       }
@@ -281,25 +300,25 @@ export function MonitoringBottomPanel({
   // State tertutup (Collapsible Bar di bawah layar)
   if (!isOpen) {
     return (
-      <div className="h-9 bg-[#0D1322] border-t border-[#1E2942] flex items-center justify-between px-4 select-none shrink-0 z-20">
+      <div className="h-9 bg-bg-nav border-t border-border-subtle flex items-center justify-between px-4 select-none shrink-0 z-20">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onToggle}
-            className="flex items-center gap-1.5 text-xs font-bold text-[#F0F6FC] hover:text-[#00D2FF] transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 text-xs font-bold text-text-primary hover:text-accent-primary transition-colors cursor-pointer"
           >
-            <IconChevronUp className="w-4 h-4 text-[#00D2FF]" />
+            <IconChevronUp className="w-4 h-4 text-accent-primary" />
             <span>Analisis Atribut Shapefile ({activeScope.label})</span>
           </button>
-          <span className="text-[10px] text-[#8B9BB4] font-mono hidden sm:inline tabular-nums">
-            Luas Ukur GIS: <strong className="text-[#00D2FF]">{activeScope.luasHa} Ha</strong>
+          <span className="text-2xs text-text-secondary font-mono hidden sm:inline tabular-nums">
+            Luas Ukur GIS: <strong className="text-accent-primary">{activeScope.luasHa} Ha</strong>
           </span>
         </div>
 
         <button
           type="button"
           onClick={onToggle}
-          className="p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
+          className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors cursor-pointer"
           title="Buka Panel Visualisasi"
         >
           <IconChevronUp className="w-4 h-4" />
@@ -309,30 +328,39 @@ export function MonitoringBottomPanel({
   }
 
   return (
-    <div className="h-64 sm:h-72 bg-[#0D1322] border-t border-[#1E2942] flex flex-col select-none shrink-0 z-20 shadow-2xl overflow-hidden text-[#F0F6FC]">
+    <div
+      data-nusa-chrome
+      className="h-48 sm:h-64 md:h-72 bg-bg-nav border-t border-border-subtle flex flex-col select-none shrink-0 z-20 overflow-hidden text-text-primary"
+    >
       {/* 1. TOP HEADER PANEL BAWAH: Judul Analitik & Scope Wilayah */}
-      <div className="h-9 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between shrink-0">
+      <div className="h-9 px-4 bg-bg-nav border-b border-border-subtle flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#00D2FF] animate-pulse" />
-            <h4 className="text-xs font-bold text-[#F0F6FC] tracking-tight">
-              Analisis Atribut Shapefile: {layers.find((l) => l.id === selectedLayerId)?.nama_layer || 'Semua Layer Aktif'}
+            <span className="w-2 h-2 rounded-full bg-accent-primary" aria-hidden />
+            <h4 className="text-xs font-bold text-text-primary tracking-tight">
+              Analisis atribut: {layers.find((l) => l.id === selectedLayerId)?.nama_layer || 'Semua layer aktif'}
             </h4>
           </div>
 
           {/* Badge Indikator Wilayah Aktif */}
-          <div className="flex items-center gap-1.5 bg-[#0A0E1A] border border-[#1E2942] px-2.5 py-0.5 rounded-full text-[10px]">
-            <span className="text-[#00D2FF] font-bold">
-              {activeScope.type === 'blok' ? '📍' : activeScope.type === 'afdeling' ? '🏢' : '🌐'}
+          <div className="flex items-center gap-1.5 bg-bg-ground border border-border-subtle px-2.5 py-0.5 rounded-full text-2xs">
+            <span className="text-status-success flex items-center" aria-hidden>
+              {activeScope.type === 'blok' ? (
+                <IconMap className="w-3.5 h-3.5" />
+              ) : activeScope.type === 'afdeling' ? (
+                <IconLayers className="w-3.5 h-3.5" />
+              ) : (
+                <IconGlobe3D className="w-3.5 h-3.5" />
+              )}
             </span>
-            <span className="font-semibold text-[#F0F6FC] truncate max-w-[200px]">
+            <span className="font-semibold text-text-primary truncate max-w-50">
               {activeScope.title}
             </span>
             {selectedFeatureId && (
               <button
                 type="button"
                 onClick={() => onSelectFeature(null)}
-                className="ml-1 text-[10px] text-[#00D2FF] hover:underline cursor-pointer"
+                className="ml-1 text-2xs text-accent-primary hover:underline cursor-pointer"
                 title="Batalkan pilihan blok & tampilkan semua afdeling"
               >
                 (Reset ke Semua)
@@ -343,14 +371,14 @@ export function MonitoringBottomPanel({
 
         {/* Tab Switcher: Grafik vs Tabel Atribut & Tombol Tutup */}
         <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-md bg-[#0A0E1A] border border-[#1E2942] p-0.5 text-[11px]">
+          <div className="inline-flex rounded-md bg-bg-ground border border-border-subtle p-0.5 text-caption">
             <button
               type="button"
               onClick={() => setPanelView('chart')}
-              className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+              className={`px-2.5 py-0.5 rounded text-2xs font-bold transition-all cursor-pointer ${
                 panelView === 'chart'
-                  ? 'bg-[#00D2FF] text-[#0A0E1A] shadow-xs'
-                  : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
+                  ? 'bg-accent-primary text-background shadow-xs'
+                  : 'text-text-secondary hover:text-text-primary'
               }`}
             >
               Visualisasi Grafik
@@ -358,10 +386,10 @@ export function MonitoringBottomPanel({
             <button
               type="button"
               onClick={() => setPanelView('table')}
-              className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+              className={`px-2.5 py-0.5 rounded text-2xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
                 panelView === 'table'
-                  ? 'bg-[#00D2FF] text-[#0A0E1A] shadow-xs'
-                  : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
+                  ? 'bg-accent-primary text-background shadow-xs'
+                  : 'text-text-secondary hover:text-text-primary'
               }`}
             >
               <IconTable className="w-3 h-3" />
@@ -372,7 +400,7 @@ export function MonitoringBottomPanel({
           <button
             type="button"
             onClick={onToggle}
-            className="p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
+            className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors cursor-pointer"
             title="Kecilkan Panel Bawah"
           >
             <IconChevronDown className="w-4 h-4" />
@@ -395,25 +423,25 @@ export function MonitoringBottomPanel({
       ) : (
         /* 4. TAMPILAN TABEL ATRIBUT (Bila Pengguna Memilih Tab Tabel) */
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-          <div className="h-9 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between text-xs">
+          <div className="h-9 px-4 bg-bg-nav border-b border-border-subtle flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-[#F0F6FC]">
+              <span className="font-bold text-text-primary">
                 Layer: {layers.find((l) => l.id === selectedLayerId)?.nama_layer || 'Pilih Layer'}
               </span>
-              <span className="text-[10px] text-[#8B9BB4] font-mono tabular-nums">
+              <span className="text-2xs text-text-secondary font-mono tabular-nums">
                 ({totalRecords} baris fitur)
               </span>
             </div>
 
             <div className="flex items-center gap-2">
               <div className="relative w-36">
-                <IconSearch className="w-3 h-3 text-[#566680] absolute left-2 top-1.5 pointer-events-none" />
+                <IconSearch className="w-3 h-3 text-text-muted absolute left-2 top-1.5 pointer-events-none" />
                 <input
                   type="text"
                   placeholder="Cari atribut..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-[#0A0E1A] border border-[#1E2942] rounded pl-6 pr-2 py-0.5 text-[10px] text-[#F0F6FC] placeholder-[#566680] focus:outline-none focus:border-[#00D2FF]"
+                  className="w-full bg-bg-ground border border-border-subtle rounded pl-6 pr-2 py-0.5 text-2xs text-text-primary placeholder:text-text-muted nusa-focus focus:border-border-active"
                 />
               </div>
 
@@ -421,7 +449,7 @@ export function MonitoringBottomPanel({
                 type="button"
                 onClick={exportCsv}
                 disabled={records.length === 0}
-                className="px-2.5 py-0.5 rounded text-[10px] font-bold border bg-[#12192B] border-[#1E2942] text-[#00D2FF] hover:bg-[#19233A] transition-colors flex items-center gap-1 cursor-pointer"
+                className="px-2.5 py-0.5 rounded text-2xs font-bold border bg-bg-surface border-border-subtle text-accent-primary hover:bg-bg-surface-hover transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <IconDownload className="w-3 h-3" />
                 <span>Export CSV</span>
@@ -461,7 +489,7 @@ export function MonitoringBottomPanel({
                       alert('Gagal menghubungi server.');
                     }
                   }}
-                  className="px-2.5 py-0.5 rounded text-[10px] font-bold border border-rose-800 bg-rose-950/70 text-rose-300 hover:bg-rose-900 transition-colors flex items-center gap-1 cursor-pointer"
+                  className="px-2.5 py-0.5 rounded text-2xs font-bold border border-rose-800 bg-rose-950/70 text-rose-300 hover:bg-rose-900 transition-colors flex items-center gap-1 cursor-pointer"
                   title="Hapus baris lahan terpilih dari database"
                 >
                   <svg
@@ -483,14 +511,18 @@ export function MonitoringBottomPanel({
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto bg-[#0A0E1A]">
+          <div className="flex-1 min-h-0 overflow-auto nusa-scroll bg-bg-ground">
             {records.length === 0 ? (
-              <div className="p-8 text-center text-xs text-[#566680] italic">
-                {loading ? 'Memuat data atribut...' : 'Tidak ada data atribut pada layer ini.'}
+              <div className="p-8 text-center text-xs text-text-muted italic">
+                {loading
+                  ? 'Memuat data atribut...'
+                  : loadError
+                    ? loadError
+                    : 'Tidak ada data atribut pada layer ini.'}
               </div>
             ) : (
-              <table className="w-full text-left text-[11px] border-collapse font-sans">
-                <thead className="bg-[#0D1322] sticky top-0 z-10 text-[#8B9BB4] font-semibold border-b border-[#1E2942] text-[10px] uppercase">
+              <table className="w-full text-left text-caption border-collapse font-sans">
+                <thead className="bg-bg-nav sticky top-0 z-10 text-text-secondary font-semibold border-b border-border-subtle text-2xs uppercase">
                   <tr>
                     <th className="py-1.5 px-3 w-8">#</th>
                     {columns
@@ -502,7 +534,7 @@ export function MonitoringBottomPanel({
                       ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#1E2942]/60 font-mono text-[10px] tabular-nums">
+                <tbody className="divide-y divide-border-subtle/60 font-mono text-2xs tabular-nums">
                   {records.map((r, idx) => {
                     const isSelected = r.id === selectedFeatureId;
                     return (
@@ -516,17 +548,17 @@ export function MonitoringBottomPanel({
                         }}
                         className={`cursor-pointer transition-colors ${
                           isSelected
-                            ? 'bg-[#132238] text-[#00D2FF] font-bold'
+                            ? 'bg-bg-surface-hover text-accent-primary font-bold'
                             : idx % 2 === 0
-                            ? 'bg-[#0A0E1A] hover:bg-[#19233A]'
-                            : 'bg-[#12192B]/50 hover:bg-[#19233A]'
+                            ? 'bg-bg-ground hover:bg-bg-surface-hover'
+                            : 'bg-bg-surface/50 hover:bg-bg-surface-hover'
                         }`}
                       >
-                        <td className="py-1.5 px-3 text-[#566680] font-sans">{idx + 1}</td>
+                        <td className="py-1.5 px-3 text-text-muted font-sans">{idx + 1}</td>
                         {columns
                           .filter((c) => !c.startsWith('_'))
                           .map((col) => (
-                            <td key={col} className="py-1.5 px-3 whitespace-nowrap text-[#F0F6FC]">
+                            <td key={col} className="py-1.5 px-3 whitespace-nowrap text-text-primary">
                               {String(r[col] ?? '-')}
                             </td>
                           ))}
