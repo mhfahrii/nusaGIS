@@ -2,6 +2,7 @@ export interface Kebun {
   id: string | number;
   kode_kebun: string;
   nama_kebun: string;
+  perusahaan?: string | null;
   wilayah: string | null;
   komoditas: string | null;
   keterangan: string | null;

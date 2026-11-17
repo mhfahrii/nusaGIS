@@ -175,10 +175,10 @@ export async function DELETE(req: NextRequest) {
       `Fitur #${id}`
     );
 
-    // 2. Soft Delete: Tandai fitur sebagai terhapus tanpa menghapus data spasial fisik
+    // 2. Soft Delete: Tandai fitur sebagai terhapus tanpa menghapus data spasial fisik (Audit Trail)
     await query(
-      'UPDATE public.fitur_peta SET is_deleted = TRUE, dihapus_pada = NOW() WHERE id = $1',
-      [id]
+      'UPDATE public.fitur_peta SET is_deleted = TRUE, dihapus_pada = NOW(), dihapus_oleh_user_id = $2 WHERE id = $1',
+      [id, auth.user.id]
     );
 
     // 3. Update jumlah fitur aktif di layer_peta

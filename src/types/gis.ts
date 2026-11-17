@@ -41,6 +41,8 @@ export interface LayerPeta {
   srid_asal?: number | null;
   nama_kebun?: string | null;
   kode_kebun?: string | null;
+  wilayah?: string | null;
+  perusahaan?: string | null;
   nama_dataset?: string | null;
   dibuat_pada: string;
   bbox?: [number, number, number, number] | null; // [west, south, east, north]
@@ -59,10 +61,12 @@ export interface FiturPetaRow {
 export interface ExtractedShapefile {
   layerName: string;
   shapefileName: string;
+  folderName?: string;
   geometryType: string;
   featureCount: number;
   crsAsal: string;
   sridAsal: number | null;
+  isPrjMissing?: boolean;
   features: Array<{
     geometry: Geometry;
     properties: GeoJsonProperties;
@@ -97,12 +101,17 @@ export interface DetectedDataset {
   index: number;
   name: string;
   sourceFileName: string;
+  folderName?: string;
+  suggestedKebunName?: string;
+  suggestedWilayah?: string;
+  suggestedAfdelingName?: string;
   format: 'shapefile' | 'geojson' | 'geotiff';
   geometryType: string;
   featureCount: number;
   crsAsal: string;
   sridAsal: number | null;
   needsCrsSelection: boolean;
+  isPrjMissing?: boolean;
   attributes: string[];
   sampleProperties: Record<string, unknown>[];
   bbox: [number, number, number, number] | null;
@@ -120,10 +129,16 @@ export interface DetectedDataset {
 
 export interface LayerMappingInput {
   datasetIndex: number;
+  selected?: boolean;
   nama_layer: string;
   kategori: string;
-  kebun_id: number;
+  kebun_id?: number | null;
+  is_new_kebun?: boolean;
+  new_kebun_nama?: string | null;
+  new_kebun_wilayah?: string | null;
+  new_kebun_perusahaan?: string | null;
   afdeling_id?: number | null;
+  new_afdeling_nama?: string | null;
   blok_id?: number | null;
   fallback_crs?: string | null;
 }
@@ -195,6 +210,8 @@ export interface LayerRaster {
   dibuat_pada: string;
   nama_kebun?: string | null;
   kode_kebun?: string | null;
+  wilayah?: string | null;
+  perusahaan?: string | null;
   nama_dataset?: string | null;
   bbox?: [number, number, number, number] | null; // [west, south, east, north]
   extent?: ExtentBox | null;

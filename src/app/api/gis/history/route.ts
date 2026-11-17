@@ -145,12 +145,13 @@ export async function POST(req: NextRequest) {
         `Fitur #${id}`
       );
 
-      // Pulihkan fitur
+      // Pulihkan fitur dengan audit trail pengguna
       await query(
         `UPDATE public.fitur_peta 
-         SET is_deleted = FALSE, dihapus_pada = NULL 
+         SET is_deleted = FALSE, dihapus_pada = NULL, dihapus_oleh_user_id = NULL,
+             diubah_pada = NOW(), diubah_oleh_user_id = $2
          WHERE id = $1`,
-        [id]
+        [id, auth.user.id]
       );
 
       // Sinkronisasi jumlah fitur di layer
@@ -192,13 +193,14 @@ export async function POST(req: NextRequest) {
 
       let updateQuery = `
         UPDATE public.fitur_peta 
-        SET is_deleted = FALSE, dihapus_pada = NULL 
+        SET is_deleted = FALSE, dihapus_pada = NULL, dihapus_oleh_user_id = NULL,
+            diubah_pada = NOW(), diubah_oleh_user_id = $1
         WHERE COALESCE(is_deleted, FALSE) = TRUE
       `;
-      const params: unknown[] = [];
+      const params: unknown[] = [auth.user.id];
 
       if (targetIds) {
-        updateQuery += ` AND id = ANY($1::bigint[])`;
+        updateQuery += ` AND id = ANY($2::bigint[])`;
         params.push(targetIds);
       }
 

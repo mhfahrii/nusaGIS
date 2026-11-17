@@ -10,6 +10,10 @@ interface CreateFeatureBody {
   kebun_id?: number | null;
   afdeling_id?: number | null;
   blok_id?: number | null;
+  new_kebun_nama?: string | null;
+  new_kebun_wilayah?: string | null;
+  new_kebun_perusahaan?: string | null;
+  new_afdeling_nama?: string | null;
   komoditas?: string;
   tahun_tanam?: number | string | null;
   status_lahan?: string;
@@ -99,22 +103,86 @@ export async function POST(req: NextRequest) {
       dibuat_pada: new Date().toISOString(),
     };
 
-    // Ambil informasi kebun dan afdeling jika terhubung
-    if (kebun_id) {
-      const kRes = await query<{ nama_kebun: string; kode_kebun: string }>(
-        'SELECT nama_kebun, kode_kebun FROM public.kebun WHERE id = $1;',
-        [kebun_id]
+    // 1. Tangani pembuatan Kebun baru dinamis jika diisi oleh pengguna
+    let finalKebunId = kebun_id ? Number(kebun_id) : null;
+    if ((!finalKebunId || body.new_kebun_nama) && body.new_kebun_nama?.trim()) {
+      const kNama = body.new_kebun_nama.trim();
+      const kWil = body.new_kebun_wilayah?.trim() || 'Wilayah Belum Ditentukan';
+      const kPer = body.new_kebun_perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)';
+      const kKode = `KBN-${kNama.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'NEW'}-${Date.now().toString().slice(-4)}`;
+
+      const existingK = await query<{ id: number; nama_kebun: string; kode_kebun: string }>(
+        'SELECT id, nama_kebun, kode_kebun FROM public.kebun WHERE LOWER(nama_kebun) = LOWER($1);',
+        [kNama]
+      );
+      if (existingK.rowCount && existingK.rowCount > 0) {
+        finalKebunId = Number(existingK.rows[0].id);
+      } else {
+        const insK = await query<{ id: number }>(
+          `INSERT INTO public.kebun (kode_kebun, nama_kebun, wilayah, perusahaan)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id;`,
+          [kKode, kNama, kWil, kPer]
+        );
+        if (insK.rowCount && insK.rowCount > 0) {
+          finalKebunId = Number(insK.rows[0].id);
+        }
+      }
+    }
+
+    // 2. Tangani pembuatan Afdeling baru dinamis jika diisi
+    let finalAfdelingId = afdeling_id ? Number(afdeling_id) : null;
+    if (
+      (!finalAfdelingId || body.new_afdeling_nama) &&
+      body.new_afdeling_nama?.trim() &&
+      finalKebunId
+    ) {
+      const aNama = body.new_afdeling_nama.trim();
+      const aKode = `AFD-${aNama.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'NEW'}-${Date.now().toString().slice(-4)}`;
+
+      const existingA = await query<{ id: number }>(
+        'SELECT id FROM public.afdeling WHERE kebun_id = $1 AND LOWER(nama_afdeling) = LOWER($2);',
+        [finalKebunId, aNama]
+      );
+      if (existingA.rowCount && existingA.rowCount > 0) {
+        finalAfdelingId = Number(existingA.rows[0].id);
+      } else {
+        const insA = await query<{ id: number }>(
+          `INSERT INTO public.afdeling (kebun_id, kode_afdeling, nama_afdeling)
+           VALUES ($1, $2, $3)
+           RETURNING id;`,
+          [finalKebunId, aKode, aNama]
+        );
+        if (insA.rowCount && insA.rowCount > 0) {
+          finalAfdelingId = Number(insA.rows[0].id);
+        }
+      }
+    }
+
+    // 3. Ambil informasi kebun dan afdeling jika terhubung
+    if (finalKebunId) {
+      const kRes = await query<{ nama_kebun: string; kode_kebun: string; wilayah: string; perusahaan: string }>(
+        'SELECT nama_kebun, kode_kebun, wilayah, perusahaan FROM public.kebun WHERE id = $1;',
+        [finalKebunId]
       );
       if (kRes.rowCount && kRes.rowCount > 0) {
         attributesPayload['nama_kebun'] = kRes.rows[0].nama_kebun;
         attributesPayload['kode_kebun'] = kRes.rows[0].kode_kebun;
+        attributesPayload['wilayah'] = kRes.rows[0].wilayah;
+        attributesPayload['perusahaan'] = kRes.rows[0].perusahaan;
       }
+
+      // Pastikan layer_peta memiliki relasi kebun ini
+      await query(
+        'UPDATE public.layer_peta SET kebun_id = $1 WHERE id = $2 AND (kebun_id IS NULL OR kebun_id = 0);',
+        [finalKebunId, layer_id]
+      );
     }
 
-    if (afdeling_id) {
+    if (finalAfdelingId) {
       const aRes = await query<{ nama_afdeling: string; kode_afdeling: string }>(
         'SELECT nama_afdeling, kode_afdeling FROM public.afdeling WHERE id = $1;',
-        [afdeling_id]
+        [finalAfdelingId]
       );
       if (aRes.rowCount && aRes.rowCount > 0) {
         attributesPayload['nama_afdeling'] = aRes.rows[0].nama_afdeling;
@@ -131,11 +199,12 @@ export async function POST(req: NextRequest) {
       luas_geodesik_ha: number;
     }>(
       `
-      INSERT INTO public.fitur_peta (layer_id, geom, atribut)
+      INSERT INTO public.fitur_peta (layer_id, geom, atribut, dibuat_oleh_user_id)
       VALUES (
         $1,
         ST_Multi(ST_Force2D(ST_SetSRID(ST_MakeValid(ST_GeomFromGeoJSON($2)), 4326))),
-        $3
+        $3,
+        $4
       )
       RETURNING 
         id, 
@@ -144,7 +213,7 @@ export async function POST(req: NextRequest) {
         atribut,
         ROUND((ST_Area(geom::geography) / 10000.0)::numeric, 2)::float8 as luas_geodesik_ha;
       `,
-      [layer_id, JSON.stringify(geoJsonPolygon), JSON.stringify(attributesPayload)]
+      [layer_id, JSON.stringify(geoJsonPolygon), JSON.stringify(attributesPayload), auth.user.id]
     );
 
     const created = insertRes.rows[0];

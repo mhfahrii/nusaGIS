@@ -35,10 +35,18 @@ export async function POST(req: NextRequest) {
     let fallbackCrsSingle: string | null = null;
     let tempIdToCleanup: string | null = null;
 
+    let globalTargetKebun: {
+      is_new_kebun?: boolean;
+      kebun_id?: number | null;
+      new_kebun_nama?: string | null;
+      new_kebun_wilayah?: string | null;
+      new_kebun_perusahaan?: string | null;
+    } | null = null;
+
     if (contentType.includes('application/json')) {
       // Alur 2-Step: Konfirmasi Import dengan Data Mapping spesifik per dataset
       const body = await req.json();
-      const { tempId, nama_data, keterangan: ket, mappings: mapList } = body;
+      const { tempId, nama_data, keterangan: ket, mappings: mapList, target_kebun } = body;
 
       if (!tempId || typeof tempId !== 'string') {
         return NextResponse.json(
@@ -72,6 +80,9 @@ export async function POST(req: NextRequest) {
       namaData = (nama_data as string | undefined)?.trim() || fileName.replace(/\.[^/.]+$/, '');
       keterangan = (ket as string | undefined)?.trim() || '';
       mappings = Array.isArray(mapList) ? mapList : [];
+      if (target_kebun && typeof target_kebun === 'object') {
+        globalTargetKebun = target_kebun;
+      }
     } else {
       // Alur Direct Multipart Form-Data (Mendukung upload langsung file ZIP, GeoJSON, atau kumpulan file Shapefile terpisah)
       const formData = await req.formData();
@@ -412,9 +423,57 @@ export async function POST(req: NextRequest) {
         const ds = extractedDatasets[i];
         const mapping = mappings.find((m) => m.datasetIndex === i) || mappings[i];
 
-        // Tentukan metadata layer berdasarkan mapping pengguna
-        const targetKebunId = mapping?.kebun_id ? Number(mapping.kebun_id) : defaultKebunId;
-        const targetAfdelingId = mapping?.afdeling_id ? Number(mapping.afdeling_id) : null;
+        // Jika layer sengaja tidak dicentang (uncheck), lewati impor layer ini
+        if (mapping && mapping.selected === false) {
+          continue;
+        }
+
+        // Tentukan metadata layer berdasarkan mapping pengguna & target kebun global
+        const effectiveIsNewKebun = mapping?.is_new_kebun ?? globalTargetKebun?.is_new_kebun ?? false;
+        const effectiveNewKebunNama = mapping?.new_kebun_nama ?? globalTargetKebun?.new_kebun_nama;
+        const effectiveNewKebunWilayah = mapping?.new_kebun_wilayah ?? globalTargetKebun?.new_kebun_wilayah;
+        const effectiveNewKebunPerusahaan = mapping?.new_kebun_perusahaan ?? globalTargetKebun?.new_kebun_perusahaan;
+        let targetKebunId = mapping?.kebun_id ? Number(mapping.kebun_id) : (globalTargetKebun?.kebun_id ? Number(globalTargetKebun.kebun_id) : defaultKebunId);
+
+        if ((!targetKebunId || effectiveIsNewKebun) && effectiveNewKebunNama?.trim()) {
+          const kNama = effectiveNewKebunNama.trim();
+          const kWil = effectiveNewKebunWilayah?.trim() || 'Wilayah Belum Ditentukan';
+          const kPer = effectiveNewKebunPerusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)';
+          const kKode = `KBN-${kNama.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'NEW'}-${Date.now().toString().slice(-4)}`;
+
+          const existingK = await client.query('SELECT id FROM public.kebun WHERE LOWER(nama_kebun) = LOWER($1);', [kNama]);
+          if (existingK.rowCount && existingK.rowCount > 0) {
+            targetKebunId = Number(existingK.rows[0].id);
+          } else {
+            const insK = await client.query(
+              `INSERT INTO public.kebun (kode_kebun, nama_kebun, wilayah, perusahaan)
+               VALUES ($1, $2, $3, $4) RETURNING id;`,
+              [kKode, kNama, kWil, kPer]
+            );
+            targetKebunId = Number(insK.rows[0].id);
+          }
+        }
+
+        let targetAfdelingId = mapping?.afdeling_id ? Number(mapping.afdeling_id) : null;
+        if ((!targetAfdelingId || mapping?.new_afdeling_nama) && mapping?.new_afdeling_nama?.trim() && targetKebunId) {
+          const aNama = mapping.new_afdeling_nama.trim();
+          const aKode = `AFD-${aNama.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'NEW'}-${Date.now().toString().slice(-4)}`;
+          const existingA = await client.query(
+            'SELECT id FROM public.afdeling WHERE kebun_id = $1 AND LOWER(nama_afdeling) = LOWER($2);',
+            [targetKebunId, aNama]
+          );
+          if (existingA.rowCount && existingA.rowCount > 0) {
+            targetAfdelingId = Number(existingA.rows[0].id);
+          } else {
+            const insA = await client.query(
+              `INSERT INTO public.afdeling (kebun_id, kode_afdeling, nama_afdeling)
+               VALUES ($1, $2, $3) RETURNING id;`,
+              [targetKebunId, aKode, aNama]
+            );
+            targetAfdelingId = Number(insA.rows[0].id);
+          }
+        }
+
         const targetBlokId = mapping?.blok_id ? Number(mapping.blok_id) : null;
         const finalLayerName =
           mapping?.nama_layer?.trim() || ds.layerName || `Layer ${startOrder + i}`;
@@ -448,8 +507,12 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Deteksi SRID Asal (dari file .prj atau fallback mapping)
-        let effectiveSourceSrid = ds.sridAsal || (mapping?.fallback_crs ? parseInt(mapping.fallback_crs.replace(/[^0-9]/g, ''), 10) : null);
+        // Deteksi SRID Asal (dari file .prj atau fallback mapping pilihan user)
+        const mappingCrsSrid = mapping?.fallback_crs
+          ? parseInt(mapping.fallback_crs.replace(/[^0-9]/g, ''), 10)
+          : null;
+        const effectiveSourceSrid = (ds.isPrjMissing && mappingCrsSrid) ? mappingCrsSrid : (ds.sridAsal || mappingCrsSrid);
+        const crsAsalName = (ds.isPrjMissing && mapping?.fallback_crs) ? mapping.fallback_crs : (ds.crsAsal || mapping?.fallback_crs || 'WGS 84 (EPSG:4326)');
         
         // Simpan layer_peta
         const insertLayerRes = await client.query<LayerPeta>(
@@ -470,7 +533,7 @@ export async function POST(req: NextRequest) {
             color,
             startOrder + i,
             ds.featureCount,
-            ds.crsAsal.slice(0, 100),
+            crsAsalName.slice(0, 100),
             effectiveSourceSrid || ds.sridAsal,
           ]
         );
@@ -484,36 +547,26 @@ export async function POST(req: NextRequest) {
           const geomGeoJson = JSON.stringify(feat.geometry);
           const propertiesJson = JSON.stringify(feat.properties || {});
 
-          if (effectiveSourceSrid && effectiveSourceSrid !== 4326) {
-            // Transformasi matematis ellipsoid dari Projected CRS (UTM) ke Geographic WGS 84
-            await client.query(
-              `INSERT INTO public.fitur_peta (layer_id, geom, atribut)
-               VALUES (
-                 $1,
-                 ST_Force2D(ST_Transform(ST_SetSRID(ST_MakeValid(ST_GeomFromGeoJSON($2)), $3), 4326)),
-                 $4::jsonb
-               );`,
-              [layer.id, geomGeoJson, effectiveSourceSrid, propertiesJson]
-            );
-          } else {
-            // Cek koordinat cerdas: jika X > 180 atau Y > 90 berarti meter UTM yang hilang file .prj
-            await client.query(
-              `INSERT INTO public.fitur_peta (layer_id, geom, atribut)
-               VALUES (
-                 $1,
-                 ST_Force2D(
-                   CASE
-                     WHEN ST_XMin(ST_GeomFromGeoJSON($2)) < -180 OR ST_XMax(ST_GeomFromGeoJSON($2)) > 180
-                       OR ST_YMin(ST_GeomFromGeoJSON($2)) < -90 OR ST_YMax(ST_GeomFromGeoJSON($2)) > 90
-                     THEN ST_Transform(ST_SetSRID(ST_MakeValid(ST_GeomFromGeoJSON($2)), COALESCE($3, 32749)), 4326)
-                     ELSE ST_SetSRID(ST_MakeValid(ST_GeomFromGeoJSON($2)), 4326)
-                   END
-                 ),
-                 $4::jsonb
-               );`,
-              [layer.id, geomGeoJson, effectiveSourceSrid, propertiesJson]
-            );
-          }
+          // Periksa koordinat spasial:
+          // Jika koordinat GeoJSON dari shpjs sudah berupa derajat WGS 84 (-180..180 dan -90..90), JANGAN lakukan ST_Transform ulang!
+          // Hanya lakukan ST_Transform jika koordinat masih murni berupa meter (di luar rentang derajat).
+          await client.query(
+            `INSERT INTO public.fitur_peta (layer_id, geom, atribut, dibuat_oleh_user_id)
+             VALUES (
+               $1,
+               ST_Force2D(
+                 CASE
+                   WHEN ST_XMin(ST_GeomFromGeoJSON($2)) < -180 OR ST_XMax(ST_GeomFromGeoJSON($2)) > 180
+                     OR ST_YMin(ST_GeomFromGeoJSON($2)) < -90 OR ST_YMax(ST_GeomFromGeoJSON($2)) > 90
+                   THEN ST_Transform(ST_SetSRID(ST_MakeValid(ST_GeomFromGeoJSON($2)), COALESCE($3, 32749)), 4326)
+                   ELSE ST_SetSRID(ST_MakeValid(ST_GeomFromGeoJSON($2)), 4326)
+                 END
+               ),
+               $4::jsonb,
+               $5
+             );`,
+            [layer.id, geomGeoJson, effectiveSourceSrid, propertiesJson, auth.user.id]
+          );
         }
 
         // Ambil extent dan jumlah fitur aktual dari PostGIS
@@ -569,14 +622,18 @@ export async function POST(req: NextRequest) {
           north: ext.north,
         };
 
-        // Ambil nama kebun jika ada
+        // Ambil info kebun (nama, wilayah, perusahaan) jika ada
         let namaKebun: string | null = null;
+        let wilayahKebun: string | null = null;
+        let perusahaanKebun: string | null = null;
         if (targetKebunId) {
-          const kNameRes = await client.query<{ nama_kebun: string }>(
-            'SELECT nama_kebun FROM public.kebun WHERE id = $1;',
+          const kNameRes = await client.query<{ nama_kebun: string; wilayah: string; perusahaan: string }>(
+            'SELECT nama_kebun, wilayah, perusahaan FROM public.kebun WHERE id = $1;',
             [targetKebunId]
           );
           namaKebun = kNameRes.rows[0]?.nama_kebun || null;
+          wilayahKebun = kNameRes.rows[0]?.wilayah || null;
+          perusahaanKebun = kNameRes.rows[0]?.perusahaan || null;
         }
 
         createdLayers.push({
@@ -590,6 +647,8 @@ export async function POST(req: NextRequest) {
           urutan: Number(layer.urutan),
           jumlah_fitur: ext.actual_count,
           nama_kebun: namaKebun,
+          wilayah: wilayahKebun,
+          perusahaan: perusahaanKebun,
           nama_dataset: namaData,
           bbox,
           extent: extentObj,
@@ -603,6 +662,10 @@ export async function POST(req: NextRequest) {
           overallBbox[2] = Math.max(overallBbox[2], bbox[2]);
           overallBbox[3] = Math.max(overallBbox[3], bbox[3]);
         }
+      }
+
+      if (createdLayers.length === 0) {
+        throw new Error('Tidak ada layer yang dipilih untuk diimpor. Harap centang minimal satu layer.');
       }
 
       await client.query('COMMIT');

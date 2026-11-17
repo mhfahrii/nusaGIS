@@ -14,6 +14,7 @@ interface KebunItem {
   id: number;
   kode_kebun: string;
   nama_kebun: string;
+  perusahaan?: string | null;
   wilayah: string | null;
 }
 
@@ -53,12 +54,12 @@ export function MonitoringDashboard() {
   const [stats, setStats] = useState<MonitoringStats | null>(null);
 
   // Filter states
+  const [selectedPerusahaan, setSelectedPerusahaan] = useState('');
   const [selectedWilayah, setSelectedWilayah] = useState('');
   const [selectedKebunId, setSelectedKebunId] = useState<number | null>(null);
   const [selectedAfdelingId, setSelectedAfdelingId] = useState<number | null>(null);
   const [selectedBlokId, setSelectedBlokId] = useState<number | null>(null);
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'ktg' | 'ks_gpa'>('all');
-  const [layerCategoryFilter, setLayerCategoryFilter] = useState('');
 
   // Active map and selection states
   const [selectedLayerId, setSelectedLayerId] = useState<number | null>(null);
@@ -206,44 +207,59 @@ export function MonitoringDashboard() {
   // 2. Filter layers based on cascading filter
   const displayedLayers = useMemo(() => {
     return rawLayers.filter((l) => {
+      // Filter Perusahaan
+      if (selectedPerusahaan) {
+        const allowedKebunIds = kebunList
+          .filter(
+            (k) =>
+              (k.perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)') ===
+              selectedPerusahaan
+          )
+          .map((k) => k.id);
+        if (l.kebun_id && !allowedKebunIds.includes(l.kebun_id)) {
+          return false;
+        }
+      }
+      // Filter Wilayah
+      if (selectedWilayah) {
+        const allowedWilayahKebunIds = kebunList
+          .filter((k) => k.wilayah?.trim() === selectedWilayah)
+          .map((k) => k.id);
+        if (l.kebun_id && !allowedWilayahKebunIds.includes(l.kebun_id)) {
+          return false;
+        }
+      }
       // Filter Kebun
       if (selectedKebunId && l.kebun_id && l.kebun_id !== selectedKebunId) {
         return false;
       }
       // Filter Afdeling: Hanya sembunyikan jika layer ini memang eksplisit milik afdeling lain
       if (selectedAfdelingId && l.afdeling_id && l.afdeling_id !== selectedAfdelingId) {
-        if (!l.kebun_id || (selectedKebunId && l.kebun_id !== selectedKebunId)) {
-          return false;
-        }
+        return false;
       }
       // Filter Blok
       if (selectedBlokId && l.blok_id && l.blok_id !== selectedBlokId) {
-        return false;
-      }
-      // Filter Category
-      if (
-        layerCategoryFilter &&
-        !l.nama_layer.toLowerCase().includes(layerCategoryFilter.toLowerCase())
-      ) {
         return false;
       }
       return true;
     });
   }, [
     rawLayers,
+    kebunList,
+    selectedPerusahaan,
+    selectedWilayah,
     selectedKebunId,
     selectedAfdelingId,
     selectedBlokId,
-    layerCategoryFilter,
   ]);
 
   // Reset filters
   const handleResetFilters = () => {
+    setSelectedPerusahaan('');
     setSelectedWilayah('');
     setSelectedKebunId(null);
     setSelectedAfdelingId(null);
     setSelectedBlokId(null);
-    setLayerCategoryFilter('');
     const firstLayerWithBbox = rawLayers.find((l) => l.bbox);
     if (firstLayerWithBbox?.bbox) {
       setFitBoundsTarget(firstLayerWithBbox.bbox);
@@ -295,6 +311,118 @@ export function MonitoringDashboard() {
       });
     } catch (err) {
       console.error('Change raster opacity error:', err);
+    }
+  };
+
+  // Rename layer handler
+  const handleRenameLayer = async (layerId: number, newName: string) => {
+    try {
+      const res = await fetch('/api/gis/layers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: layerId, nama_layer: newName }),
+      });
+      if (res.ok) {
+        setRawLayers((prev) =>
+          prev.map((l) => (l.id === layerId ? { ...l, nama_layer: newName } : l))
+        );
+      }
+    } catch (err) {
+      console.error('Failed to rename layer:', err);
+    }
+  };
+
+  // Hapus 1 file/layer tertentu (dengan cascade update jika wilayah ikut terhapus)
+  const handleDeleteLayer = async (layerId: number, layerName: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/gis/layers?id=${layerId}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (res.ok && json.status === 'success') {
+        setRawLayers((prev) => prev.filter((l) => l.id !== layerId));
+        if (selectedLayerId === layerId) {
+          setSelectedLayerId(null);
+        }
+
+        // Jika backend menandai bahwa wilayah ikut terhapus karena ini file terakhir
+        if (json.data?.wilayahDeleted && json.data?.wilayah) {
+          const wName = json.data.wilayah.trim().toLowerCase();
+          setKebunList((prev) =>
+            prev.filter((k) => (k.wilayah || '').trim().toLowerCase() !== wName)
+          );
+          if (selectedWilayah.trim().toLowerCase() === wName) {
+            setSelectedWilayah('');
+            setSelectedKebunId(null);
+            setSelectedAfdelingId(null);
+            setSelectedBlokId(null);
+          }
+        } else if (json.data?.kebunDeleted && json.data?.deletedKebunId) {
+          setKebunList((prev) => prev.filter((k) => k.id !== json.data.deletedKebunId));
+          if (selectedKebunId === json.data.deletedKebunId) {
+            setSelectedKebunId(null);
+            setSelectedAfdelingId(null);
+            setSelectedBlokId(null);
+          }
+        }
+
+        return true;
+      } else {
+        alert(json.detail || json.message || `Gagal menghapus layer "${layerName}".`);
+        return false;
+      }
+    } catch (err) {
+      console.error('Delete layer error:', err);
+      alert(`Terjadi kesalahan saat menghapus layer "${layerName}".`);
+      return false;
+    }
+  };
+
+  // Hapus seluruh data pada satu wilayah
+  const handleDeleteWilayah = async (wilayahName: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/gis/layers?wilayah=${encodeURIComponent(wilayahName)}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (res.ok && json.status === 'success') {
+        const deletedLayerIds: number[] = json.data?.deletedLayerIds || [];
+        const deletedKebunIds: number[] = json.data?.deletedKebunIds || [];
+        const wName = wilayahName.trim().toLowerCase();
+
+        setRawLayers((prev) =>
+          prev.filter(
+            (l) =>
+              !deletedLayerIds.includes(l.id) &&
+              (l.wilayah || '').trim().toLowerCase() !== wName
+          )
+        );
+        setKebunList((prev) =>
+          prev.filter(
+            (k) =>
+              !deletedKebunIds.includes(k.id) &&
+              (k.wilayah || '').trim().toLowerCase() !== wName
+          )
+        );
+
+        if (selectedWilayah.trim().toLowerCase() === wName) {
+          setSelectedWilayah('');
+          setSelectedKebunId(null);
+          setSelectedAfdelingId(null);
+          setSelectedBlokId(null);
+        }
+        if (selectedLayerId && deletedLayerIds.includes(selectedLayerId)) {
+          setSelectedLayerId(null);
+        }
+        return true;
+      } else {
+        alert(json.detail || json.message || `Gagal menghapus data wilayah "${wilayahName}".`);
+        return false;
+      }
+    } catch (err) {
+      console.error('Delete wilayah error:', err);
+      alert(`Terjadi kesalahan saat menghapus data wilayah "${wilayahName}".`);
+      return false;
     }
   };
 
@@ -351,6 +479,8 @@ export function MonitoringDashboard() {
           kebunList={kebunList}
           afdelingList={afdelingList}
           blokList={blokList}
+          selectedPerusahaan={selectedPerusahaan}
+          onSelectPerusahaan={setSelectedPerusahaan}
           selectedWilayah={selectedWilayah}
           onSelectWilayah={setSelectedWilayah}
           selectedKebunId={selectedKebunId}
@@ -369,14 +499,15 @@ export function MonitoringDashboard() {
           onSelectAfdeling={setSelectedAfdelingId}
           selectedBlokId={selectedBlokId}
           onSelectBlok={setSelectedBlokId}
-          layerCategoryFilter={layerCategoryFilter}
-          onChangeLayerCategoryFilter={setLayerCategoryFilter}
           onResetFilters={handleResetFilters}
           layers={displayedLayers}
           selectedLayerId={selectedLayerId}
           onSelectLayer={(id) => setSelectedLayerId(id)}
           onToggleLayerVisibility={handleToggleLayerVisibility}
           onZoomToLayer={(bbox) => setFitBoundsTarget(bbox)}
+          onRenameLayer={handleRenameLayer}
+          onDeleteLayer={handleDeleteLayer}
+          onDeleteWilayah={handleDeleteWilayah}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
           deletedCount={deletedCount}
         />

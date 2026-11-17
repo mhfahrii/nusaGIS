@@ -8,6 +8,8 @@ interface KebunItem {
   id: number;
   kode_kebun: string;
   nama_kebun: string;
+  wilayah: string | null;
+  perusahaan?: string | null;
 }
 
 interface AfdelingItem {
@@ -45,8 +47,16 @@ export function CreateParcelModal({
   const [afdelingList, setAfdelingList] = useState<AfdelingItem[]>([]);
   const [selectedKebunId, setSelectedKebunId] = useState<number | null>(null);
   const [selectedAfdelingId, setSelectedAfdelingId] = useState<number | null>(null);
+
+  // Mode Buat / Ketik Kebun & Afdeling Baru
+  const [isNewKebun, setIsNewKebun] = useState(false);
+  const [newKebunNama, setNewKebunNama] = useState('');
+  const [newKebunWilayah, setNewKebunWilayah] = useState('');
+  const [newKebunPerusahaan, setNewKebunPerusahaan] = useState('PT Perkebunan Nusantara I (Regional 4)');
+  const [isNewAfdeling, setIsNewAfdeling] = useState(false);
+  const [newAfdelingNama, setNewAfdelingNama] = useState('');
   const [komoditas, setKomoditas] = useState('Tebu');
-  const [tahunTanam, setTahunTanam] = useState(new Date().getFullYear().toString());
+  const [tahunTanam, setTahunTanam] = useState('2024');
   const [statusLahan, setStatusLahan] = useState('KS GPA 2023');
   const [luasHa, setLuasHa] = useState(calculatedAreaHa.toString());
   const [luasBaku, setLuasBaku] = useState(calculatedAreaHa.toFixed(2));
@@ -66,6 +76,7 @@ export function CreateParcelModal({
     setLuasHa(areaStr);
     setLuasBaku(areaStr);
     setKode(`BLK-${Date.now().toString().slice(-4)}`);
+    setTahunTanam(new Date().getFullYear().toString());
   }, [defaultLayerId, layers, calculatedAreaHa]);
 
   // Load master kebun & afdeling
@@ -117,6 +128,11 @@ export function CreateParcelModal({
       return;
     }
 
+    if (isNewKebun && !newKebunNama.trim()) {
+      setErrorMsg('Harap isi nama Unit Kebun baru.');
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMsg(null);
 
@@ -126,8 +142,12 @@ export function CreateParcelModal({
         coordinates,
         nama: nama.trim(),
         kode: kode.trim() || undefined,
-        kebun_id: selectedKebunId,
-        afdeling_id: selectedAfdelingId,
+        kebun_id: isNewKebun ? null : selectedKebunId,
+        afdeling_id: isNewAfdeling ? null : selectedAfdelingId,
+        new_kebun_nama: isNewKebun ? newKebunNama.trim() : null,
+        new_kebun_wilayah: isNewKebun ? newKebunWilayah.trim() : null,
+        new_kebun_perusahaan: isNewKebun ? newKebunPerusahaan.trim() : null,
+        new_afdeling_nama: isNewAfdeling ? newAfdelingNama.trim() : null,
         komoditas,
         tahun_tanam: parseInt(tahunTanam, 10) || null,
         status_lahan: statusLahan,
@@ -259,45 +279,158 @@ export function CreateParcelModal({
             </div>
           </div>
 
-          {/* Grid: Kebun & Afdeling */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
-                Unit Kebun
-              </label>
-              <select
-                value={selectedKebunId || ''}
-                onChange={(e) => {
-                  setSelectedKebunId(Number(e.target.value) || null);
-                  setSelectedAfdelingId(null);
+          {/* Section: Unit Kebun & Afdeling (Pilih yang Ada atau Ketik Baru) */}
+          <div className="space-y-2.5 p-2.5 bg-[#0a0e1a] rounded-lg border border-[#1E2942]">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-[#F0F6FC]">Kelompok Unit Kebun & Wilayah</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsNewKebun((prev) => !prev);
+                  if (!isNewKebun) {
+                    setSelectedKebunId(null);
+                    setSelectedAfdelingId(null);
+                  }
                 }}
-                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
+                className="text-[10px] text-[#00D2FF] hover:underline cursor-pointer"
               >
-                <option value="">-- Pilih Kebun --</option>
-                {kebunList.map((k) => (
-                  <option key={k.id} value={k.id}>
-                    {k.nama_kebun} ({k.kode_kebun})
-                  </option>
-                ))}
-              </select>
+                {isNewKebun ? '← Pilih Kebun yang Ada' : '+ Ketik / Buat Kebun Baru'}
+              </button>
             </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
-                Afdeling
-              </label>
-              <select
-                value={selectedAfdelingId || ''}
-                onChange={(e) => setSelectedAfdelingId(Number(e.target.value) || null)}
-                className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
-              >
-                <option value="">-- Pilih Afdeling --</option>
-                {filteredAfdeling.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.nama_afdeling} ({a.kode_afdeling})
-                  </option>
-                ))}
-              </select>
-            </div>
+
+            {!isNewKebun ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                    Pilih Unit Kebun
+                  </label>
+                  <select
+                    value={selectedKebunId || ''}
+                    onChange={(e) => {
+                      if (e.target.value === '__new__') {
+                        setIsNewKebun(true);
+                        setSelectedKebunId(null);
+                      } else {
+                        setSelectedKebunId(Number(e.target.value) || null);
+                      }
+                      setSelectedAfdelingId(null);
+                    }}
+                    className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
+                  >
+                    <option value="">-- Pilih Kebun --</option>
+                    {kebunList.map((k) => (
+                      <option key={k.id} value={k.id}>
+                        {k.nama_kebun} ({k.wilayah || 'Wilayah'})
+                      </option>
+                    ))}
+                    <option value="__new__" className="text-[#00D2FF] font-bold">+ Ketik Kebun Baru...</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                    Afdeling
+                  </label>
+                  {!isNewAfdeling ? (
+                    <select
+                      value={selectedAfdelingId || ''}
+                      onChange={(e) => {
+                        if (e.target.value === '__new_afd__') {
+                          setIsNewAfdeling(true);
+                          setSelectedAfdelingId(null);
+                        } else {
+                          setSelectedAfdelingId(Number(e.target.value) || null);
+                        }
+                      }}
+                      className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-hidden focus:border-[#00D2FF]"
+                    >
+                      <option value="">-- Pilih Afdeling --</option>
+                      {filteredAfdeling.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.nama_afdeling} ({a.kode_afdeling})
+                        </option>
+                      ))}
+                      <option value="__new_afd__" className="text-[#00D2FF] font-bold">+ Ketik Afdeling Baru...</option>
+                    </select>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        placeholder="Nama Afdeling..."
+                        value={newAfdelingNama}
+                        onChange={(e) => setNewAfdelingNama(e.target.value)}
+                        className="w-full bg-[#12192B] border border-[#00D2FF] rounded-lg px-2 py-1 text-xs text-[#F0F6FC]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsNewAfdeling(false)}
+                        className="text-[10px] text-[#8B9BB4] hover:text-[#F0F6FC] px-1"
+                        title="Batal"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2 border-t border-[#1E2942] pt-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                      Nama Kebun Baru <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="misal: Kebun Cibeureum"
+                      value={newKebunNama}
+                      onChange={(e) => setNewKebunNama(e.target.value)}
+                      className="w-full bg-[#12192B] border border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                      Wilayah Geografis <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="misal: Kabupaten Bandung, Jawa Barat"
+                      value={newKebunWilayah}
+                      onChange={(e) => setNewKebunWilayah(e.target.value)}
+                      className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC] placeholder:text-[#8B9BB4]/50"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                      Perusahaan / Holding
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="misal: PT Perkebunan Nusantara I"
+                      value={newKebunPerusahaan}
+                      onChange={(e) => setNewKebunPerusahaan(e.target.value)}
+                      className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                      Afdeling (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="misal: Afdeling I"
+                      value={newAfdelingNama}
+                      onChange={(e) => setNewAfdelingNama(e.target.value)}
+                      className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC]"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Grid: Komoditas & Tahun Tanam */}

@@ -8,6 +8,8 @@ import {
   parseShapefileZip,
   parseGeoJsonBuffer,
   bundleLooseFilesToZip,
+  extractCleanKebunName,
+  detectWilayahFromCoordsAndName,
   ShapefileValidationError,
   UploadedFileItem,
   MAX_ZIP_SIZE_BYTES,
@@ -189,16 +191,86 @@ export async function POST(req: NextRequest) {
         }
         const sampleProps = item.features.slice(0, 3).map((f) => (f.properties as Record<string, unknown>) || {});
 
+        // Periksa apakah atribut DBF memuat informasi kebun / afdeling / wilayah
+        let dbfKebunName: string | undefined = undefined;
+        let dbfAfdelingName: string | undefined = undefined;
+        let dbfWilayahName: string | undefined = undefined;
+
+        for (const feat of item.features) {
+          if (!feat.properties) continue;
+          for (const [k, v] of Object.entries(feat.properties)) {
+            const lk = k.toLowerCase();
+            const sv = typeof v === 'string' ? v.trim() : '';
+            if (
+              !dbfKebunName &&
+              sv &&
+              (lk === 'nama_kebun' || lk === 'kebun' || lk === 'kbn' || lk === 'unit_kebun' || lk === 'nama_unit')
+            ) {
+              dbfKebunName = sv;
+            }
+            if (
+              !dbfAfdelingName &&
+              sv &&
+              (lk === 'nama_afdeling' || lk === 'afdeling' || lk === 'afd' || lk === 'nama_afd')
+            ) {
+              dbfAfdelingName = sv;
+            }
+            if (
+              !dbfWilayahName &&
+              sv &&
+              (lk === 'wilayah' || lk === 'kabupaten' || lk === 'kota' || lk === 'lokasi')
+            ) {
+              dbfWilayahName = sv;
+            }
+          }
+          if (dbfKebunName && dbfAfdelingName) break;
+        }
+
+        const folderCandidate = item.folderName || fileName;
+        const suggestedKebunName = extractCleanKebunName(dbfKebunName || folderCandidate) || 'Kebun Baru';
+
+        // Hitung titik tengah Bounding Box untuk reverse-geocoding wilayah secara akurat
+        const midLng = item.bbox ? (item.bbox[0] + item.bbox[2]) / 2 : undefined;
+        const midLat = item.bbox ? (item.bbox[1] + item.bbox[3]) / 2 : undefined;
+        const detectedLoc = detectWilayahFromCoordsAndName(
+          midLng,
+          midLat,
+          `${dbfWilayahName || ''} ${suggestedKebunName} ${folderCandidate}`
+        );
+
+        const suggestedWilayah = dbfWilayahName || detectedLoc.wilayah;
+
+        let suggestedAfdelingName: string | undefined = dbfAfdelingName;
+        if (!suggestedAfdelingName && item.folderName) {
+          const afdMatch = item.folderName.match(/(?:afd|afdeling)\s*([a-z0-9_]+)/i);
+          if (afdMatch) {
+            suggestedAfdelingName = `Afdeling ${afdMatch[1].toUpperCase()}`;
+          }
+        }
+
+        let suggestedLayerName = item.layerName;
+        if (
+          suggestedLayerName.toLowerCase() === 'batas_kebun' ||
+          suggestedLayerName.toLowerCase() === 'kebun'
+        ) {
+          suggestedLayerName = `Batas ${suggestedKebunName}`;
+        }
+
         detectedDatasets.push({
           index: i,
-          name: item.layerName,
+          name: suggestedLayerName,
           sourceFileName: item.shapefileName,
+          folderName: item.folderName,
+          suggestedKebunName,
+          suggestedWilayah,
+          suggestedAfdelingName,
           format: 'shapefile',
           geometryType: item.geometryType,
           featureCount: item.featureCount,
           crsAsal: item.crsAsal,
           sridAsal: item.sridAsal,
-          needsCrsSelection: !item.crsAsal || item.crsAsal === '',
+          needsCrsSelection: false,
+          isPrjMissing: Boolean(item.isPrjMissing),
           attributes: Array.from(allKeys),
           sampleProperties: sampleProps,
           bbox: item.bbox || null,

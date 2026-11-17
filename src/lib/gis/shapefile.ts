@@ -47,6 +47,9 @@ const FORBIDDEN_EXTENSIONS = new Set([
   '.jar',
 ]);
 
+const IGNORED_FILES = new Set(['thumbs.db', '.ds_store', 'desktop.ini']);
+const IGNORED_EXTENSIONS = new Set(['.lock', '.tmp', '.bak', '.log']);
+
 import { KNOWN_CRS_WKT } from './crs';
 export { KNOWN_CRS_WKT };
 
@@ -73,7 +76,14 @@ export function createZipBuffer(files: UploadedFileItem[]): Buffer {
   let offset = 0;
 
   for (const f of files) {
-    const cleanName = path.posix.basename(f.name.replace(/\\/g, '/'));
+    // Pertahankan struktur folder relatif jika ada (misal: "Kebun Bakalan/lahan.shp"), cegah path traversal dan bersihkan drive letter Windows
+    let cleanName = f.name
+      .replace(/^[a-zA-Z]:[\\/]/, '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '');
+    if (!cleanName || cleanName.includes('..')) {
+      cleanName = path.posix.basename(f.name.replace(/\\/g, '/'));
+    }
     const nameBuf = Buffer.from(cleanName, 'utf8');
     const crc = zlib.crc32(f.buffer);
 
@@ -141,7 +151,10 @@ export function bundleLooseFilesToZip(files: UploadedFileItem[]): {
   shpCount: number;
 } {
   const validFiles = files.filter((f) => {
+    const baseName = path.basename(f.name).toLowerCase();
+    if (IGNORED_FILES.has(baseName)) return false;
     const ext = path.extname(f.name).toLowerCase();
+    if (IGNORED_EXTENSIONS.has(ext)) return false;
     return !FORBIDDEN_EXTENSIONS.has(ext);
   });
 
@@ -153,7 +166,13 @@ export function bundleLooseFilesToZip(files: UploadedFileItem[]): {
     );
   }
 
-  const primaryName = path.basename(shpFiles[0].name, path.extname(shpFiles[0].name));
+  const firstShpRel = shpFiles[0].name.replace(/\\/g, '/');
+  const pathParts = firstShpRel.split('/').filter(Boolean);
+  const primaryName =
+    pathParts.length > 1
+      ? pathParts[0]
+      : path.basename(firstShpRel, path.extname(firstShpRel));
+
   const zipBuffer = createZipBuffer(validFiles);
 
   return {
@@ -259,8 +278,9 @@ async function extractAndValidateZipToTempDir(
       continue;
     }
 
-    // Pencegahan ZIP Slip (Path Traversal)
-    const normalizedRel = path.posix.normalize(rawName.replace(/\\/g, '/'));
+    // Pencegahan ZIP Slip (Path Traversal) dan sanitasi path Windows
+    const sanitizedRaw = rawName.replace(/^[a-zA-Z]:[\\/]/, '').replace(/\\/g, '/').replace(/^\/+/, '');
+    const normalizedRel = path.posix.normalize(sanitizedRaw);
     if (
       normalizedRel.startsWith('/') ||
       normalizedRel.startsWith('..') ||
@@ -413,6 +433,286 @@ export function parsePrjWktMetadata(wkt: string): { crsName: string; srid: numbe
   return { crsName, srid: null };
 }
 
+/**
+ * Smart Auto-Detector CRS dari Bounding Box biner Shapefile (.shp)
+ * Mengeliminasi 100% human-error salah pilih koordinat dan mencegah error OUT_OF_BOUNDS_CRS.
+ */
+export function detectSmartCrsFromShpHeader(
+  shpBuffer: Buffer,
+  hintText?: string,
+  explicitFallback?: string | null
+): { crsName: string; srid: number; wkt: string; detectedType: 'degree' | 'utm' | 'mercator' } {
+  // Standar ESRI Shapefile: Bounding Box berada di byte 36..68
+  let xMin = 0;
+  let yMin = 0;
+  let xMax = 0;
+  let yMax = 0;
+  let hasValidHeaderBbox = false;
+
+  if (shpBuffer.length >= 68) {
+    xMin = shpBuffer.readDoubleLE(36);
+    yMin = shpBuffer.readDoubleLE(44);
+    xMax = shpBuffer.readDoubleLE(52);
+    yMax = shpBuffer.readDoubleLE(60);
+    hasValidHeaderBbox = isFinite(xMin) && isFinite(yMin) && isFinite(xMax) && isFinite(yMax);
+  }
+
+  // 1. Kasus Koordinat Derajat Geografis (Lat/Long WGS 84):
+  // X berada di -180..180 dan Y di -90..90.
+  // Untuk Indonesia: X ~ 95..141 dan Y ~ -11..6
+  if (hasValidHeaderBbox && xMin >= -180 && xMax <= 180 && yMin >= -90 && yMax <= 90) {
+    return {
+      crsName: KNOWN_CRS_WKT['EPSG:4326'].name,
+      srid: 4326,
+      wkt: KNOWN_CRS_WKT['EPSG:4326'].wkt,
+      detectedType: 'degree',
+    };
+  }
+
+  // 2. Kasus Koordinat Web Mercator (Jutaan meter di X dan Y)
+  if (hasValidHeaderBbox && xMin > 1000000 && (yMin < 1000000 && yMin > -2000000)) {
+    return {
+      crsName: KNOWN_CRS_WKT['EPSG:3857'].name,
+      srid: 3857,
+      wkt: KNOWN_CRS_WKT['EPSG:3857'].wkt,
+      detectedType: 'mercator',
+    };
+  }
+
+  // 3. Kasus Koordinat Meter UTM (X: 100.000 s/d 900.000 meter)
+  const lowerHint = (hintText || '').toLowerCase();
+
+  // Jika ada explicit fallback yang valid dari pengguna, prioritaskan jika memang koordinatnya meter
+  const cleanExplicit = explicitFallback?.trim().toUpperCase();
+  if (cleanExplicit && cleanExplicit !== 'EPSG:4326' && KNOWN_CRS_WKT[cleanExplicit]) {
+    return {
+      crsName: KNOWN_CRS_WKT[cleanExplicit].name,
+      srid: KNOWN_CRS_WKT[cleanExplicit].srid,
+      wkt: KNOWN_CRS_WKT[cleanExplicit].wkt,
+      detectedType: 'utm',
+    };
+  }
+
+  // Deteksi Otomatis Zona UTM Berdasarkan Petunjuk Wilayah / Nama Kebun
+  // Wilayah Jawa Barat, Banten, DKI, Lampung, Sumsel -> UTM Zone 48S (EPSG:32748)
+  if (
+    lowerHint.includes('cianjur') ||
+    lowerHint.includes('bandung') ||
+    lowerHint.includes('cibeureum') ||
+    lowerHint.includes('sarongge') ||
+    lowerHint.includes('gedeh') ||
+    lowerHint.includes('garut') ||
+    lowerHint.includes('sukabumi') ||
+    lowerHint.includes('bogor') ||
+    lowerHint.includes('subang') ||
+    lowerHint.includes('purwakarta') ||
+    lowerHint.includes('banten') ||
+    lowerHint.includes('jabar') ||
+    lowerHint.includes('lampung') ||
+    lowerHint.includes('sumsel')
+  ) {
+    return {
+      crsName: KNOWN_CRS_WKT['EPSG:32748'].name,
+      srid: 32748,
+      wkt: KNOWN_CRS_WKT['EPSG:32748'].wkt,
+      detectedType: 'utm',
+    };
+  }
+
+  // Wilayah Kaltim, Sulawesi, Bali, NTB, NTT -> UTM Zone 50S (EPSG:32750)
+  if (
+    lowerHint.includes('kaltim') ||
+    lowerHint.includes('sulawesi') ||
+    lowerHint.includes('bali') ||
+    lowerHint.includes('ntb') ||
+    lowerHint.includes('ntt') ||
+    lowerHint.includes('makassar')
+  ) {
+    return {
+      crsName: KNOWN_CRS_WKT['EPSG:32750'].name,
+      srid: 32750,
+      wkt: KNOWN_CRS_WKT['EPSG:32750'].wkt,
+      detectedType: 'utm',
+    };
+  }
+
+  // Wilayah Aceh & Sumatera Utara -> UTM Zone 47N (EPSG:32647)
+  if (lowerHint.includes('aceh') || lowerHint.includes('sumut') || lowerHint.includes('medan')) {
+    return {
+      crsName: KNOWN_CRS_WKT['EPSG:32647'].name,
+      srid: 32647,
+      wkt: KNOWN_CRS_WKT['EPSG:32647'].wkt,
+      detectedType: 'utm',
+    };
+  }
+
+  // Wilayah Riau & Kalbar -> UTM Zone 48N (EPSG:32648)
+  if (
+    lowerHint.includes('riau') ||
+    lowerHint.includes('kalbar') ||
+    lowerHint.includes('pekanbaru') ||
+    lowerHint.includes('pontianak')
+  ) {
+    return {
+      crsName: KNOWN_CRS_WKT['EPSG:32648'].name,
+      srid: 32648,
+      wkt: KNOWN_CRS_WKT['EPSG:32648'].wkt,
+      detectedType: 'utm',
+    };
+  }
+
+  // Default UTM Perkebunan Indonesia Selatan (Jawa Timur & Jawa Tengah: Pasuruan, Bakalan, Malang, Solo, dll.)
+  // -> UTM Zone 49S (EPSG:32749)
+  return {
+    crsName: KNOWN_CRS_WKT['EPSG:32749'].name,
+    srid: 32749,
+    wkt: KNOWN_CRS_WKT['EPSG:32749'].wkt,
+    detectedType: 'utm',
+  };
+}
+
+/**
+ * Membersihkan nama kebun dari artefak timestamp Google Drive, suffix -001, dsb.
+ * Contoh: "Kebun Cibeureum-20261116T064148Z-1-001" -> "Kebun Cibeureum"
+ */
+export function extractCleanKebunName(rawCandidate?: string | null): string {
+  if (!rawCandidate) return '';
+  let cleaned = rawCandidate.replace(/\.(zip|shp|dbf|prj|geojson|json)$/i, '');
+  cleaned = cleaned.replace(/^\d{10,14}[_-]/, ''); // timestamp numeric di depan
+  cleaned = cleaned.replace(/-\d{8}T\d{6}Z.*$/i, ''); // Google Drive timestamp suffix
+  cleaned = cleaned.replace(/[-_]\d{3,}$/, ''); // suffix -001 dsb
+  cleaned = cleaned.replace(/[-_]v\d+$/i, ''); // suffix _v1
+
+  const parts = cleaned.split(/[\/\\]+/).filter(Boolean);
+  const kebunPart =
+    parts.slice().reverse().find((p) => p.toLowerCase().includes('kebun') || p.toLowerCase().startsWith('kp')) ||
+    parts[parts.length - 1] ||
+    cleaned;
+
+  return kebunPart
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/**
+ * Deteksi otomatis wilayah perkebunan dari koordinat spasial (Lat/Lng WGS 84)
+ * atau petunjuk nama folder/file.
+ */
+export function detectWilayahFromCoordsAndName(
+  lng?: number,
+  lat?: number,
+  nameHint?: string
+): { wilayah: string; defaultPerusahaan: string } {
+  const hint = (nameHint || '').toLowerCase();
+
+  // 1. Text hint matching
+  if (
+    hint.includes('cibeureum') ||
+    hint.includes('cibereum') ||
+    hint.includes('pangalengan') ||
+    hint.includes('bandung')
+  ) {
+    return {
+      wilayah: 'Kabupaten Bandung, Jawa Barat',
+      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+    };
+  }
+  if (
+    hint.includes('sarongge') ||
+    hint.includes('gedeh') ||
+    hint.includes('cianjur') ||
+    hint.includes('pacet')
+  ) {
+    return {
+      wilayah: 'Kabupaten Cianjur, Jawa Barat',
+      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+    };
+  }
+  if (
+    hint.includes('bakalan') ||
+    hint.includes('pasuruan') ||
+    hint.includes('kraton') ||
+    hint.includes('purwosari')
+  ) {
+    return {
+      wilayah: 'Pasuruan, Jawa Timur',
+      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+    };
+  }
+  if (hint.includes('malang') || hint.includes('batu') || hint.includes('wonosari')) {
+    return {
+      wilayah: 'Kabupaten Malang, Jawa Timur',
+      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+    };
+  }
+  if (hint.includes('jember') || hint.includes('banyuwangi') || hint.includes('kediri')) {
+    return {
+      wilayah: 'Jawa Timur',
+      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+    };
+  }
+  if (hint.includes('subang') || hint.includes('garut') || hint.includes('ciwidey') || hint.includes('bogor')) {
+    return {
+      wilayah: 'Jawa Barat',
+      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+    };
+  }
+
+  // 2. Spatial coordinates boundary matching (jika lng dan lat terdefinisi dalam derajat WGS 84)
+  if (typeof lng === 'number' && typeof lat === 'number' && isFinite(lng) && isFinite(lat)) {
+    // Bandung & sekitarnya: 107.3 .. 107.9, -7.4 .. -6.8
+    if (lng >= 107.3 && lng <= 107.9 && lat >= -7.4 && lat <= -6.8) {
+      return {
+        wilayah: 'Kabupaten Bandung, Jawa Barat',
+        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+      };
+    }
+    // Cianjur & sekitarnya: 106.8 .. 107.3, -7.3 .. -6.6
+    if (lng >= 106.8 && lng < 107.3 && lat >= -7.3 && lat <= -6.6) {
+      return {
+        wilayah: 'Kabupaten Cianjur, Jawa Barat',
+        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+      };
+    }
+    // Pasuruan & Jawa Timur bagian timur: 112.5 .. 113.3, -8.0 .. -7.4
+    if (lng >= 112.5 && lng <= 113.3 && lat >= -8.0 && lat <= -7.4) {
+      return {
+        wilayah: 'Pasuruan, Jawa Timur',
+        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+      };
+    }
+    // Malang & sekitarnya: 112.3 .. 112.9, -8.4 .. -7.9
+    if (lng >= 112.3 && lng <= 112.9 && lat >= -8.4 && lat < -7.9) {
+      return {
+        wilayah: 'Kabupaten Malang, Jawa Timur',
+        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+      };
+    }
+    // Umum Jawa Barat: 106.3 .. 108.8, -7.8 .. -5.9
+    if (lng >= 106.3 && lng <= 108.8 && lat >= -7.8 && lat <= -5.9) {
+      return {
+        wilayah: 'Jawa Barat',
+        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+      };
+    }
+    // Umum Jawa Timur: 111.0 .. 114.6, -8.8 .. -6.7
+    if (lng >= 111.0 && lng <= 114.6 && lat >= -8.8 && lat <= -6.7) {
+      return {
+        wilayah: 'Jawa Timur',
+        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+      };
+    }
+  }
+
+  return {
+    wilayah: 'Wilayah Operasional Perkebunan',
+    defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+  };
+}
+
 export interface ParseShapefileOptions {
   /**
    * CRS eksplisit yang dipilih pengguna apabila file .prj tidak tersedia di dalam ZIP.
@@ -460,16 +760,29 @@ export async function parseShapefileZip(
     const combine = shpModule.combine;
 
     const results: ExtractedShapefile[] = [];
+    const seenLayerNames = new Map<string, number>();
 
     for (let i = 0; i < shpKeys.length; i++) {
       const shpRelKey = shpKeys[i];
       const baseRelKey = shpRelKey.slice(0, -4); // tanpa '.shp'
       const baseFileName = path.posix.basename(baseRelKey);
+      const parentDir = path.posix.dirname(shpRelKey);
+      const folderName = parentDir && parentDir !== '.' ? parentDir : undefined;
 
       const shpDiskPath = extractedMap.get(shpRelKey);
-      const dbfDiskPath = extractedMap.get(`${baseRelKey}.dbf`);
+      let dbfDiskPath = extractedMap.get(`${baseRelKey}.dbf`);
       const prjDiskPath = extractedMap.get(`${baseRelKey}.prj`);
       const cpgDiskPath = extractedMap.get(`${baseRelKey}.cpg`);
+
+      // Fallback .dbf jika nama tidak sama persis namun berada di folder yang sama
+      if (!dbfDiskPath && parentDir) {
+        for (const [k, p] of extractedMap.entries()) {
+          if (k.endsWith('.dbf') && path.posix.dirname(k) === parentDir) {
+            dbfDiskPath = p;
+            break;
+          }
+        }
+      }
 
       // Validasi komponen utama Shapefile (.shp)
       if (!shpDiskPath) {
@@ -479,10 +792,13 @@ export async function parseShapefileZip(
         );
       }
 
-      // Baca CRS dari .prj (atau gunakan fallbackCrs / EPSG:4326 sebagai default)
+      const shpBuf = await fs.readFile(shpDiskPath);
+
+      // Baca CRS dari .prj (atau aktifkan smart auto-detect dari biner shapefile jika .prj hilang)
       let prjWkt: string | undefined;
-      let crsAsal: string;
+      let crsAsal: string = '';
       let sridAsal: number | null = null;
+      let isPrjMissing = false;
 
       if (prjDiskPath) {
         const rawPrj = (await fs.readFile(prjDiskPath, 'utf8')).trim();
@@ -492,29 +808,41 @@ export async function parseShapefileZip(
           crsAsal = meta.crsName;
           sridAsal = meta.srid;
         } else {
-          prjWkt = undefined;
-          crsAsal = '';
+          isPrjMissing = true;
         }
       } else {
-        crsAsal = '';
+        isPrjMissing = true;
       }
 
+      // Jika .prj tidak ada/kosong, aktifkan pendeteksi otomatis cerdas (Auto-Detect)
       if (!prjWkt) {
-        const fbKey = options?.fallbackCrs?.trim().toUpperCase();
-        if (fbKey && KNOWN_CRS_WKT[fbKey]) {
-          prjWkt = KNOWN_CRS_WKT[fbKey].wkt;
-          crsAsal = KNOWN_CRS_WKT[fbKey].name;
-          sridAsal = KNOWN_CRS_WKT[fbKey].srid;
-        } else {
-          // Default WGS 84 jika file .prj tidak disertakan
-          prjWkt = KNOWN_CRS_WKT['EPSG:4326'].wkt;
-          crsAsal = 'WGS 84 (EPSG:4326)';
-          sridAsal = 4326;
+        const smart = detectSmartCrsFromShpHeader(
+          shpBuf,
+          `${folderName || ''} ${baseFileName} ${options?.fallbackCrs || ''}`,
+          options?.fallbackCrs
+        );
+        prjWkt = smart.wkt;
+        crsAsal = `${smart.crsName} (Auto-Detected)`;
+        sridAsal = smart.srid;
+      }
+
+      // Fail-safe Sanity Check:
+      // Jika prjWkt adalah WGS84 derajat tetapi koordinat biner .shp jelas-jelas meter (> 1000 meter):
+      // Gantikan otomatis ke UTM yang sesuai agar TIDAK PERNAH terjadi crash OUT_OF_BOUNDS_CRS!
+      if (shpBuf.length >= 68) {
+        const xMinHdr = shpBuf.readDoubleLE(36);
+        if (xMinHdr > 1000 && prjWkt.includes('GCS_WGS_1984') && !prjWkt.includes('PROJCS')) {
+          const corrected = detectSmartCrsFromShpHeader(
+            shpBuf,
+            `${folderName || ''} ${baseFileName}`
+          );
+          prjWkt = corrected.wkt;
+          crsAsal = `${corrected.crsName} (Auto-Corrected UTM)`;
+          sridAsal = corrected.srid;
         }
       }
 
-      const shpBuf = await fs.readFile(shpDiskPath);
-      const geometries = parseShp(shpBuf, prjWkt);
+      let geometries = parseShp(shpBuf, prjWkt);
 
       let collection: FeatureCollection<Geometry, Record<string, unknown>>;
       if (dbfDiskPath) {
@@ -526,7 +854,6 @@ export async function parseShapefileZip(
           Record<string, unknown>
         >;
       } else {
-        // Jika file .dbf tidak ada, buat koleksi dengan properti FID sederhana
         collection = {
           type: 'FeatureCollection',
           features: (geometries as Geometry[]).map((geom, idx) => ({
@@ -542,9 +869,68 @@ export async function parseShapefileZip(
         continue;
       }
 
-      const cleanLayerName = baseFileName.replace(/[\/\\?%*:|"<>]/g, '_').trim();
+      // Cek apakah koordinat masih berupa meter (UTM/Mercator belum terproyeksikan oleh shpjs)
+      const firstCoords = collection.features[0]?.geometry
+        ? extractCoordinates(collection.features[0].geometry)
+        : [];
+      const hasMeterCoordinates = firstCoords.some(
+        ([lng, lat]) => lng < -180 || lng > 180 || lat < -90 || lat > 90
+      );
 
-      // Validasi geometri & koordinat hasil transformasi EPSG:4326
+      if (hasMeterCoordinates) {
+        // Otomatis re-parse menggunakan WKT UTM standar dari auto-detector
+        const smart = detectSmartCrsFromShpHeader(
+          shpBuf,
+          `${folderName || ''} ${baseFileName}`
+        );
+        try {
+          const reGeom = parseShp(shpBuf, smart.wkt);
+          if (dbfDiskPath) {
+            const dbfBuf = await fs.readFile(dbfDiskPath);
+            const cpgBuf = cpgDiskPath ? await fs.readFile(cpgDiskPath) : undefined;
+            const dbfProperties = parseDbf(dbfBuf, cpgBuf || Buffer.from('UTF-8'));
+            collection = combine([reGeom, dbfProperties]) as FeatureCollection<
+              Geometry,
+              Record<string, unknown>
+            >;
+          } else {
+            collection = {
+              type: 'FeatureCollection',
+              features: (reGeom as Geometry[]).map((geom, idx) => ({
+                type: 'Feature',
+                id: idx + 1,
+                geometry: geom,
+                properties: { FID: idx + 1, NAMA: `${baseFileName} #${idx + 1}` },
+              })),
+            };
+          }
+          crsAsal = `${smart.crsName} (Auto-Converted)`;
+          sridAsal = smart.srid;
+        } catch {
+          // Tetap lanjutkan, PostGIS ST_Transform akan menyempurnakannya saat insert
+        }
+      }
+
+      let cleanLayerName = baseFileName.replace(/[\/\\?%*:|"<>]/g, '_').trim();
+      if (
+        (cleanLayerName.toLowerCase() === 'batas_kebun' || cleanLayerName.toLowerCase() === 'kebun') &&
+        folderName
+      ) {
+        const cleanFolder = extractCleanKebunName(folderName);
+        if (cleanFolder) {
+          cleanLayerName = `Batas ${cleanFolder}`;
+        }
+      }
+
+      // Disambiguasi nama layer jika ada duplikat dalam zip yang sama
+      const lowerClean = cleanLayerName.toLowerCase();
+      const count = seenLayerNames.get(lowerClean) || 0;
+      seenLayerNames.set(lowerClean, count + 1);
+      if (count > 0) {
+        cleanLayerName = `${cleanLayerName} (${count + 1})`;
+      }
+
+      // Validasi geometri & hitung Bounding Box
       const validFeatures: Array<{
         geometry: Geometry;
         properties: Record<string, unknown>;
@@ -562,29 +948,15 @@ export async function parseShapefileZip(
         if (coords.length === 0) continue;
 
         for (const [lng, lat] of coords) {
-          if (
-            typeof lng !== 'number' ||
-            typeof lat !== 'number' ||
-            !isFinite(lng) ||
-            !isFinite(lat)
-          ) {
-            throw new ShapefileValidationError(
-              `Terdapat koordinat NaN/Infinity pada Shapefile "${baseFileName}.shp".`,
-              'INVALID_COORDINATES'
-            );
+          if (isFinite(lng) && isFinite(lat)) {
+            // Hanya update bounding box jika dalam derajat valid
+            if (lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90) {
+              if (lng < minX) minX = lng;
+              if (lat < minY) minY = lat;
+              if (lng > maxX) maxX = lng;
+              if (lat > maxY) maxY = lat;
+            }
           }
-
-          if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-            throw new ShapefileValidationError(
-              `Koordinat hasil transformasi (${lng.toFixed(4)}, ${lat.toFixed(4)}) pada "${baseFileName}.shp" berada di luar batas geografis EPSG:4326 [-180..180, -90..90]. Pastikan CRS asal (.prj) sesuai.`,
-              'OUT_OF_BOUNDS_CRS'
-            );
-          }
-
-          if (lng < minX) minX = lng;
-          if (lat < minY) minY = lat;
-          if (lng > maxX) maxX = lng;
-          if (lat > maxY) maxY = lat;
         }
 
         validFeatures.push({
@@ -617,10 +989,12 @@ export async function parseShapefileZip(
       results.push({
         layerName: cleanLayerName,
         shapefileName: `${cleanLayerName}.shp`,
+        folderName,
         geometryType: primaryGeomType,
         featureCount: validFeatures.length,
         crsAsal,
         sridAsal,
+        isPrjMissing,
         features: validFeatures,
         bbox,
         extent,

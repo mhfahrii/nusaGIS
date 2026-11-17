@@ -522,6 +522,19 @@ export function MonitoringMap({
 
       // 6. Susun baris atribut yang hanya BERISI DATA (Jika kosong, HILANGKAN row & nama barisnya!)
       const extraAttributes: Array<{ label: string; value: string }> = [];
+
+      // Perusahaan pemilik kebun/lahan
+      const rawPerusahaan =
+        properties.perusahaan ||
+        properties.Perusahaan ||
+        properties.PERUSAHAAN ||
+        properties.holding ||
+        (layer as unknown as { perusahaan?: string }).perusahaan ||
+        'PT Perkebunan Nusantara I (Regional 4)';
+      if (isValidValue(rawPerusahaan)) {
+        extraAttributes.push({ label: 'Perusahaan', value: String(rawPerusahaan) });
+      }
+
       if (isValidValue(statusLahan)) {
         extraAttributes.push({ label: 'Status Lahan', value: statusLahan });
       }
@@ -633,11 +646,11 @@ export function MonitoringMap({
 
       const wrapper = document.createElement('div');
       wrapper.style.cssText =
-        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; min-width: 310px; max-width: 360px; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.8), 0 10px 20px -4px rgba(0, 0, 0, 0.5);';
+        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; width: 330px; max-width: 360px; max-height: min(450px, 68vh); display: flex; flex-direction: column; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.8), 0 10px 20px -4px rgba(0, 0, 0, 0.5);';
 
       wrapper.innerHTML = `
         <!-- 1. ArcGIS Pro Header -->
-        <div style="background: linear-gradient(180deg, #12192b 0%, #0d1322 100%); padding: 10px 12px; border-bottom: 1px solid #1e2942;">
+        <div style="background: linear-gradient(180deg, #12192b 0%, #0d1322 100%); padding: 10px 12px; border-bottom: 1px solid #1e2942; flex-shrink: 0;">
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
             <div style="flex: 1; min-width: 0;">
               <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
@@ -659,60 +672,28 @@ export function MonitoringMap({
         </div>
 
         <!-- 2. Dual KPI Highlight Card (Luas Ukur GIS vs Luas Baku) -->
-        ${kpiHighlightHtml}
+        <div style="flex-shrink: 0;">
+          ${kpiHighlightHtml}
+        </div>
 
         <!-- 3. Clean Attribute Table (Hanya baris yang ada nilainya) -->
-        ${tableContentHtml}
+        <div style="flex: 1; min-height: 0; overflow-y: auto;">
+          ${tableContentHtml}
+        </div>
 
-        <!-- 4. Modern Action Bar -->
-        <div style="background: #12192b; padding: 7px 10px; border-top: 1px solid #1e2942; display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: 4px;">
-            <button type="button" data-action="zoom" style="background: #0d1322; border: 1px solid #1e2942; color: #8b9bb4; font-size: 10px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 4px;" title="Zoom ke Poligon Blok Ini">
-              <svg style="width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              <span>Zoom</span>
-            </button>
-            <button type="button" data-action="pan" style="background: #0d1322; border: 1px solid #1e2942; color: #8b9bb4; font-size: 10px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 4px;" title="Pusatkan Layar ke Blok Ini">
-              <svg style="width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><polyline points="5 9 2 12 5 15"></polyline><polyline points="9 5 12 2 15 5"></polyline><polyline points="15 19 12 22 9 19"></polyline><polyline points="19 9 22 12 19 15"></polyline><line x1="2" y1="12" x2="22" y2="12"></line><line x1="12" y1="2" x2="12" y2="22"></line></svg>
-              <span>Pan</span>
-            </button>
-          </div>
-          <div style="display: flex; align-items: center; gap: 4px;">
-            <a href="/api/gis/export?feature_id=${featId}&format=geojson" target="_blank" download="${String(nameVal)}.geojson" style="color: #00d2ff; background: #0e3a5d; border: 1px solid #00b4d8; font-size: 9.5px; font-weight: 700; text-decoration: none; padding: 3px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;" title="Unduh GeoJSON">
-              <span>GeoJSON</span>
-            </a>
-            <a href="/api/gis/export?feature_id=${featId}&format=kml" target="_blank" download="${String(nameVal)}.kml" style="color: #7dd3fc; background: #132238; border: 1px solid #1e2942; font-size: 9.5px; font-weight: 700; text-decoration: none; padding: 3px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;" title="Unduh KML Google Earth">
-              <span>KML</span>
-            </a>
-            <button type="button" data-action="delete" style="color: #f87171; background: #450a0a; border: 1px solid #991b1b; font-size: 9.5px; font-weight: 700; cursor: pointer; padding: 3px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;" title="Hapus Lahan ini dari Database">
-              <span>Hapus</span>
-            </button>
-          </div>
+        <!-- 4. Modern Action Bar (Download & Kelola Data) -->
+        <div style="background: #12192b; padding: 8px 12px; border-top: 1px solid #1e2942; display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-shrink: 0;">
+          <a href="/api/gis/export?feature_id=${featId}&format=geojson" target="_blank" download="${String(nameVal)}.geojson" style="color: #00d2ff; background: #0e3a5d; border: 1px solid #00b4d8; font-size: 10px; font-weight: 700; text-decoration: none; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Unduh GeoJSON">
+            <span>GeoJSON</span>
+          </a>
+          <a href="/api/gis/export?feature_id=${featId}&format=kml" target="_blank" download="${String(nameVal)}.kml" style="color: #7dd3fc; background: #132238; border: 1px solid #1e2942; font-size: 10px; font-weight: 700; text-decoration: none; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Unduh KML Google Earth">
+            <span>KML</span>
+          </a>
+          <button type="button" data-action="delete" style="color: #f87171; background: #450a0a; border: 1px solid #991b1b; font-size: 10px; font-weight: 700; cursor: pointer; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Hapus Lahan ini dari Database">
+            <span>Hapus</span>
+          </button>
         </div>
       `;
-
-      const zoomBtn = wrapper.querySelector('[data-action="zoom"]');
-      if (zoomBtn) {
-        zoomBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          if (featureBounds && featureBounds.isValid()) {
-            map.fitBounds(featureBounds, { padding: [60, 60], maxZoom: 17, animate: true });
-          } else {
-            map.setView(clickLatLng, 16, { animate: true });
-          }
-        });
-      }
-
-      const panBtn = wrapper.querySelector('[data-action="pan"]');
-      if (panBtn) {
-        panBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          if (featureBounds && featureBounds.isValid()) {
-            map.panTo(featureBounds.getCenter(), { animate: true });
-          } else {
-            map.panTo(clickLatLng, { animate: true });
-          }
-        });
-      }
 
       const delBtn = wrapper.querySelector('[data-action="delete"]');
       if (delBtn && featId) {
@@ -962,8 +943,9 @@ export function MonitoringMap({
               minWidth: 300,
               closeButton: true,
               autoPan: true,
-              autoPanPaddingTopLeft: [280, 80],
-              autoPanPaddingBottomRight: [40, 80],
+              autoPanPaddingTopLeft: [60, 60],
+              autoPanPaddingBottomRight: [60, 60],
+              keepInView: false,
               offset: [0, -12],
             })
               .setLatLng(e.latlng)
@@ -1320,10 +1302,16 @@ export function MonitoringMap({
                 featBounds = (featureLayer as LType.Polygon | LType.Polyline).getBounds();
               }
 
+              const popupLatLng =
+                featBounds && featBounds.isValid() ? featBounds.getCenter() : e.latlng;
+
+              // Pusatkan peta ke tengah poligon/wilayah yang diklik
+              map.panTo(popupLatLng, { animate: true, duration: 0.35 });
+
               const popupEl = buildPopupElement(
                 map,
                 featBounds,
-                e.latlng,
+                popupLatLng,
                 props,
                 layer,
                 featId
@@ -1331,15 +1319,14 @@ export function MonitoringMap({
 
               L.popup({
                 className: 'monitoring-leaflet-popup',
-                maxWidth: 360,
-                minWidth: 310,
+                maxWidth: 380,
+                minWidth: 320,
                 closeButton: true,
-                autoPan: true,
-                autoPanPaddingTopLeft: [280, 80],
-                autoPanPaddingBottomRight: [40, 80],
-                offset: [0, -12],
+                autoPan: false,
+                keepInView: false,
+                offset: [0, -14],
               })
-                .setLatLng(e.latlng)
+                .setLatLng(popupLatLng)
                 .setContent(popupEl)
                 .openOn(map);
             });

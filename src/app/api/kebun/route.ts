@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
       }
 
       const res = await query<Kebun>(
-        'SELECT id, kode_kebun, nama_kebun, wilayah, komoditas, keterangan, dibuat_pada FROM kebun WHERE id = $1;',
+        'SELECT id, kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada FROM kebun WHERE id = $1;',
         [id]
       );
 
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     }
 
     const res = await query<Kebun>(
-      'SELECT id, kode_kebun, nama_kebun, wilayah, komoditas, keterangan, dibuat_pada FROM kebun ORDER BY nama_kebun ASC;'
+      'SELECT id, kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada FROM kebun ORDER BY nama_kebun ASC;'
     );
 
     return NextResponse.json({
@@ -78,6 +78,9 @@ export async function POST(req: NextRequest) {
 
     const kode_kebun = typeof body.kode_kebun === 'string' ? body.kode_kebun.trim() : '';
     const nama_kebun = typeof body.nama_kebun === 'string' ? body.nama_kebun.trim() : '';
+    const perusahaan = typeof body.perusahaan === 'string' && body.perusahaan.trim()
+      ? body.perusahaan.trim()
+      : 'PT Perkebunan Nusantara I (Regional 4)';
     const wilayah = typeof body.wilayah === 'string' ? body.wilayah.trim() : null;
     const komoditas = typeof body.komoditas === 'string' ? body.komoditas.trim() : null;
     const keterangan = typeof body.keterangan === 'string' ? body.keterangan.trim() : null;
@@ -110,10 +113,10 @@ export async function POST(req: NextRequest) {
     }
 
     const insertRes = await query<Kebun>(
-      `INSERT INTO kebun (kode_kebun, nama_kebun, wilayah, komoditas, keterangan, dibuat_pada)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       RETURNING id, kode_kebun, nama_kebun, wilayah, komoditas, keterangan, dibuat_pada;`,
-      [kode_kebun, nama_kebun, wilayah, komoditas, keterangan]
+      `INSERT INTO kebun (kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       RETURNING id, kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada;`,
+      [kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan]
     );
 
     return NextResponse.json(
@@ -209,6 +212,11 @@ export async function PATCH(req: NextRequest) {
       values.push(nama);
     }
 
+    if (body.perusahaan !== undefined) {
+      updates.push(`perusahaan = $${paramIndex++}`);
+      values.push(typeof body.perusahaan === 'string' ? body.perusahaan.trim() : null);
+    }
+
     if (body.wilayah !== undefined) {
       updates.push(`wilayah = $${paramIndex++}`);
       values.push(typeof body.wilayah === 'string' ? body.wilayah.trim() : null);
@@ -236,7 +244,7 @@ export async function PATCH(req: NextRequest) {
       UPDATE kebun 
       SET ${updates.join(', ')} 
       WHERE id = $${paramIndex}
-      RETURNING id, kode_kebun, nama_kebun, wilayah, komoditas, keterangan, dibuat_pada;
+      RETURNING id, kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada;
     `;
 
     const updateRes = await query<Kebun>(updateSql, values);
