@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   IconClose,
   IconAddData,
   IconLayers,
-  IconTable,
   IconFolder,
 } from '../GisIcons';
 import { KNOWN_CRS_WKT } from '@/lib/gis/crs';
@@ -24,13 +23,6 @@ interface AfdelingOption {
   kebun_id: number;
   kode_afdeling: string;
   nama_afdeling: string;
-}
-
-interface BlokOption {
-  id: number;
-  afdeling_id: number;
-  kode_blok: string;
-  nama_blok: string;
 }
 
 interface GisUploadModalProps {
@@ -146,10 +138,9 @@ export function GisUploadModal({
   const [fileName, setFileName] = useState<string>('');
   const [detectedDatasets, setDetectedDatasets] = useState<DetectedDataset[]>([]);
 
-  // Metadata kebun, afdeling, blok dari database
+  // Metadata kebun & afdeling dari database
   const [kebunList, setKebunList] = useState<KebunOption[]>([]);
   const [afdelingList, setAfdelingList] = useState<AfdelingOption[]>([]);
-  const [blokList, setBlokList] = useState<BlokOption[]>([]);
 
   // State Target Geodatabase Induk (ArcGIS Pro Best Practice: Set 1 Kali untuk Seluruh Folder)
   const [targetMode, setTargetMode] = useState<'existing' | 'new'>('existing');
@@ -159,21 +150,42 @@ export function GisUploadModal({
   const [newKebunPerusahaan, setNewKebunPerusahaan] = useState<string>(
     'PT Perkebunan Nusantara I (Regional 4)'
   );
+  const [isNewPerusahaan, setIsNewPerusahaan] = useState<boolean>(false);
+
+  // Daftar unik perusahaan yang sudah ada di DB + standar PTPN/P3GI (bisa dipilih atau ketik baru)
+  const availablePerusahaan = useMemo(() => {
+    const map = new Map<string, string>();
+    const defaults = [
+      'PT Perkebunan Nusantara I (Regional 4)',
+      'Pusat Penelitian Perkebunan Gula Indonesia (P3GI)',
+    ];
+    for (const k of kebunList) {
+      const p = k.perusahaan?.trim();
+      if (p && !map.has(p.toLowerCase())) {
+        map.set(p.toLowerCase(), p);
+      }
+    }
+    for (const d of defaults) {
+      if (!map.has(d.toLowerCase())) {
+        map.set(d.toLowerCase(), d);
+      }
+    }
+    return Array.from(map.values());
+  }, [kebunList]);
 
   // Mappings state per dataset
   const [mappings, setMappings] = useState<LayerMappingInput[]>([]);
 
-  // Load master kebun, afdeling, blok
+  // Load master kebun & afdeling
   useEffect(() => {
     if (!isOpen) return;
 
     let ignore = false;
     async function loadMaster() {
       try {
-        const [kRes, aRes, bRes] = await Promise.all([
+        const [kRes, aRes] = await Promise.all([
           fetch('/api/kebun'),
           fetch('/api/afdeling'),
-          fetch('/api/blok'),
         ]);
 
         if (!ignore) {
@@ -184,10 +196,6 @@ export function GisUploadModal({
           if (aRes.ok) {
             const aj = await aRes.json();
             setAfdelingList(aj.data || []);
-          }
-          if (bRes.ok) {
-            const bj = await bRes.json();
-            setBlokList(bj.data || []);
           }
         }
       } catch (err) {
@@ -214,6 +222,7 @@ export function GisUploadModal({
     setNewKebunNama('');
     setNewKebunWilayah('');
     setNewKebunPerusahaan('PT Perkebunan Nusantara I (Regional 4)');
+    setIsNewPerusahaan(false);
     setErrorMessage(null);
     setIsInspecting(false);
     setIsImporting(false);
@@ -352,7 +361,8 @@ export function GisUploadModal({
       let initialKebunId = defaultKebunId;
       let initialNama = '';
       let initialWilayah = '';
-      const initialPerusahaan = 'PT Perkebunan Nusantara I (Regional 4)';
+      let initialPerusahaan =
+        (kebunList[0]?.perusahaan?.trim()) || 'PT Perkebunan Nusantara I (Regional 4)';
 
       if (firstDs?.suggestedKebunName) {
         const lowerSug = firstDs.suggestedKebunName.toLowerCase();
@@ -366,6 +376,8 @@ export function GisUploadModal({
           initialKebunId = found.id;
           initialNama = found.nama_kebun;
           initialWilayah = found.wilayah || firstDs.suggestedWilayah || '';
+          initialPerusahaan =
+            found.perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)';
         } else {
           initialTargetMode = 'new';
           initialKebunId = 0;
@@ -383,6 +395,7 @@ export function GisUploadModal({
       setNewKebunNama(initialNama);
       setNewKebunWilayah(initialWilayah);
       setNewKebunPerusahaan(initialPerusahaan);
+      setIsNewPerusahaan(false);
 
       // Siapkan default mapping untuk setiap dataset
       const initialMappings = (json.datasets as DetectedDataset[]).map((ds, idx) => {
@@ -468,7 +481,7 @@ export function GisUploadModal({
       return;
     }
 
-    // 2. Validasi Target Kebun & Wilayah
+    // 2. Validasi Target Kebun, Wilayah & Perusahaan
     if (targetMode === 'existing') {
       if (!selectedKebunId || selectedKebunId <= 0) {
         setErrorMessage('Pilih Unit Kebun tujuan untuk menyimpan layer.');
@@ -483,6 +496,10 @@ export function GisUploadModal({
         setErrorMessage('Wilayah administratif kebun baru wajib diisi.');
         return;
       }
+    }
+    if (isNewPerusahaan && !newKebunPerusahaan.trim()) {
+      setErrorMessage('Ketik nama perusahaan baru, atau klik "← Pilih Daftar" untuk memilih perusahaan yang sudah ada.');
+      return;
     }
 
     // 3. Validasi nama layer aktif
@@ -500,7 +517,7 @@ export function GisUploadModal({
       const payload = {
         tempId,
         nama_data: fileName.replace(/\.[^/.]+$/, ''),
-        keterangan: 'Diimpor melalui NusaGIS Monitoring Dashboard (Standar ArcGIS Pro)',
+        keterangan: 'Diimpor melalui GIS Monitoring Dashboard (Standar ArcGIS Pro)',
         target_kebun: {
           is_new_kebun: targetMode === 'new',
           kebun_id: targetMode === 'existing' ? selectedKebunId : null,
@@ -935,7 +952,13 @@ export function GisUploadModal({
                       onClick={() => {
                         setTargetMode('existing');
                         if (kebunList.length > 0 && (!selectedKebunId || selectedKebunId === 0)) {
-                          setSelectedKebunId(kebunList[0].id);
+                          const firstK = kebunList[0];
+                          setSelectedKebunId(firstK.id);
+                          if (!isNewPerusahaan) {
+                            setNewKebunPerusahaan(
+                              firstK.perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)'
+                            );
+                          }
                         }
                       }}
                       className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
@@ -949,98 +972,177 @@ export function GisUploadModal({
                   </div>
                 </div>
 
-                {/* Form Input Target Kebun */}
-                {targetMode === 'new' ? (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                {/* Form Input Target Kebun & Perusahaan */}
+                {(() => {
+                  const renderPerusahaanField = () => (
                     <div>
-                      <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1 flex items-center justify-between">
-                        <span>
-                          Nama Unit Kebun Baru <span className="text-rose-400">*</span>
-                        </span>
-                        <span className="text-[9px] text-[#00D2FF]">Auto-Detected</span>
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="misal: Kebun Sarongge"
-                        value={newKebunNama}
-                        onChange={(e) => setNewKebunNama(e.target.value)}
-                        className="w-full bg-[#0D1322] border border-[#00D2FF]/50 focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1 flex items-center justify-between">
-                        <span>
-                          Wilayah Administratif <span className="text-rose-400">*</span>
-                        </span>
-                        <span className="text-[9px] text-emerald-400">Dari Koordinat GIS</span>
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="misal: Kabupaten Cianjur, Jawa Barat"
-                        value={newKebunWilayah}
-                        onChange={(e) => setNewKebunWilayah(e.target.value)}
-                        className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1">
-                        Perusahaan Induk
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="PT Perkebunan Nusantara I"
-                        value={newKebunPerusahaan}
-                        onChange={(e) => setNewKebunPerusahaan(e.target.value)}
-                        className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                    <div>
-                      <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1">
-                        Pilih Unit Kebun Tujuan <span className="text-rose-400">*</span>
-                      </label>
-                      <select
-                        value={selectedKebunId || ''}
-                        onChange={(e) => setSelectedKebunId(Number(e.target.value))}
-                        className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
-                      >
-                        <option value="" disabled>
-                          Pilih Kebun yang Ada...
-                        </option>
-                        {kebunList.map((k) => (
-                          <option key={k.id} value={k.id} className="bg-[#0D1322]">
-                            {k.nama_kebun} — ({k.wilayah || 'Wilayah Belum Diset'})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center text-xs text-[#8B9BB4] bg-[#0D1322]/60 rounded-lg p-2.5 border border-[#1E2942]">
-                      {selectedKebunId ? (
-                        (() => {
-                          const cur = kebunList.find((k) => k.id === selectedKebunId);
-                          return (
-                            <div className="space-y-0.5">
-                              <span className="text-[#F0F6FC] font-semibold">
-                                {cur?.nama_kebun}
-                              </span>
-                              <div className="text-[10px] text-slate-400">
-                                Wilayah:{' '}
-                                <span className="text-emerald-400">{cur?.wilayah || '-'}</span> |
-                                Perusahaan: {cur?.perusahaan || 'PTPN I'}
-                              </div>
-                            </div>
-                          );
-                        })()
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-semibold text-[#8B9BB4]">
+                          Perusahaan Induk <span className="text-rose-400">*</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isNewPerusahaan) {
+                              setIsNewPerusahaan(false);
+                              if (!availablePerusahaan.includes(newKebunPerusahaan.trim())) {
+                                setNewKebunPerusahaan(
+                                  availablePerusahaan[0] ||
+                                    'PT Perkebunan Nusantara I (Regional 4)'
+                                );
+                              }
+                            } else {
+                              setIsNewPerusahaan(true);
+                              setNewKebunPerusahaan('');
+                            }
+                          }}
+                          className="text-[10px] font-semibold text-[#00D2FF] hover:text-[#38BDF8] hover:underline cursor-pointer"
+                        >
+                          {isNewPerusahaan ? '← Pilih dari Daftar' : '+ Ketik Perusahaan Baru'}
+                        </button>
+                      </div>
+                      {isNewPerusahaan ? (
+                        <input
+                          type="text"
+                          placeholder="Ketik nama perusahaan baru (misal: PTPN I Regional 2)..."
+                          value={newKebunPerusahaan}
+                          onChange={(e) => setNewKebunPerusahaan(e.target.value)}
+                          autoFocus
+                          className="w-full bg-[#0D1322] border border-[#00D2FF]/60 focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+                        />
                       ) : (
-                        <span className="italic text-slate-500">
-                          Pilih salah satu kebun pada dropdown di samping
-                        </span>
+                        <select
+                          value={
+                            availablePerusahaan.includes(newKebunPerusahaan)
+                              ? newKebunPerusahaan
+                              : availablePerusahaan[0] || ''
+                          }
+                          onChange={(e) => {
+                            if (e.target.value === '__NEW__') {
+                              setIsNewPerusahaan(true);
+                              setNewKebunPerusahaan('');
+                            } else {
+                              setNewKebunPerusahaan(e.target.value);
+                            }
+                          }}
+                          className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+                        >
+                          {availablePerusahaan.map((p) => (
+                            <option key={p} value={p} className="bg-[#0D1322]">
+                              {p}
+                            </option>
+                          ))}
+                          <option value="__NEW__" className="bg-[#0D1322] text-[#00D2FF] font-semibold">
+                            + Ketik Perusahaan Baru...
+                          </option>
+                        </select>
                       )}
                     </div>
-                  </div>
-                )}
+                  );
+
+                  if (targetMode === 'new') {
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                        <div>
+                          <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1 flex items-center justify-between">
+                            <span>
+                              Nama Unit Kebun Baru <span className="text-rose-400">*</span>
+                            </span>
+                            <span className="text-[9px] text-[#00D2FF]">Auto-Detected</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="misal: Kebun Sarongge"
+                            value={newKebunNama}
+                            onChange={(e) => setNewKebunNama(e.target.value)}
+                            className="w-full bg-[#0D1322] border border-[#00D2FF]/50 focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1 flex items-center justify-between">
+                            <span>
+                              Wilayah Administratif <span className="text-rose-400">*</span>
+                            </span>
+                            <span className="text-[9px] text-emerald-400">Dari Koordinat GIS</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="misal: Kabupaten Cianjur, Jawa Barat"
+                            value={newKebunWilayah}
+                            onChange={(e) => setNewKebunWilayah(e.target.value)}
+                            className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+                          />
+                        </div>
+                        {renderPerusahaanField()}
+                      </div>
+                    );
+                  }
+
+                  const curKebun = kebunList.find((k) => k.id === selectedKebunId);
+                  const curPerusahaan = curKebun?.perusahaan?.trim() || '';
+                  const isPerusahaanChanged =
+                    Boolean(newKebunPerusahaan.trim()) &&
+                    newKebunPerusahaan.trim().toLowerCase() !== curPerusahaan.toLowerCase();
+
+                  return (
+                    <div className="space-y-2.5 pt-1">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1">
+                            Pilih Unit Kebun Tujuan <span className="text-rose-400">*</span>
+                          </label>
+                          <select
+                            value={selectedKebunId || ''}
+                            onChange={(e) => {
+                              const nextId = Number(e.target.value);
+                              setSelectedKebunId(nextId);
+                              const nextK = kebunList.find((k) => k.id === nextId);
+                              if (nextK && !isNewPerusahaan) {
+                                setNewKebunPerusahaan(
+                                  nextK.perusahaan?.trim() ||
+                                    'PT Perkebunan Nusantara I (Regional 4)'
+                                );
+                              }
+                            }}
+                            className="w-full bg-[#0D1322] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-3 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+                          >
+                            <option value="" disabled>
+                              Pilih Kebun yang Ada...
+                            </option>
+                            {kebunList.map((k) => (
+                              <option key={k.id} value={k.id} className="bg-[#0D1322]">
+                                {k.nama_kebun} — ({k.wilayah || 'Wilayah Belum Diset'})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {renderPerusahaanField()}
+                      </div>
+
+                      {curKebun && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-[#8B9BB4] bg-[#0D1322]/60 rounded-lg px-3 py-1.5 border border-[#1E2942]">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[#F0F6FC] font-semibold">
+                              {curKebun.nama_kebun}
+                            </span>
+                            <span className="text-[#2C3B59]">|</span>
+                            <span>
+                              Wilayah:{' '}
+                              <span className="text-emerald-400 font-medium">
+                                {curKebun.wilayah || '-'}
+                              </span>
+                            </span>
+                          </div>
+                          {isPerusahaanChanged && (
+                            <span className="px-2 py-0.5 rounded bg-[#00D2FF]/10 border border-[#00D2FF]/40 text-[#00D2FF] text-[10px] font-semibold">
+                              Perusahaan akan diperbarui ke: {newKebunPerusahaan.trim()}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* 2. TABEL MATRIKS STANDAR ARCGIS PRO: DAFTAR LAYER SPASIAL */}

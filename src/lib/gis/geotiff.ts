@@ -1,7 +1,6 @@
 import { fromArrayBuffer, GeoTIFF, GeoTIFFImage } from 'geotiff';
 import { PNG } from 'pngjs';
 import fs from 'node:fs/promises';
-import path from 'node:path';
 
 export interface GeoTiffMetadata {
   width: number;
@@ -41,7 +40,7 @@ export async function parseGeoTiffMetadata(buffer: Buffer): Promise<GeoTiffMetad
 
   // Bounding box: [minX, minY, maxX, maxY]
   // Note: image.getBoundingBox() mengembalikan [minX, minY, maxX, maxY] dalam koordinat proyeksi file
-  let bbox = image.getBoundingBox() as [number, number, number, number];
+  const bbox = image.getBoundingBox() as [number, number, number, number];
   
   // Deteksi CRS/SRID sederhana dari GeoKey
   const geoKeys = image.getGeoKeys();
@@ -60,7 +59,7 @@ export async function parseGeoTiffMetadata(buffer: Buffer): Promise<GeoTiffMetad
 
   // Jika koordinat dalam range bujur/lintang Indonesia (-15 s/d 15 lintang, 90 s/d 145 bujur)
   // Atau jika SRID UTM, kita lakukan validasi
-  let isLonLat = Math.abs(bbox[0]) <= 180 && Math.abs(bbox[2]) <= 180 && Math.abs(bbox[1]) <= 90 && Math.abs(bbox[3]) <= 90;
+  const isLonLat = Math.abs(bbox[0]) <= 180 && Math.abs(bbox[2]) <= 180 && Math.abs(bbox[1]) <= 90 && Math.abs(bbox[3]) <= 90;
 
   if (!isLonLat && (sridAsal >= 32600 && sridAsal <= 32760)) {
     // UTM projection converter sederhana atau fallback

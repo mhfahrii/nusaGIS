@@ -88,11 +88,13 @@ export default function SettingsModal({
   }, []);
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    const timer = setTimeout(() => {
       setActiveTab(initialTab);
       setActionMessage(null);
       fetchHistory();
-    }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [isOpen, initialTab, fetchHistory]);
 
   // Flash message auto clear
@@ -707,7 +709,7 @@ export default function SettingsModal({
         <div className="p-3 bg-[#090D18] border-t border-[#1E2942] flex items-center justify-between text-[11px] text-[#8B9BB4]">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
-            <span>NusaGIS Enterprise Spatial Manager</span>
+            <span>GIS Monitoring Spatial Manager</span>
           </div>
           <button
             type="button"

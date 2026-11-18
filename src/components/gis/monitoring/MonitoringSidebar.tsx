@@ -58,6 +58,7 @@ interface MonitoringSidebarProps {
   onResetFilters: () => void;
   // Manajemen Layer Props (Dipindahkan ke Sidebar Kiri)
   layers?: LayerPeta[];
+  allLayers?: LayerPeta[];
   selectedLayerId?: number | null;
   onSelectLayer?: (id: number) => void;
   onToggleLayerVisibility?: (id: number, visible: boolean) => void;
@@ -88,6 +89,7 @@ export function MonitoringSidebar({
   onSelectBlok,
   onResetFilters,
   layers = [],
+  allLayers,
   selectedLayerId = null,
   onSelectLayer,
   onToggleLayerVisibility,
@@ -146,26 +148,40 @@ export function MonitoringSidebar({
     ])
   );
 
-  // 2. Cascading Wilayah berdasarkan Perusahaan terpilih
+  // 2. Cascading Wilayah berdasarkan Perusahaan terpilih (gabungkan dari master kebun + layer aktif)
   const filteredByPerusahaanKebun = selectedPerusahaan
     ? kebunList.filter(
         (k) =>
-          (k.perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)') ===
-          selectedPerusahaan
+          (k.perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)').toLowerCase() ===
+          selectedPerusahaan.trim().toLowerCase()
       )
     : kebunList;
 
-  const availableWilayah = Array.from(
-    new Set(
-      filteredByPerusahaanKebun
-        .map((k) => k.wilayah?.trim())
-        .filter((w): w is string => Boolean(w && w.length > 0))
-    )
-  );
+  const sourceLayersForWilayah = allLayers ?? layers;
+  const wilayahMap = new Map<string, string>();
+  for (const k of filteredByPerusahaanKebun) {
+    const w = k.wilayah?.trim();
+    if (w && w.length > 0 && !wilayahMap.has(w.toLowerCase())) {
+      wilayahMap.set(w.toLowerCase(), w);
+    }
+  }
+  for (const l of sourceLayersForWilayah) {
+    if (selectedPerusahaan) {
+      const lPer = (l.perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)').toLowerCase();
+      if (lPer !== selectedPerusahaan.trim().toLowerCase()) continue;
+    }
+    const w = l.wilayah?.trim();
+    if (w && w.length > 0 && !wilayahMap.has(w.toLowerCase())) {
+      wilayahMap.set(w.toLowerCase(), w);
+    }
+  }
+  const availableWilayah = Array.from(wilayahMap.values());
 
   // 3. Kebun berdasarkan Wilayah & Perusahaan terpilih
   const filteredKebun = selectedWilayah
-    ? filteredByPerusahaanKebun.filter((k) => k.wilayah?.trim() === selectedWilayah)
+    ? filteredByPerusahaanKebun.filter(
+        (k) => (k.wilayah?.trim() || '').toLowerCase() === selectedWilayah.trim().toLowerCase()
+      )
     : filteredByPerusahaanKebun;
 
   // 4. Afdeling berdasarkan Kebun terpilih
@@ -241,10 +257,6 @@ export function MonitoringSidebar({
             value={selectedPerusahaan}
             onChange={(e) => {
               onSelectPerusahaan(e.target.value);
-              onSelectWilayah('');
-              onSelectKebun(null);
-              onSelectAfdeling(null);
-              onSelectBlok(null);
             }}
             className="w-full bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
           >
@@ -284,9 +296,6 @@ export function MonitoringSidebar({
             value={selectedWilayah}
             onChange={(e) => {
               onSelectWilayah(e.target.value);
-              onSelectKebun(null);
-              onSelectAfdeling(null);
-              onSelectBlok(null);
             }}
             className="w-full bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
           >
@@ -309,8 +318,6 @@ export function MonitoringSidebar({
             onChange={(e) => {
               const val = e.target.value ? Number(e.target.value) : null;
               onSelectKebun(val);
-              onSelectAfdeling(null);
-              onSelectBlok(null);
             }}
             className="w-full bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
           >
@@ -333,7 +340,6 @@ export function MonitoringSidebar({
             onChange={(e) => {
               const val = e.target.value ? Number(e.target.value) : null;
               onSelectAfdeling(val);
-              onSelectBlok(null);
             }}
             className="w-full bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors disabled:opacity-40"
           >

@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
       FROM public.layer_peta l
       LEFT JOIN public.kebun k ON l.kebun_id = k.id
       LEFT JOIN public.data_unggahan du ON l.unggahan_id = du.id
-      LEFT JOIN public.fitur_peta f ON l.id = f.layer_id
+      LEFT JOIN public.fitur_peta f ON l.id = f.layer_id AND COALESCE(f.is_deleted, FALSE) = FALSE
       ${whereSql}
       GROUP BY l.id, k.nama_kebun, k.kode_kebun, k.wilayah, k.perusahaan, du.nama_data, du.crs_asal, du.srid_asal
       ORDER BY l.urutan ASC, l.id ASC;

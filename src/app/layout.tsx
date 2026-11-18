@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "NusaGIS Monitoring — Simple GIS Dashboard",
+  title: "GIS Monitoring — Simple GIS Dashboard",
   description: "Web GIS Perkebunan Monitoring Dashboard berbasis PostGIS dan Leaflet",
 };
 

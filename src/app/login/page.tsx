@@ -110,7 +110,7 @@ export default function LoginPage() {
             <IconTree className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-slate-900 tracking-wide">NUSAGIS</h1>
+            <h1 className="text-base font-bold text-slate-900 tracking-wide">GIS MONITORING</h1>
             <p className="text-xs text-emerald-700 font-medium">Web GIS Perkebunan</p>
           </div>
         </div>

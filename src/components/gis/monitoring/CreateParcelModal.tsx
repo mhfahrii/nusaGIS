@@ -65,18 +65,21 @@ export function CreateParcelModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Sync default layer and calculated area
+  // Sync default layer and calculated area when modal opens or area changes
   useEffect(() => {
-    if (defaultLayerId) {
-      setSelectedLayerId(defaultLayerId);
-    } else if (layers.length > 0) {
-      setSelectedLayerId(layers[0].id);
-    }
-    const areaStr = calculatedAreaHa.toFixed(2);
-    setLuasHa(areaStr);
-    setLuasBaku(areaStr);
-    setKode(`BLK-${Date.now().toString().slice(-4)}`);
-    setTahunTanam(new Date().getFullYear().toString());
+    const timer = setTimeout(() => {
+      if (defaultLayerId) {
+        setSelectedLayerId(defaultLayerId);
+      } else if (layers.length > 0) {
+        setSelectedLayerId(layers[0].id);
+      }
+      const areaStr = calculatedAreaHa.toFixed(2);
+      setLuasHa(areaStr);
+      setLuasBaku(areaStr);
+      setKode(`BLK-${Date.now().toString().slice(-4)}`);
+      setTahunTanam(new Date().getFullYear().toString());
+    }, 0);
+    return () => clearTimeout(timer);
   }, [defaultLayerId, layers, calculatedAreaHa]);
 
   // Load master kebun & afdeling

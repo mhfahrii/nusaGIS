@@ -14,6 +14,7 @@ import {
   MAX_ZIP_SIZE_BYTES,
 } from '@/lib/gis/shapefile';
 import { parseGeoTiffMetadata } from '@/lib/gis/geotiff';
+import { extractFeatureIntel } from '@/lib/gis/attributeExtractor';
 import type { DataUnggahan, LayerPeta, ExtentBox, LayerMappingInput } from '@/types/gis';
 
 export async function POST(req: NextRequest) {
@@ -441,9 +442,28 @@ export async function POST(req: NextRequest) {
           const kPer = effectiveNewKebunPerusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)';
           const kKode = `KBN-${kNama.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'NEW'}-${Date.now().toString().slice(-4)}`;
 
-          const existingK = await client.query('SELECT id FROM public.kebun WHERE LOWER(nama_kebun) = LOWER($1);', [kNama]);
+          const existingK = await client.query<{ id: number; wilayah: string | null; perusahaan: string | null }>(
+            'SELECT id, wilayah, perusahaan FROM public.kebun WHERE LOWER(nama_kebun) = LOWER($1);',
+            [kNama]
+          );
           if (existingK.rowCount && existingK.rowCount > 0) {
             targetKebunId = Number(existingK.rows[0].id);
+            const curWil = (existingK.rows[0].wilayah || '').trim();
+            const curPer = (existingK.rows[0].perusahaan || '').trim();
+            const shouldUpdateWil =
+              kWil &&
+              kWil !== 'Wilayah Belum Ditentukan' &&
+              (!curWil || curWil === 'Wilayah Belum Ditentukan');
+            const shouldUpdatePer = Boolean(kPer) && curPer.toLowerCase() !== kPer.toLowerCase();
+            if (shouldUpdateWil || shouldUpdatePer) {
+              await client.query(
+                `UPDATE public.kebun
+                 SET wilayah = COALESCE(NULLIF(NULLIF(TRIM(wilayah), ''), 'Wilayah Belum Ditentukan'), $1),
+                     perusahaan = $2
+                 WHERE id = $3;`,
+                [kWil, kPer, targetKebunId]
+              );
+            }
           } else {
             const insK = await client.query(
               `INSERT INTO public.kebun (kode_kebun, nama_kebun, wilayah, perusahaan)
@@ -452,6 +472,15 @@ export async function POST(req: NextRequest) {
             );
             targetKebunId = Number(insK.rows[0].id);
           }
+        } else if (targetKebunId && effectiveNewKebunPerusahaan?.trim()) {
+          // Jika user memilih kebun yang sudah ada dan memilih/mengetik perusahaan baru, perbarui perusahaan kebun tersebut
+          const newPer = effectiveNewKebunPerusahaan.trim();
+          await client.query(
+            `UPDATE public.kebun
+             SET perusahaan = $1
+             WHERE id = $2 AND COALESCE(LOWER(TRIM(perusahaan)), '') <> LOWER($1);`,
+            [newPer, targetKebunId]
+          );
         }
 
         let targetAfdelingId = mapping?.afdeling_id ? Number(mapping.afdeling_id) : null;
@@ -567,6 +596,38 @@ export async function POST(req: NextRequest) {
              );`,
             [layer.id, geomGeoJson, effectiveSourceSrid, propertiesJson, auth.user.id]
           );
+        }
+
+        // Auto-deteksi & registrasi klaster Afdeling (misal: Afdeling A, B, C, Kebun Rakyat) dari atribut blok DBF
+        if (targetKebunId && ds.features.length > 1) {
+          const detectedAfdelings = new Set<string>();
+          for (const feat of ds.features) {
+            const intel = extractFeatureIntel(
+              (feat.properties || {}) as Record<string, unknown>,
+              { layerName: finalLayerName }
+            );
+            if (intel.afdelingGroup) {
+              detectedAfdelings.add(intel.afdelingGroup);
+            }
+          }
+          for (const afdName of detectedAfdelings) {
+            const existA = await client.query(
+              'SELECT id FROM public.afdeling WHERE kebun_id = $1 AND LOWER(TRIM(nama_afdeling)) = LOWER(TRIM($2));',
+              [targetKebunId, afdName]
+            );
+            if (!existA.rowCount || existA.rowCount === 0) {
+              const afdCode = `AFD-${afdName
+                .replace(/[^a-zA-Z0-9]/g, '')
+                .slice(0, 5)
+                .toUpperCase()}-${targetKebunId}`;
+              await client.query(
+                `INSERT INTO public.afdeling (kebun_id, kode_afdeling, nama_afdeling)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT DO NOTHING;`,
+                [targetKebunId, afdCode, afdName]
+              );
+            }
+          }
         }
 
         // Ambil extent dan jumlah fitur aktual dari PostGIS

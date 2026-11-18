@@ -46,7 +46,7 @@ export function Sidebar() {
           <IconTree className="w-5 h-5" />
         </div>
         <div>
-          <h1 className="text-sm font-bold text-white tracking-wide">NUSAGIS</h1>
+          <h1 className="text-sm font-bold text-white tracking-wide">GIS MONITORING</h1>
           <p className="text-[11px] text-emerald-400 font-medium">Web GIS Perkebunan</p>
         </div>
       </div>

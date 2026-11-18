@@ -21,6 +21,7 @@ interface MonitoringHeaderProps {
   onSelectYear?: (year: string) => void;
   selectedMonth?: string;
   onSelectMonth?: (month: string) => void;
+  activeCommodity?: string;
   onOpenUpload: () => void;
 }
 
@@ -29,6 +30,7 @@ export function MonitoringHeader({
   selectedKebunId = null,
   selectedStatusFilter = 'all',
   onSelectStatusFilter,
+  activeCommodity,
   onOpenUpload,
 }: MonitoringHeaderProps) {
   const { user, logout } = useAuth();
@@ -44,7 +46,7 @@ export function MonitoringHeader({
         <div>
           <div className="flex items-center gap-2">
             <span className="font-extrabold tracking-wider text-[#F0F6FC] text-sm uppercase">
-              NusaGIS Monitoring
+              GIS Monitoring
             </span>
             <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-[#0E3A5D]/80 border border-[#00B4D8]/60 text-[#00D2FF] font-mono">
               PostGIS
@@ -79,9 +81,9 @@ export function MonitoringHeader({
         <div className="flex flex-col justify-center">
           <span className="text-[10px] text-[#8B9BB4] font-semibold">Komoditas Lahan</span>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#10B981]/20 border border-[#10B981]/50 text-[#10B981] flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse"></span>
-              <span>Tebu (PSKA 942)</span>
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#10B981]/20 border border-[#10B981]/50 text-[#10B981] flex items-center gap-1 max-w-[200px] truncate" title={activeCommodity || 'Tebu (PSKA 942)'}>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse shrink-0"></span>
+              <span className="truncate">{activeCommodity || 'Tebu (PSKA 942)'}</span>
             </span>
           </div>
         </div>

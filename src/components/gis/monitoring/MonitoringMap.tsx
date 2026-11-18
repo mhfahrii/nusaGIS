@@ -15,12 +15,14 @@ import {
 } from '../GisIcons';
 import { CreateParcelModal } from './CreateParcelModal';
 import type { LayerPeta, LayerRaster, MonitoringStats } from '@/types/gis';
+import { extractFeatureIntel } from '@/lib/gis/attributeExtractor';
 import {
   searchLocalData,
   searchPlaces,
   searchBigAdmin,
   mergePlaceResults,
   fetchBoundary,
+  fetchWilayahBoundary,
   computeGeoJsonBbox,
   type LocalSearchResult,
   type PlaceSearchResult,
@@ -31,6 +33,7 @@ interface MonitoringMapProps {
   layers: LayerPeta[];
   rasterLayers?: LayerRaster[];
   stats?: MonitoringStats | null;
+  selectedWilayah?: string;
   selectedLayerId?: number | null;
   onSelectFeature?: (featureId: number | null, layerId?: number) => void;
   selectedFeatureId?: number | null;
@@ -43,7 +46,7 @@ interface MonitoringMapProps {
   dataRevision?: number;
   statusFilter?: 'all' | 'ktg' | 'ks_gpa';
   selectedAfdelingId?: number | null;
-  afdelingList?: { id: number; nama_afdeling: string; kode_afdeling: string }[];
+  afdelingList?: { id: number; kebun_id?: number; nama_afdeling: string; kode_afdeling: string }[];
 }
 
 export type LeafletBasemapKey = 'google_sat' | 'google_hybrid' | 'satellite' | 'topo' | 'osm';
@@ -113,84 +116,99 @@ export interface RkapClassification {
 }
 
 /**
- * Filter cerdas keterkaitan fitur blok terhadap Afdeling (Standar Hierarki Perkebunan)
+ * Filter cerdas keterkaitan fitur blok terhadap Afdeling (Standar Hierarki Perkebunan + Klaster Otomatis A/B/C/Kebun Rakyat)
  */
 export function isFeatureMatchingAfdeling(
   feature: GeoJSON.Feature | Record<string, unknown>,
   afdelingId: number | null | undefined,
-  afdelingList: { id: number; nama_afdeling: string; kode_afdeling: string }[] = []
+  afdelingList: { id: number; kebun_id?: number; nama_afdeling: string; kode_afdeling: string }[] = [],
+  layerKebunId?: number | null
 ): boolean {
   if (!afdelingId) return true;
   const props = ((feature as GeoJSON.Feature).properties || feature || {}) as Record<string, unknown>;
 
-  // 1. Cek langsung jika id afdeling tersimpan di atribut
+  const afd = afdelingList.find((a) => Number(a.id) === Number(afdelingId));
+
+  // 0. Guard Kebun Induk: jika Afdeling punya kebun_id dan layer berasal dari kebun lain (misal Bandung), LANGSUNG tolak!
+  if (afd?.kebun_id && layerKebunId && Number(afd.kebun_id) !== Number(layerKebunId)) {
+    return false;
+  }
+
+  // 1. Cek langsung jika id afdeling tersimpan di atribut fitur
   if (props.afdeling_id && Number(props.afdeling_id) === Number(afdelingId)) {
     return true;
   }
 
-  const afd = afdelingList.find((a) => a.id === Number(afdelingId));
   if (!afd) return true;
 
-  const afdNameLower = (afd.nama_afdeling || '').toLowerCase();
-  const afdCodeLower = (afd.kode_afdeling || '').toLowerCase();
+  const afdNameLower = (afd.nama_afdeling || '').trim().toLowerCase();
+  const afdCodeLower = (afd.kode_afdeling || '').trim().toLowerCase();
 
-  // 2. Cek jika nama atau kode afdeling terdapat dalam atribut
+  // 2. Cek menggunakan Mesin Ekstraksi Multi-Kolom (A1-A4 -> Afdeling A, B1-B4 -> Afdeling B, C1-C4 -> Afdeling C, Kebun Rakyat, Bakalan Rayon A/B/C)
+  const intel = extractFeatureIntel(props);
+  if (intel.afdelingGroup) {
+    const groupLower = intel.afdelingGroup.toLowerCase();
+    if (
+      groupLower === afdNameLower ||
+      groupLower.includes(afdNameLower) ||
+      afdNameLower.includes(groupLower)
+    ) {
+      return true;
+    }
+  }
+
+  // 3. Cek jika nama atau kode afdeling terdapat langsung di atribut DBF
   const featAfd = String(
     props.afdeling || props.nama_afdeling || props.NAMA_AFDELING || props.kode_afdeling || ''
-  ).toLowerCase();
+  )
+    .trim()
+    .toLowerCase();
   if (featAfd) {
-    if (featAfd.includes(afdNameLower) || afdNameLower.includes(featAfd)) return true;
-    if (featAfd.includes(afdCodeLower) || afdCodeLower.includes(featAfd)) return true;
+    if (featAfd === afdNameLower || featAfd.includes(afdNameLower) || afdNameLower.includes(featAfd)) {
+      return true;
+    }
+    if (afdCodeLower && (featAfd === afdCodeLower || featAfd.includes(afdCodeLower))) {
+      return true;
+    }
   }
 
-  // 3. Heuristik Partisi Blok Kebun Bakalan (PTPN / RPN Rayon Standard):
-  // Afdeling I (Rayon A): Bakalan A, GPA 1, GPA 2, GPA 3
-  // Afdeling II (Rayon B & C): GPA 4, GPA 5, GPA 6, GPA 7, GPA 8
-  const featName = String(
-    props.Name || props.NAME || props.nama_blok || props.KODE_BLOK || props.kode_blok || props._label || ''
-  ).toLowerCase();
-  const isAfd1 =
-    afdCodeLower.includes('1') || afdNameLower.includes(' i') || afdNameLower.endsWith(' 1') || afdNameLower.includes('-1');
+  // 4. Heuristik Partisi Blok Kebun Bakalan (cek Afdeling II / 2 DULU agar 'ii' tidak terdeteksi sebagai 'i'!)
+  const featName = intel.blokName.toLowerCase();
   const isAfd2 =
-    afdCodeLower.includes('2') || afdNameLower.includes(' ii') || afdNameLower.endsWith(' 2') || afdCodeLower.includes('-2');
+    /\b(ii|2)\b/i.test(afdNameLower) ||
+    /(?:^|[-_\s])(?:ii|2)$|afd[^0-9]*2\b/i.test(afdCodeLower);
+  const isAfd1 =
+    !isAfd2 &&
+    (/\b(i|1)\b/i.test(afdNameLower) ||
+      /(?:^|[-_\s])(?:i|1)$|afd[^0-9]*1\b/i.test(afdCodeLower));
 
   if (isAfd1) {
-    return /gpa\s*[1-3]|bakalan\s*a/i.test(featName);
+    return /gpa\s*[1-3]\b|bakalan\s*a\b/i.test(featName);
   }
   if (isAfd2) {
-    return /gpa\s*[4-8]|bakalan\s*[bc]/i.test(featName);
+    return /gpa\s*[4-8]\b|bakalan\s*[bc]\b/i.test(featName);
   }
 
-  return true;
+  // 5. Jika filter adalah klaster eksplisit (Afdeling A/B/C/D atau Kebun Rakyat) namun fitur tidak cocok di langkah 2, tolak
+  if (/afdeling\s+[a-d]\b|kebun rakyat/i.test(afdNameLower)) {
+    return false;
+  }
+
+  return false;
 }
 
 /**
  * Klasifikasi Simbologi Tematik ArcGIS Pro Murni dari Atribut Shapefile (.dbf / PopupInfo)
- * Mengklasifikasikan poligon blok berdasarkan Status Pengelolaan (KTG vs KS GPA) & Kelas Luas (Ha)
- * tanpa angka dummy/simulasi.
+ * - Mendukung Status Pengelolaan (KTG vs KS GPA), Varietas, serta Pewarnaan Klaster Afdeling (A, B, C, Kebun Rakyat)
  */
 export function getFeatureRkapClassification(
-  _featId: number,
+  featId: number,
   props: Record<string, unknown>
 ): RkapClassification {
-  const popupRaw = String(props.PopupInfo ?? props.popupinfo ?? '');
-  const popupMap: Record<string, string> = {};
-  for (const line of popupRaw.split(/\r?\n/)) {
-    const idx = line.indexOf(':');
-    if (idx > 0) {
-      popupMap[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim();
-    }
-  }
-
-  const rawLuas = parseFloat(
-    String(props.luas ?? props.Luas ?? props.LUAS ?? props._luas_geodesik_ha ?? '0').replace(',', '.')
-  );
-  const luasHa = Number.isFinite(rawLuas) ? Number(rawLuas.toFixed(2)) : 0;
-
-  const statusLahan = String(
-    props['Status Lahan'] ?? props.status_lahan ?? popupMap['status lahan'] ?? ''
-  ).trim();
-  const varietas = String(props.Varietas ?? props.varietas ?? popupMap['varietas'] ?? '').trim();
+  const intel = extractFeatureIntel(props, { featId });
+  const luasHa = intel.luasUkurHa;
+  const statusLahan = intel.statusLahan;
+  const varietas = intel.varietas;
 
   // Kelas 1: Kebun Tebu Giling (KTG) / Blok Sudah Tanam Varietas
   if (/ktg|tebu giling/i.test(statusLahan) || varietas !== '') {
@@ -201,6 +219,20 @@ export function getFeatureRkapClassification(
       label: 'KTG · Tebu Giling',
       statusText: statusLahan || 'Kebun Tebu Giling (KTG)',
       badgeText: varietas ? `${statusLahan || 'KTG'} · ${varietas}` : statusLahan || 'KTG',
+    };
+  }
+
+  // Kelas Khusus Klaster Afdeling (misal Kebun Sarongge A/B/C/Kebun Rakyat tanpa status KS GPA)
+  if (!statusLahan && intel.afdelingGroup) {
+    const isB = /afdeling b/i.test(intel.afdelingGroup);
+    const isC = /afdeling c|kebun rakyat/i.test(intel.afdelingGroup);
+    return {
+      luasHa,
+      category: isB ? 'optimal' : isC ? 'critical' : 'warning',
+      color: intel.afdelingColor,
+      label: intel.afdelingGroup,
+      statusText: intel.afdelingGroup,
+      badgeText: `${luasHa} Ha`,
     };
   }
 
@@ -282,7 +314,7 @@ function SearchResultRow({
 export function MonitoringMap({
   layers,
   rasterLayers = [],
-  stats,
+  selectedWilayah = '',
   onSelectFeature,
   selectedFeatureId,
   fitBoundsTarget,
@@ -305,8 +337,18 @@ export function MonitoringMap({
   const rasterGroupRef = useRef<LType.LayerGroup | null>(null);
   const drawGroupRef = useRef<LType.LayerGroup | null>(null);
   const searchGroupRef = useRef<LType.LayerGroup | null>(null);
+  const wilayahGroupRef = useRef<LType.LayerGroup | null>(null);
+  const wilayahAbortRef = useRef<AbortController | null>(null);
   const geojsonCacheRef = useRef<Map<number, GeoJSON.FeatureCollection>>(new Map());
   const initialAutoFitDoneRef = useRef<boolean>(false);
+  const layersRef = useRef<LayerPeta[]>(layers);
+  const selectedWilayahRef = useRef<string>(selectedWilayah);
+  useEffect(() => {
+    layersRef.current = layers;
+  }, [layers]);
+  useEffect(() => {
+    selectedWilayahRef.current = selectedWilayah;
+  }, [selectedWilayah]);
 
   const onFeatureDeletedRef = useRef(onFeatureDeleted);
   useEffect(() => {
@@ -321,8 +363,6 @@ export function MonitoringMap({
   const [isOutlineOnly, setIsOutlineOnly] = useState(false);
   // ArcGIS Thematic Symbology: Mode Pewarnaan Layer ('default' vs 'rkap') — Default 'rkap' agar tematik status langsung aktif
   const [symbologyMode, setSymbologyMode] = useState<'default' | 'rkap'>('rkap');
-  const [isLegendOpen, setIsLegendOpen] = useState(true);
-  const [legendCounts, setLegendCounts] = useState({ optimal: 0, warning: 0, critical: 0, total: 0 });
   const [mapReady, setMapReady] = useState(false);
   const [loadingLayers, setLoadingLayers] = useState(false);
   const [inspectingPixel, setInspectingPixel] = useState(false);
@@ -360,10 +400,15 @@ export function MonitoringMap({
         !Number.isFinite(w) ||
         !Number.isFinite(s) ||
         !Number.isFinite(e) ||
-        !Number.isFinite(n)
+        !Number.isFinite(n) ||
+        Math.abs(w) > 180 ||
+        Math.abs(e) > 180 ||
+        Math.abs(s) > 90 ||
+        Math.abs(n) > 90
       ) {
         return;
       }
+      map.stop();
       if (typeof map.flyToBounds === 'function') {
         map.flyToBounds(
           [
@@ -373,7 +418,7 @@ export function MonitoringMap({
           {
             padding: [50, 50],
             maxZoom: 17,
-            duration: 1.0,
+            duration: 0.9,
             easeLinearity: 0.25,
           }
         );
@@ -422,82 +467,31 @@ export function MonitoringMap({
         return true;
       };
 
-      // 1. Ekstraksi Identitas Nama Blok Lahan
-      const nameVal =
-        properties.Name ||
-        properties.NAME ||
-        properties.nama_blok ||
-        properties.kode_blok ||
-        properties.KODE_BLOK ||
-        properties.nama_kebun ||
-        properties.kode_kebun ||
-        `Fitur #${featId}`;
+      // 1. Ekstraksi Universal Multi-Kolom (nama_unit, Block, Name, Luas1, Luas, PopupInfo, Afdeling, Estimasi Produksi)
+      const intel = extractFeatureIntel(properties, {
+        featId,
+        layerName: layer.nama_layer,
+        namaKebun: layer.nama_kebun,
+        wilayah: layer.wilayah,
+        isSingleBoundaryLayer: layer.jumlah_fitur === 1,
+      });
 
-      // 2. Parsing cerdas PopupInfo (format DBF/ArcGIS "Kunci : Nilai\n...")
-      const rawPopupInfo = String(properties.PopupInfo || properties.popupinfo || '');
-      const parsedInfo: Record<string, string> = {};
-      if (rawPopupInfo) {
-        for (const line of rawPopupInfo.split(/\r?\n/)) {
-          const colonIdx = line.indexOf(':');
-          if (colonIdx > 0) {
-            const k = line.slice(0, colonIdx).trim().toLowerCase();
-            const v = line.slice(colonIdx + 1).trim();
-            if (k && isValidValue(v)) {
-              parsedInfo[k] = v;
-            }
-          }
-        }
-      }
+      const nameVal = intel.blokName;
+      const luasUkurHa = intel.luasUkurHa;
+      const luasBakuNum = intel.luasBakuHa;
+      const selisihHa = intel.selisihHa;
+      const selisihPct = intel.selisihPct;
+      const statusLahan = intel.statusLahan;
+      const varietas = intel.varietas;
+      const mtFormatted = intel.mt
+        ? intel.mtFormatted && intel.mtFormatted !== intel.mt
+          ? `${intel.mtFormatted} (${intel.mt})`
+          : intel.mt
+        : '';
+      const luasTanam = intel.luasTanamHa !== null ? `${intel.luasTanamHa.toFixed(2)} Ha` : '';
+      const labelWilayah = intel.afdelingGroup || layer.wilayah || '';
 
-      // 3. Ekstraksi Luas Ukur GIS vs Luas Baku Dokumen
-      const luasUkurHa = Number(
-        properties._luas_geodesik_ha ||
-        properties.luas ||
-        (properties.Shape_Area && Number(properties.Shape_Area) > 0.01 ? properties.Shape_Area : 0) ||
-        0
-      );
-
-      const rawLuasBaku = parsedInfo['luas baku'] || (properties.luas_baku ? String(properties.luas_baku) : '');
-      let luasBakuNum: number | null = null;
-      if (rawLuasBaku) {
-        const m = rawLuasBaku.replace(/\s/g, '').match(/([0-9]+(?:[.,][0-9]+)?)/);
-        if (m) {
-          const parsed = parseFloat(m[1].replace(',', '.'));
-          if (Number.isFinite(parsed) && parsed > 0) luasBakuNum = parsed;
-        }
-      }
-
-      // Kalkulasi Selisih Luas (Variance Analysis Ukur vs Baku)
-      let selisihHa: number | null = null;
-      let selisihPct: number | null = null;
-      if (luasBakuNum && luasUkurHa > 0) {
-        selisihHa = Number((luasUkurHa - luasBakuNum).toFixed(2));
-        selisihPct = Number(((selisihHa / luasBakuNum) * 100).toFixed(1));
-      }
-
-      // 4. Ekstraksi Status Lahan, Varietas, dan Masa Tanam
-      const rawStatus = parsedInfo['status lahan'] || (properties.status || properties.status_lahan ? String(properties.status || properties.status_lahan) : '');
-      const statusLahan = isValidValue(rawStatus) ? rawStatus : '';
-      const varietas = parsedInfo['varietas'] || (properties.varietas || properties.VARIETAS ? String(properties.varietas || properties.VARIETAS) : '');
-      const mtRaw = parsedInfo['mt'] || (properties.mt || properties.MT ? String(properties.mt || properties.MT) : '');
-      const luasTanam = parsedInfo['luas tanam'] || (properties.luas_tanam ? String(properties.luas_tanam) : '');
-      const rawLabel = properties.Label || properties.label || properties.wilayah;
-      const labelWilayah = isValidValue(rawLabel) ? String(rawLabel) : '';
-
-      // Format Masa Tanam ramah pembaca (misal "08/24" -> "Agustus 2024 (08/24)")
-      let mtFormatted = mtRaw;
-      if (isValidValue(mtRaw)) {
-        const mtMatch = mtRaw.match(/^(\d{1,2})\s*\/\s*(\d{2,4})$/);
-        if (mtMatch) {
-          const bulanList = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-          const bIdx = parseInt(mtMatch[1], 10) - 1;
-          const bName = bulanList[bIdx];
-          const yr = mtMatch[2].length === 2 ? `20${mtMatch[2]}` : mtMatch[2];
-          if (bName) mtFormatted = `${bName} ${yr} (${mtRaw})`;
-        }
-      }
-
-      // 5. Filter Kolom Sampah Teknis KML / GIS (SymbolID, Clamped, Extruded, FolderPath, Derajat)
+      // 2. Filter Kolom Sampah Teknis KML / GIS (SymbolID, Clamped, Extruded, FolderPath, Derajat)
       const GARBAGE_KEYS = new Set([
         'symbolid',
         'altmode',
@@ -516,30 +510,37 @@ export function MonitoringMap({
         'created_at',
         'updated_at',
         'luas',
+        'luas1',
         'name',
-        'label'
+        'nama_unit',
+        'block',
+        'label',
       ]);
 
-      // 6. Susun baris atribut yang hanya BERISI DATA (Jika kosong, HILANGKAN row & nama barisnya!)
+      // 3. Susun baris atribut yang hanya BERISI DATA (Jika kosong, HILANGKAN row & nama barisnya!)
       const extraAttributes: Array<{ label: string; value: string }> = [];
 
-      // Perusahaan pemilik kebun/lahan
       const rawPerusahaan =
         properties.perusahaan ||
         properties.Perusahaan ||
         properties.PERUSAHAAN ||
         properties.holding ||
-        (layer as unknown as { perusahaan?: string }).perusahaan ||
+        layer.perusahaan ||
         'PT Perkebunan Nusantara I (Regional 4)';
       if (isValidValue(rawPerusahaan)) {
         extraAttributes.push({ label: 'Perusahaan', value: String(rawPerusahaan) });
       }
 
+      extraAttributes.push({ label: 'Komoditas', value: intel.commodity.label });
+
+      if (isValidValue(intel.afdelingGroup)) {
+        extraAttributes.push({ label: 'Afdeling / Klaster', value: String(intel.afdelingGroup) });
+      }
       if (isValidValue(statusLahan)) {
         extraAttributes.push({ label: 'Status Lahan', value: statusLahan });
       }
       if (isValidValue(varietas)) {
-        extraAttributes.push({ label: 'Varietas Tebu', value: varietas });
+        extraAttributes.push({ label: 'Varietas', value: varietas });
       }
       if (isValidValue(mtFormatted)) {
         extraAttributes.push({ label: 'Masa Tanam (MT)', value: mtFormatted });
@@ -547,8 +548,8 @@ export function MonitoringMap({
       if (isValidValue(luasTanam)) {
         extraAttributes.push({ label: 'Luas Tanam', value: luasTanam });
       }
-      if (isValidValue(labelWilayah)) {
-        extraAttributes.push({ label: 'Wilayah / Afdeling', value: labelWilayah });
+      if (isValidValue(layer.wilayah) && layer.wilayah !== labelWilayah) {
+        extraAttributes.push({ label: 'Wilayah', value: String(layer.wilayah) });
       }
 
       // Masukkan atribut kustom lain jika ada (yang bukan sampah dan punya nilai nyata)
@@ -562,33 +563,68 @@ export function MonitoringMap({
             keyLower !== 'mt' &&
             keyLower !== 'luas_tanam' &&
             keyLower !== 'wilayah' &&
-            keyLower !== 'afdeling'
+            keyLower !== 'afdeling' &&
+            keyLower !== 'perusahaan' &&
+            keyLower !== 'nama_kebun'
           ) {
             extraAttributes.push({ label: k, value: String(v) });
           }
         }
       }
 
-      // Status Badge Styling
-      const isKTG = statusLahan.toLowerCase().includes('ktg') || statusLahan.toLowerCase().includes('kebun tebu giling');
-      const statusBadgeColor = isKTG ? '#10B981' : '#00D2FF';
+      // Header Badge: Status Lahan atau Klaster Afdeling
+      const headerBadgeText = statusLahan || intel.afdelingGroup || '';
+      const isKTG =
+        statusLahan.toLowerCase().includes('ktg') ||
+        statusLahan.toLowerCase().includes('kebun tebu giling');
+      const statusBadgeColor = isKTG
+        ? '#10B981'
+        : intel.afdelingGroup
+        ? intel.afdelingColor
+        : '#00D2FF';
 
       // Selisih Badge Styling
       let varianceBadge = '';
       if (selisihHa !== null && selisihPct !== null) {
-        const isOptimal = Math.abs(selisihPct) <= 5.0;
-        const varColor = isOptimal ? '#10B981' : '#F59E0B';
+        const isOptimal = Math.abs(selisihPct) <= 3.0;
+        const varColor = isOptimal ? '#10B981' : selisihHa > 0 ? '#00D2FF' : '#F59E0B';
         const sign = selisihHa > 0 ? '+' : '';
         varianceBadge = `
           <div style="margin-top: 6px; padding: 4px 8px; background: ${varColor}15; border: 1px solid ${varColor}40; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; font-size: 10px;">
-            <span style="color: #8b9bb4;">Selisih Ukur vs Baku:</span>
+            <span style="color: #8b9bb4;">Audit Selisih Ukur vs Baku:</span>
             <span style="font-weight: 800; color: ${varColor}; font-family: ui-monospace, monospace;">${sign}${selisihHa.toFixed(2)} Ha (${sign}${selisihPct}%)</span>
           </div>
         `;
       }
 
+      // Estimasi Produksi & Panen Highlight Box
+      const productionHtml =
+        intel.estimasiPanenTon > 0
+          ? `
+          <div style="margin-top: 6px; padding: 6px 8px; background: #0f241f; border: 1px solid #10b98145; border-radius: 6px; display: grid; grid-template-columns: ${
+            intel.estimasiOlahanTon !== null ? '1fr 1fr' : '1fr'
+          }; gap: 8px;">
+            <div>
+              <div style="font-size: 8.5px; font-weight: 700; color: #6ee7b7; text-transform: uppercase;">Est. ${intel.commodity.yieldUnit}</div>
+              <div style="font-size: 13px; font-weight: 900; color: #10b981; font-family: ui-monospace, monospace;">
+                ${intel.estimasiPanenTon.toLocaleString('id-ID', { maximumFractionDigits: 1 })} Ton
+              </div>
+            </div>
+            ${
+              intel.estimasiOlahanTon !== null && intel.commodity.processedUnit
+                ? `<div>
+                    <div style="font-size: 8.5px; font-weight: 700; color: #7dd3fc; text-transform: uppercase;">${intel.commodity.processedLabel || 'Hasil Olahan'}</div>
+                    <div style="font-size: 13px; font-weight: 900; color: #00d2ff; font-family: ui-monospace, monospace;">
+                      ${intel.estimasiOlahanTon.toLocaleString('id-ID', { maximumFractionDigits: 2 })} Ton
+                    </div>
+                  </div>`
+                : ''
+            }
+          </div>`
+          : '';
+
       // Highlight Luas: Hanya render box Luas Baku jika datanya ada
-      const hasLuasBaku = Boolean(luasBakuNum || isValidValue(rawLuasBaku));
+      const hasLuasBaku = Boolean(luasBakuNum && luasBakuNum > 0);
       const kpiHighlightHtml = hasLuasBaku
         ? `
         <div style="padding: 9px 12px; background: #0a0e1a; border-bottom: 1px solid #1e2942;">
@@ -598,36 +634,38 @@ export function MonitoringMap({
               <div style="font-size: 15px; font-weight: 900; color: #00D2FF; margin-top: 1px; font-family: ui-monospace, monospace;">
                 ${luasUkurHa > 0 ? `${luasUkurHa.toFixed(2)} Ha` : '-'}
               </div>
-              <div style="font-size: 8.5px; color: #566680; margin-top: 1px;">PostGIS Geodesik</div>
+              <div style="font-size: 8.5px; color: #566680; margin-top: 1px;">${intel.luasUkurSource}</div>
             </div>
             <div style="background: #0d1322; border: 1px solid #1e2942; border-radius: 6px; padding: 6px 8px;">
               <div style="font-size: 9px; font-weight: 700; color: #8b9bb4; text-transform: uppercase; letter-spacing: 0.03em;">Luas Baku Dokumen</div>
               <div style="font-size: 15px; font-weight: 900; color: #f0f6fc; margin-top: 1px; font-family: ui-monospace, monospace;">
-                ${luasBakuNum ? `${luasBakuNum.toFixed(2)} Ha` : rawLuasBaku}
+                ${luasBakuNum ? `${luasBakuNum.toFixed(2)} Ha` : '-'}
               </div>
-              <div style="font-size: 8.5px; color: #566680; margin-top: 1px;">Legal Dokumen</div>
+              <div style="font-size: 8.5px; color: #566680; margin-top: 1px;">${intel.luasBakuSource || 'Legal Dokumen'}</div>
             </div>
           </div>
           ${varianceBadge}
+          ${productionHtml}
         </div>`
         : `
         <div style="padding: 9px 12px; background: #0a0e1a; border-bottom: 1px solid #1e2942;">
           <div style="background: #0d1322; border: 1px solid #1e2942; border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between;">
             <div>
-              <div style="font-size: 9px; font-weight: 700; color: #8b9bb4; text-transform: uppercase; letter-spacing: 0.03em;">Luas Ukur GIS (PostGIS)</div>
-              <div style="font-size: 8.5px; color: #566680; margin-top: 1px;">Hasil Ukur Spasial Satelit</div>
+              <div style="font-size: 9px; font-weight: 700; color: #8b9bb4; text-transform: uppercase; letter-spacing: 0.03em;">Luas Ukur GIS</div>
+              <div style="font-size: 8.5px; color: #566680; margin-top: 1px;">${intel.luasUkurSource}</div>
             </div>
             <div style="font-size: 16px; font-weight: 900; color: #00D2FF; font-family: ui-monospace, monospace;">
               ${luasUkurHa > 0 ? `${luasUkurHa.toFixed(2)} Ha` : '-'}
             </div>
           </div>
+          ${productionHtml}
         </div>`;
 
       // Tabel Atribut: Hanya tampil jika ada atribut yang memiliki nilai
       const tableContentHtml =
         extraAttributes.length > 0
           ? `
-        <div style="max-height: 160px; overflow-y: auto;">
+        <div style="max-height: 150px; overflow-y: auto;">
           <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
             <tbody>
               ${extraAttributes
@@ -646,7 +684,7 @@ export function MonitoringMap({
 
       const wrapper = document.createElement('div');
       wrapper.style.cssText =
-        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; width: 330px; max-width: 360px; max-height: min(450px, 68vh); display: flex; flex-direction: column; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.8), 0 10px 20px -4px rgba(0, 0, 0, 0.5);';
+        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; width: 340px; max-width: 370px; max-height: min(480px, 72vh); display: flex; flex-direction: column; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.8), 0 10px 20px -4px rgba(0, 0, 0, 0.5);';
 
       wrapper.innerHTML = `
         <!-- 1. ArcGIS Pro Header -->
@@ -662,9 +700,9 @@ export function MonitoringMap({
               </h4>
             </div>
             ${
-              isValidValue(statusLahan)
+              isValidValue(headerBadgeText)
                 ? `<span style="background: ${statusBadgeColor}20; border: 1px solid ${statusBadgeColor}60; color: ${statusBadgeColor}; padding: 2px 7px; border-radius: 4px; font-size: 9.5px; font-weight: 800; white-space: nowrap;">
-                     ${statusLahan}
+                     ${headerBadgeText}
                    </span>`
                 : ''
             }
@@ -798,9 +836,10 @@ export function MonitoringMap({
     []
   );
 
-  // 1. Inisialisasi Leaflet Map sekali saat mount
+  // 1. Inisialisasi Leaflet Map sekali saat mount (JANGAN pernah bergantung pada [layers] agar peta tidak hancur setiap filter berubah!)
   useEffect(() => {
     let cancelled = false;
+    let resizeObserver: ResizeObserver | null = null;
 
     async function initLeaflet() {
       if (!mapContainerRef.current || mapRef.current) return;
@@ -811,9 +850,11 @@ export function MonitoringMap({
       leafletRef.current = L;
 
       // Cari initial center dari layer yang aktif jika ada
-      const initialLayerWithBbox = layers.find((l) => l.terlihat && l.bbox) || layers.find((l) => l.bbox);
+      const initLayers = layersRef.current;
+      const initialLayerWithBbox =
+        initLayers.find((l) => l.terlihat && l.bbox) || initLayers.find((l) => l.bbox);
       let initCenter: [number, number] = [-7.6668, 112.9125]; // Default ke Kebun Bakalan
-      let initZoom = 15;
+      const initZoom = 15;
       if (initialLayerWithBbox?.bbox) {
         initCenter = [
           (initialLayerWithBbox.bbox[1] + initialLayerWithBbox.bbox[3]) / 2,
@@ -859,6 +900,10 @@ export function MonitoringMap({
       const rasterGrp = L.layerGroup().addTo(map);
       rasterGroupRef.current = rasterGrp;
 
+      // Group untuk outline batas administratif Filter Wilayah (di bawah vektor blok agar blok tetap interaktif)
+      const wilayahGrp = L.layerGroup().addTo(map);
+      wilayahGroupRef.current = wilayahGrp;
+
       // Group untuk layer GeoJSON vektor
       const geoGrp = L.layerGroup().addTo(map);
       geoJsonGroupRef.current = geoGrp;
@@ -875,7 +920,7 @@ export function MonitoringMap({
       setMapReady(true);
 
       // Resize observer
-      const resizeObserver = new ResizeObserver(() => {
+      resizeObserver = new ResizeObserver(() => {
         map.invalidateSize();
       });
       resizeObserver.observe(mapContainerRef.current);
@@ -885,12 +930,18 @@ export function MonitoringMap({
 
     return () => {
       cancelled = true;
+      wilayahAbortRef.current?.abort();
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+        resizeObserver = null;
+      }
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
+      setMapReady(false);
     };
-  }, [layers]);
+  }, []);
 
   // 2. Event Listener Map untuk Menggambar (Tool Pensil) dan Inspeksi Piksel
   useEffect(() => {
@@ -1111,12 +1162,14 @@ export function MonitoringMap({
       setLoadingLayers(true);
       group.clearLayers();
 
-      const visibleLayers = layers.filter((l) => l.terlihat);
+      // Urutkan layer agar batas luar (1 poligon perimeter) dirender di BAWAH petak blok, sehingga outline & klik selalu rapi
+      const visibleLayers = [...layers.filter((l) => l.terlihat)].sort((a, b) => {
+        const aOuter = a.jumlah_fitur <= 1 ? 0 : 1;
+        const bOuter = b.jumlah_fitur <= 1 ? 0 : 1;
+        return aOuter - bOuter;
+      });
 
-      let optCount = 0;
-      let warnCount = 0;
-      let critCount = 0;
-      let totalFeaturesCount = 0;
+      const combinedAfdelingBounds = L.latLngBounds([]);
 
       for (const layer of visibleLayers) {
         let geojsonData = geojsonCacheRef.current.get(layer.id);
@@ -1138,44 +1191,38 @@ export function MonitoringMap({
 
         if (ignore || !geojsonData) continue;
 
-        // Hitung statistik klasifikasi RKAP jika fitur poligon (memperhitungkan filter status & afdeling)
-        if (geojsonData.features) {
-          for (const f of geojsonData.features) {
-            if (selectedAfdelingId && !isFeatureMatchingAfdeling(f, selectedAfdelingId, afdelingList)) {
-              continue;
-            }
-            const featId = Number(f.id || f.properties?._feature_id || 0);
-            const rkap = getFeatureRkapClassification(featId, (f.properties || {}) as Record<string, unknown>);
-            if (statusFilter === 'ktg' && rkap.category !== 'optimal') continue;
-            if (statusFilter === 'ks_gpa' && rkap.category !== 'warning' && rkap.category !== 'critical') continue;
-            totalFeaturesCount++;
-            if (rkap.category === 'optimal') optCount++;
-            else if (rkap.category === 'warning') warnCount++;
-            else critCount++;
-          }
-        }
+        const isOuterBoundaryLayer =
+          layer.jumlah_fitur <= 1 ||
+          (geojsonData.features?.length === 1 &&
+            /batas|kebun|perimeter|konsesi|sarongge$/i.test(layer.nama_layer));
 
-        // Styling outline tebal & kontras sesuai hierarki perkebunan
+        // Styling outline rapi & presisi standar ArcGIS Pro
         let strokeColor = layer.warna || '#be185d';
-        let strokeWidth = 3;
+        let strokeWidth = 2.2;
 
         const layerNameLower = layer.nama_layer.toLowerCase();
-        if (layerNameLower.includes('kebun')) {
-          strokeColor = '#be185d'; // Magenta / rose tebal (Batas Kebun)
-          strokeWidth = 3.5;
+        if (isOuterBoundaryLayer) {
+          strokeColor = '#f43f5e'; // Rose tegas untuk batas luar konsesi
+          strokeWidth = 2.8;
+        } else if (layerNameLower.includes('kebun')) {
+          strokeColor = '#00d2ff';
+          strokeWidth = 2.2;
         } else if (layerNameLower.includes('afdeling')) {
-          strokeColor = '#65a30d'; // Olive / Greenish gold (Batas Afdeling)
-          strokeWidth = 3.0;
+          strokeColor = '#65a30d';
+          strokeWidth = 2.4;
         } else if (layerNameLower.includes('blok')) {
-          strokeColor = '#15803d'; // Forest green (Batas Blok)
-          strokeWidth = 2.5;
+          strokeColor = '#10b981';
+          strokeWidth = 2.0;
         }
 
         const defaultFillColor = strokeColor;
 
         const geoJsonLayer = L.geoJSON(geojsonData, {
           filter: (feature) => {
-            if (selectedAfdelingId && !isFeatureMatchingAfdeling(feature, selectedAfdelingId, afdelingList)) {
+            if (
+              selectedAfdelingId &&
+              !isFeatureMatchingAfdeling(feature, selectedAfdelingId, afdelingList, layer.kebun_id)
+            ) {
               return false;
             }
             if (!statusFilter || statusFilter === 'all') return true;
@@ -1194,41 +1241,63 @@ export function MonitoringMap({
             if (isSelected) {
               return {
                 color: '#00f5ff',
-                weight: 5,
+                weight: 3.8,
                 opacity: 1,
-                dashArray: '8, 6',
+                dashArray: '7, 5',
+                lineJoin: 'round',
+                lineCap: 'round',
                 className: 'selected-feature-pulse',
                 fillColor: '#00f5ff',
-                fillOpacity: isOutlineOnly ? 0.15 : 0.55,
+                fillOpacity: isOutlineOnly ? 0.12 : 0.38,
               };
             }
 
             if (isLine) {
               return {
                 color: layer.warna || '#f59e0b',
-                weight: 3.5,
-                opacity: 1,
+                weight: 3,
+                opacity: 0.95,
+                lineJoin: 'round',
+                lineCap: 'round',
               };
             }
 
-            // Mode Simbologi Tematik RKAP ala ArcGIS Choropleth Map
+            // Layer Batas Luar (1 poligon konsesi): outline putus-putus rapi & transparan agar tidak menutupi blok di dalamnya
+            if (isOuterBoundaryLayer) {
+              return {
+                color: '#f43f5e',
+                weight: 2.8,
+                opacity: 0.95,
+                dashArray: '8, 5',
+                lineJoin: 'round',
+                lineCap: 'round',
+                fillColor: '#f43f5e',
+                fillOpacity: isOutlineOnly ? 0 : 0.06,
+              };
+            }
+
+            // Mode Simbologi Tematik RKAP / Klaster Afdeling ala ArcGIS Pro (garis tajam, fill jernih)
             if (symbologyMode === 'rkap') {
               const rkap = getFeatureRkapClassification(featId, (feature?.properties || {}) as Record<string, unknown>);
               return {
                 color: rkap.color,
-                weight: isOutlineOnly ? 3.5 : 2.5,
-                opacity: 1.0,
+                weight: isOutlineOnly ? 2.8 : selectedAfdelingId ? 2.8 : 2.1,
+                opacity: 0.98,
+                lineJoin: 'round',
+                lineCap: 'round',
                 fillColor: rkap.color,
-                fillOpacity: isOutlineOnly ? 0 : 0.45,
+                fillOpacity: isOutlineOnly ? 0 : 0.26,
               };
             }
 
             return {
               color: strokeColor,
               weight: strokeWidth,
-              opacity: 1.0, // Outline tegas 100% solid
+              opacity: 0.98,
+              lineJoin: 'round',
+              lineCap: 'round',
               fillColor: defaultFillColor,
-              fillOpacity: isOutlineOnly ? 0 : 0.38, // Transparan agar citra satelit/raster tembus
+              fillOpacity: isOutlineOnly ? 0 : 0.24,
             };
           },
           pointToLayer: (feature, latlng) => {
@@ -1251,11 +1320,11 @@ export function MonitoringMap({
             const props = (feature.properties || {}) as Record<string, unknown>;
             const featId = Number(feature.id || props._feature_id || 0);
 
-            // Hover effect: pertebal garis batas
+            // Hover effect: pertebal garis batas secara halus dan rapi
             featureLayer.on('mouseover', () => {
               if ('setStyle' in featureLayer && typeof featureLayer.setStyle === 'function') {
                 (featureLayer as LType.Path).setStyle({
-                  weight: 5,
+                  weight: 3.8,
                   opacity: 1,
                 });
               }
@@ -1266,19 +1335,30 @@ export function MonitoringMap({
               }
             });
 
-            // Label permanen jika toggle Labels aktif
+            // Label permanen (Nama Blok + Luas Ha) jika toggle Labels aktif
             if (showLabels) {
-              const labelText = String(
-                props._label ||
-                  props.Name ||
-                  props.NAME ||
-                  props.nama_blok ||
-                  props.kode_blok ||
-                  props.KODE_BLOK ||
-                  props.nama_afdeling ||
-                  props.nama_kebun ||
-                  ''
-              ).trim();
+              const labelIntel = extractFeatureIntel(props, {
+                featId,
+                layerName: layer.nama_layer,
+                namaKebun: layer.nama_kebun,
+                wilayah: layer.wilayah,
+                isSingleBoundaryLayer: layer.jumlah_fitur === 1,
+              });
+              const hasRealName =
+                !labelIntel.blokName.startsWith('Blok #') &&
+                !labelIntel.blokName.startsWith('Petak ');
+              const luasLabel =
+                labelIntel.luasUkurHa > 0
+                  ? `${labelIntel.luasUkurHa.toLocaleString('id-ID', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })} Ha`
+                  : '';
+              const labelText = hasRealName
+                ? luasLabel
+                  ? `${labelIntel.shortName} · ${luasLabel}`
+                  : labelIntel.shortName
+                : luasLabel;
 
               if (labelText) {
                 featureLayer.bindTooltip(labelText, {
@@ -1335,41 +1415,29 @@ export function MonitoringMap({
 
         geoJsonLayer.addTo(group);
 
-        // Auto-fit & Visualisasi Batas Afdeling jika filter Afdeling aktif
+        // Akumulasi bounds gabungan khusus fitur yang lolos filter Afdeling (tanpa kotak persegi L.rectangle yang menutupi peta!)
         if (selectedAfdelingId) {
           const afdBnds = geoJsonLayer.getBounds();
           if (afdBnds.isValid()) {
-            map.fitBounds(afdBnds, { padding: [50, 50], maxZoom: 18 });
-            const afdItem = afdelingList.find((a) => a.id === selectedAfdelingId);
-            const afdRect = L.rectangle(afdBnds, {
-              color: '#65A30D', // Warna Standar Batas Afdeling ArcGIS (Olive Gold)
-              weight: 3.5,
-              dashArray: '8, 6',
-              fillColor: '#65A30D',
-              fillOpacity: 0.06,
-              interactive: false,
-            });
-            if (afdItem) {
-              afdRect.bindTooltip(`Batas Wilayah: ${afdItem.nama_afdeling} (${afdItem.kode_afdeling})`, {
-                permanent: true,
-                direction: 'top',
-                className: 'leaflet-gis-label',
-              });
-            }
-            afdRect.addTo(group);
+            combinedAfdelingBounds.extend(afdBnds);
           }
         }
       }
 
-      setLegendCounts({
-        optimal: optCount,
-        warning: warnCount,
-        critical: critCount,
-        total: totalFeaturesCount,
-      });
+      if (ignore) return;
+
+      // Arahkan peta 1 kali ke gabungan seluruh poligon Afdeling terpilih (cegah lompat ke kebun/wilayah lain!)
+      if (selectedAfdelingId && combinedAfdelingBounds.isValid()) {
+        map.stop();
+        map.fitBounds(combinedAfdelingBounds, {
+          padding: [55, 55],
+          maxZoom: 17,
+          animate: true,
+        });
+      }
 
       // Auto-fit awal jika belum pernah auto-fit
-      if (!initialAutoFitDoneRef.current && !selectedAfdelingId && (visibleLayers.length > 0 || rasterLayers.length > 0)) {
+      if (!initialAutoFitDoneRef.current && !selectedAfdelingId && !selectedWilayahRef.current && (visibleLayers.length > 0 || rasterLayers.length > 0)) {
         const firstVector = visibleLayers.find((l) => l.bbox);
         const firstRaster = rasterLayers.find((r) => r.bbox);
         const targetBbox = firstVector?.bbox || firstRaster?.bbox;
@@ -1410,10 +1478,97 @@ export function MonitoringMap({
 
   // 6. FitBounds target jika diperbarui dari luar
   useEffect(() => {
-    if (fitBoundsTarget) {
+    if (fitBoundsTarget && mapReady) {
       zoomToBounds(fitBoundsTarget);
     }
-  }, [fitBoundsTarget, zoomToBounds]);
+  }, [fitBoundsTarget, mapReady, zoomToBounds]);
+
+  // 7. Outline Batas Administratif & Auto-Navigation saat Filter Wilayah dipilih
+  useEffect(() => {
+    const map = mapRef.current;
+    const L = leafletRef.current;
+    const group = wilayahGroupRef.current;
+    if (!map || !L || !group || !mapReady) return;
+
+    wilayahAbortRef.current?.abort();
+    group.clearLayers();
+
+    const targetWilayah = selectedWilayah?.trim();
+    if (!targetWilayah) {
+      return;
+    }
+
+    const controller = new AbortController();
+    wilayahAbortRef.current = controller;
+
+    async function loadWilayahOutline() {
+      setIsLoadingBoundary(true);
+      try {
+        const res = await fetchWilayahBoundary(targetWilayah, controller.signal);
+        if (controller.signal.aborted || !res?.boundary) return;
+        const activeGroup = wilayahGroupRef.current;
+        const activeMap = mapRef.current;
+        const activeL = leafletRef.current;
+        if (!activeGroup || !activeMap || !activeL) return;
+
+        activeGroup.clearLayers();
+
+        // Outline batas wilayah rapi dengan sudut halus: halo putih tipis + garis putus-putus merah
+        const halo = activeL.geoJSON(res.boundary as GeoJSON.GeoJsonObject, {
+          interactive: false,
+          style: {
+            color: '#ffffff',
+            weight: 4.5,
+            opacity: 0.35,
+            lineJoin: 'round',
+            lineCap: 'round',
+            fill: false,
+          },
+        });
+        const outline = activeL.geoJSON(res.boundary as GeoJSON.GeoJsonObject, {
+          interactive: false,
+          style: {
+            color: '#EF4444',
+            weight: 2.5,
+            opacity: 0.95,
+            dashArray: '10 6',
+            lineJoin: 'round',
+            lineCap: 'round',
+            fillColor: '#EF4444',
+            fillOpacity: 0.04,
+          },
+        });
+        halo.addTo(activeGroup);
+        outline.addTo(activeGroup);
+
+        // Jika wilayah belum memiliki layer ber-bbox di PostGIS, arahkan peta langsung ke batas administratif wilayah
+        const hasLayerBbox = layersRef.current.some(
+          (l) => Array.isArray(l.bbox) && l.bbox.length === 4
+        );
+        if (!hasLayerBbox) {
+          const b = outline.getBounds();
+          if (b.isValid()) {
+            activeMap.stop();
+            activeMap.fitBounds(b, { padding: [45, 45], maxZoom: 14, animate: true });
+          } else if (res.bbox) {
+            zoomToBounds(res.bbox);
+          }
+        }
+      } catch {
+        // ignore abort or network hiccup
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingBoundary(false);
+        }
+      }
+    }
+
+    loadWilayahOutline();
+
+    return () => {
+      controller.abort();
+    };
+  }, [selectedWilayah, mapReady, zoomToBounds]);
 
   // Handler Drawing Toolbar
   const handleUndoPoint = () => {
@@ -1499,9 +1654,6 @@ export function MonitoringMap({
     }
     const q = searchQuery.trim();
     if (q.length < 2) {
-      setLocalResults([]);
-      setPlaceResults([]);
-      setIsSearching(false);
       return;
     }
 
@@ -1552,7 +1704,7 @@ export function MonitoringMap({
   }, []);
 
   // Pin penanda + popup "Buat Lahan di Sini"
-  const addSearchPin = useCallback((loc: MapSearchResult, openPopup: boolean) => {
+  const addSearchPin = (loc: MapSearchResult, openPopup: boolean) => {
     const map = mapRef.current;
     const L = leafletRef.current;
     const group = searchGroupRef.current;
@@ -1617,7 +1769,7 @@ export function MonitoringMap({
     });
     marker.addTo(group);
     if (openPopup) marker.openPopup();
-  }, []);
+  };
 
   const fitToBbox = (bbox: [number, number, number, number], maxZoom: number) => {
     const map = mapRef.current;
@@ -1784,7 +1936,15 @@ export function MonitoringMap({
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSearchQuery(val);
+              if (val.trim().length < 2) {
+                setLocalResults([]);
+                setPlaceResults([]);
+                setIsSearching(false);
+              }
+            }}
             onFocus={() => {
               if (allSearchResults.length > 0) setIsSearchDropdownOpen(true);
             }}
@@ -2314,102 +2474,6 @@ export function MonitoringMap({
           <span>Menginspeksi nilai piksel GeoTIFF...</span>
         </div>
       )}
-
-      {/* ArcGIS Standalone Legend Panel (Pojok Kiri Bawah) */}
-      <div className="absolute bottom-6 left-3 z-[1000] pointer-events-auto select-none transition-all">
-        {!isLegendOpen ? (
-          <button
-            type="button"
-            onClick={() => setIsLegendOpen(true)}
-            className="flex items-center gap-1.5 bg-[#0D1322]/95 hover:bg-[#12192B] border border-[#1E2942] hover:border-[#00D2FF] text-[#F0F6FC] px-2.5 py-1.5 rounded-lg shadow-xl text-xs font-semibold backdrop-blur-md transition-all cursor-pointer group"
-            title="Buka Legenda Peta (ArcGIS Legend)"
-          >
-            <span className="w-2.5 h-2.5 rounded-xs bg-[#00D2FF] group-hover:scale-110 transition-transform" />
-            <span className="text-[11px]">Legenda</span>
-            <span className="text-[10px] text-[#00D2FF] font-mono">▲</span>
-          </button>
-        ) : (
-          <div className="w-64 bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] rounded-xl shadow-2xl p-3 text-[#F0F6FC] space-y-2.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
-            {/* Header Legenda */}
-            <div className="flex items-center justify-between pb-2 border-b border-[#1E2942]">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#00D2FF]" />
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#F0F6FC]">
-                  {symbologyMode === 'rkap' ? 'Legenda Status & Luas' : 'Legenda Layer GIS'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsLegendOpen(false)}
-                className="text-[#8B9BB4] hover:text-[#EF4444] text-xs px-1 rounded hover:bg-[#12192B] transition-colors cursor-pointer"
-                title="Sembunyikan Legenda"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Konten Simbol Legenda */}
-            {symbologyMode === 'rkap' ? (
-              <div className="space-y-1.5 text-xs">
-                <div className="flex items-center justify-between p-1 rounded hover:bg-[#12192B]">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3.5 h-3.5 rounded-xs border border-white/40 bg-[#10B981] shadow-xs" />
-                    <span className="text-[11px] text-[#F0F6FC] font-medium">KTG · Tebu Giling</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-[#10B981] font-bold tabular-nums">
-                    {legendCounts.optimal} blok
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between p-1 rounded hover:bg-[#12192B]">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3.5 h-3.5 rounded-xs border border-white/40 bg-[#00D2FF] shadow-xs" />
-                    <span className="text-[11px] text-[#F0F6FC] font-medium">KS GPA (≥ 1,50 Ha)</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-[#00D2FF] font-bold tabular-nums">
-                    {legendCounts.warning} blok
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between p-1 rounded hover:bg-[#12192B]">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3.5 h-3.5 rounded-xs border border-white/40 bg-[#F59E0B] shadow-xs" />
-                    <span className="text-[11px] text-[#F0F6FC] font-medium">KS GPA (&lt; 1,50 Ha)</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-[#F59E0B] font-bold tabular-nums">
-                    {legendCounts.critical} blok
-                  </span>
-                </div>
-
-                <div className="pt-1.5 border-t border-[#1E2942]/60 flex items-center justify-between text-[10px] text-[#8B9BB4]">
-                  <span>Total Unit Terpetakan</span>
-                  <span className="font-mono font-bold text-[#00D2FF] tabular-nums">
-                    {legendCounts.total} Poligon
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-1.5 text-xs">
-                <div className="flex items-center gap-2 p-1">
-                  <span className="w-3.5 h-3.5 rounded-xs border border-white/30 bg-[#BE185D]" />
-                  <span className="text-[11px] text-[#F0F6FC]">Batas Kebun (Induk)</span>
-                </div>
-                <div className="flex items-center gap-2 p-1">
-                  <span className="w-3.5 h-3.5 rounded-xs border border-white/30 bg-[#65A30D]" />
-                  <span className="text-[11px] text-[#F0F6FC]">Batas Afdeling</span>
-                </div>
-                <div className="flex items-center gap-2 p-1">
-                  <span className="w-3.5 h-3.5 rounded-xs border border-white/30 bg-[#15803D]" />
-                  <span className="text-[11px] text-[#F0F6FC]">Batas Blok Lahan</span>
-                </div>
-                <div className="pt-1.5 border-t border-[#1E2942]/60 text-[9.5px] text-[#8B9BB4] leading-tight">
-                  Aktifkan tombol <strong>Tema: Status &amp; Luas</strong> di menu atas untuk simbologi tematik sesuai atribut shapefile.
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* Modal Pengisian Informasi Lahan Baru */}
       <CreateParcelModal

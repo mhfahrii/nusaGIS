@@ -32,6 +32,44 @@ interface BlokItem {
   nama_blok: string;
 }
 
+const DEFAULT_PERUSAHAAN = 'PT Perkebunan Nusantara I (Regional 4)';
+
+function normText(s?: string | null): string {
+  return (s || '').trim().toLowerCase();
+}
+
+function computeUnionBbox(layerList: LayerPeta[]): [number, number, number, number] | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let found = false;
+
+  for (const l of layerList) {
+    if (!l.bbox || l.bbox.length !== 4) continue;
+    const [w, s, e, n] = l.bbox;
+    if (
+      !Number.isFinite(w) ||
+      !Number.isFinite(s) ||
+      !Number.isFinite(e) ||
+      !Number.isFinite(n) ||
+      Math.abs(w) > 180 ||
+      Math.abs(e) > 180 ||
+      Math.abs(s) > 90 ||
+      Math.abs(n) > 90
+    ) {
+      continue;
+    }
+    minX = Math.min(minX, w);
+    minY = Math.min(minY, s);
+    maxX = Math.max(maxX, e);
+    maxY = Math.max(maxY, n);
+    found = true;
+  }
+
+  return found ? [minX, minY, maxX, maxY] : null;
+}
+
 export function MonitoringDashboard() {
   // Panel toggles
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -41,9 +79,9 @@ export function MonitoringDashboard() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [deletedCount, setDeletedCount] = useState<number>(0);
 
-  // Time & Period state (matching screenshot: January 2021)
-  const [selectedYear, setSelectedYear] = useState('2026');
-  const [selectedMonth, setSelectedMonth] = useState('November');
+  // Time & Period state
+  const selectedYear = '2026';
+  const selectedMonth = 'November';
 
   // Master lists
   const [kebunList, setKebunList] = useState<KebunItem[]>([]);
@@ -67,20 +105,36 @@ export function MonitoringDashboard() {
   const [fitBoundsTarget, setFitBoundsTarget] = useState<[number, number, number, number] | null>(null);
   const [dataRevision, setDataRevision] = useState(0);
 
-  // 1. Load initial master data (kebun, afdeling, blok, stats, layers, rasters)
+  // 1. Refresh seluruh master data (kebun, afdeling, blok, layers, rasters, stats, history)
   const refreshStatsAndLayers = useCallback(async () => {
     try {
       const params: string[] = [];
       if (selectedKebunId) params.push(`kebun_id=${selectedKebunId}`);
+      else if (selectedWilayah) params.push(`wilayah=${encodeURIComponent(selectedWilayah)}`);
       if (selectedLayerId) params.push(`layer_id=${selectedLayerId}`);
       const statsQuery = params.length > 0 ? `?${params.join('&')}` : '';
 
-      const [lRes, rRes, sRes, hRes] = await Promise.all([
+      const [kRes, aRes, bRes, lRes, rRes, sRes, hRes] = await Promise.all([
+        fetch('/api/kebun'),
+        fetch('/api/afdeling'),
+        fetch('/api/blok'),
         fetch('/api/gis/layers'),
         fetch('/api/gis/rasters'),
         fetch(`/api/stats${statsQuery}`),
         fetch('/api/gis/history'),
       ]);
+      if (kRes.ok) {
+        const kj = await kRes.json();
+        setKebunList(kj.data || []);
+      }
+      if (aRes.ok) {
+        const aj = await aRes.json();
+        setAfdelingList(aj.data || []);
+      }
+      if (bRes.ok) {
+        const bj = await bRes.json();
+        setBlokList(bj.data || []);
+      }
       if (lRes.ok) {
         const lj = await lRes.json();
         setRawLayers(lj.data || []);
@@ -102,15 +156,16 @@ export function MonitoringDashboard() {
     } catch (err) {
       console.error('Failed to refresh layers and stats:', err);
     }
-  }, [selectedKebunId, selectedLayerId]);
+  }, [selectedWilayah, selectedKebunId, selectedLayerId]);
 
-  // Reaktif perbarui statistik KPI saat filter Kebun atau Layer berubah
+  // Reaktif perbarui statistik KPI saat filter Wilayah, Kebun, atau Layer berubah
   useEffect(() => {
     let ignore = false;
     async function updateStats() {
       try {
         const params: string[] = [];
         if (selectedKebunId) params.push(`kebun_id=${selectedKebunId}`);
+        else if (selectedWilayah) params.push(`wilayah=${encodeURIComponent(selectedWilayah)}`);
         if (selectedLayerId) params.push(`layer_id=${selectedLayerId}`);
         const statsQuery = params.length > 0 ? `?${params.join('&')}` : '';
         const sRes = await fetch(`/api/stats${statsQuery}`);
@@ -126,7 +181,7 @@ export function MonitoringDashboard() {
     return () => {
       ignore = true;
     };
-  }, [selectedKebunId, selectedLayerId]);
+  }, [selectedWilayah, selectedKebunId, selectedLayerId]);
 
   useEffect(() => {
     let ignore = false;
@@ -204,54 +259,263 @@ export function MonitoringDashboard() {
     };
   }, [selectedKebunId]);
 
+  // Helper: cocokkan layer terhadap filter hirarki (cek langsung kolom layer & master kebunList agar tidak pernah terlewat meski kebunList baru dibuat)
+  const filterLayersByCriteria = useCallback(
+    (
+      layersToFilter: LayerPeta[],
+      criteria: {
+        perusahaan?: string;
+        wilayah?: string;
+        kebunId?: number | null;
+        afdelingId?: number | null;
+        blokId?: number | null;
+      }
+    ) => {
+      const kebunById = new Map<number, KebunItem>();
+      for (const k of kebunList) {
+        kebunById.set(Number(k.id), k);
+      }
+
+      const targetPerusahaan = normText(criteria.perusahaan);
+      const targetWilayah = normText(criteria.wilayah);
+
+      // Jika Afdeling dipilih, identifikasi Kebun induk dari Afdeling tersebut agar layer kebun/wilayah lain (misal Bandung) TIDAK ikut tampil!
+      const matchedAfd =
+        criteria.afdelingId && criteria.afdelingId > 0
+          ? afdelingList.find((a) => Number(a.id) === Number(criteria.afdelingId))
+          : undefined;
+      const afdParentKebunId = matchedAfd?.kebun_id ? Number(matchedAfd.kebun_id) : null;
+
+      return layersToFilter.filter((l) => {
+        const matchKebun = l.kebun_id ? kebunById.get(Number(l.kebun_id)) : undefined;
+
+        // Filter Perusahaan
+        if (targetPerusahaan) {
+          const layerPerusahaan = normText(
+            l.perusahaan || matchKebun?.perusahaan || DEFAULT_PERUSAHAAN
+          );
+          if (layerPerusahaan !== targetPerusahaan) {
+            return false;
+          }
+        }
+
+        // Filter Wilayah
+        if (targetWilayah) {
+          const layerWilayah = normText(l.wilayah || matchKebun?.wilayah);
+          if (layerWilayah !== targetWilayah) {
+            return false;
+          }
+        }
+
+        // Filter Kebun
+        if (criteria.kebunId && Number(l.kebun_id) !== Number(criteria.kebunId)) {
+          return false;
+        }
+
+        // Filter Afdeling:
+        // 1) Wajib cocok dengan kebun induk milik Afdeling terpilih (cegah Afdeling Bakalan mengarah ke Kebun Bandung!)
+        if (afdParentKebunId && Number(l.kebun_id) !== afdParentKebunId) {
+          return false;
+        }
+        // 2) Jika layer memang eksplisit milik afdeling DB lain, sembunyikan
+        if (
+          criteria.afdelingId &&
+          criteria.afdelingId > 0 &&
+          l.afdeling_id &&
+          Number(l.afdeling_id) !== Number(criteria.afdelingId)
+        ) {
+          return false;
+        }
+
+        // Filter Blok
+        if (criteria.blokId && l.blok_id && Number(l.blok_id) !== Number(criteria.blokId)) {
+          return false;
+        }
+
+        return true;
+      });
+    },
+    [kebunList, afdelingList]
+  );
+
   // 2. Filter layers based on cascading filter
   const displayedLayers = useMemo(() => {
-    return rawLayers.filter((l) => {
-      // Filter Perusahaan
-      if (selectedPerusahaan) {
-        const allowedKebunIds = kebunList
-          .filter(
-            (k) =>
-              (k.perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)') ===
-              selectedPerusahaan
-          )
-          .map((k) => k.id);
-        if (l.kebun_id && !allowedKebunIds.includes(l.kebun_id)) {
-          return false;
-        }
-      }
-      // Filter Wilayah
-      if (selectedWilayah) {
-        const allowedWilayahKebunIds = kebunList
-          .filter((k) => k.wilayah?.trim() === selectedWilayah)
-          .map((k) => k.id);
-        if (l.kebun_id && !allowedWilayahKebunIds.includes(l.kebun_id)) {
-          return false;
-        }
-      }
-      // Filter Kebun
-      if (selectedKebunId && l.kebun_id && l.kebun_id !== selectedKebunId) {
-        return false;
-      }
-      // Filter Afdeling: Hanya sembunyikan jika layer ini memang eksplisit milik afdeling lain
-      if (selectedAfdelingId && l.afdeling_id && l.afdeling_id !== selectedAfdelingId) {
-        return false;
-      }
-      // Filter Blok
-      if (selectedBlokId && l.blok_id && l.blok_id !== selectedBlokId) {
-        return false;
-      }
-      return true;
+    return filterLayersByCriteria(rawLayers, {
+      perusahaan: selectedPerusahaan,
+      wilayah: selectedWilayah,
+      kebunId: selectedKebunId,
+      afdelingId: selectedAfdelingId,
+      blokId: selectedBlokId,
     });
   }, [
+    filterLayersByCriteria,
     rawLayers,
-    kebunList,
     selectedPerusahaan,
     selectedWilayah,
     selectedKebunId,
     selectedAfdelingId,
     selectedBlokId,
   ]);
+
+  // 2B. Gabungkan daftar Afdeling DB dengan klaster Afdeling otomatis hasil ekstraksi DBF (misal Afdeling A, B, C, Kebun Rakyat pada Kebun Sarongge)
+  const effectiveAfdelingList = useMemo<AfdelingItem[]>(() => {
+    const merged: AfdelingItem[] = [...afdelingList];
+    const breakdown = stats?.afdeling_breakdown || [];
+    if (breakdown.length === 0) return merged;
+
+    const targetKebunId =
+      selectedKebunId ||
+      displayedLayers.find((l) => l.kebun_id)?.kebun_id ||
+      kebunList[0]?.id ||
+      0;
+
+    let virtualId = -1;
+    for (const item of breakdown) {
+      const exists = merged.some(
+        (a) =>
+          (!targetKebunId || a.kebun_id === targetKebunId) &&
+          a.nama_afdeling.trim().toLowerCase() === item.name.trim().toLowerCase()
+      );
+      if (!exists) {
+        merged.push({
+          id: virtualId--,
+          kebun_id: targetKebunId,
+          kode_afdeling: `${item.count} blok · ${item.luas_ukur_ha} Ha`,
+          nama_afdeling: item.name,
+        });
+      }
+    }
+    return merged;
+  }, [afdelingList, stats?.afdeling_breakdown, selectedKebunId, displayedLayers, kebunList]);
+
+  // Handler Perusahaan (cascading reset + zoom ke cakupan perusahaan)
+  const handleSelectPerusahaan = useCallback(
+    (perusahaanVal: string) => {
+      setSelectedPerusahaan(perusahaanVal);
+      setSelectedWilayah('');
+      setSelectedKebunId(null);
+      setSelectedAfdelingId(null);
+      setSelectedBlokId(null);
+      setSelectedFeatureId(null);
+
+      const matching = filterLayersByCriteria(rawLayers, { perusahaan: perusahaanVal });
+      const visible = matching.filter((l) => l.terlihat);
+      const targetPool = visible.length > 0 ? visible : matching;
+      setSelectedLayerId(targetPool[0]?.id ?? null);
+      const bbox = computeUnionBbox(targetPool);
+      if (bbox) {
+        setFitBoundsTarget([...bbox]);
+      }
+    },
+    [filterLayersByCriteria, rawLayers]
+  );
+
+  // Handler Wilayah (cascading reset + sinkron layer aktif + arahkan peta ke lokasi wilayah)
+  const handleSelectWilayah = useCallback(
+    (wilayahVal: string) => {
+      setSelectedWilayah(wilayahVal);
+      setSelectedKebunId(null);
+      setSelectedAfdelingId(null);
+      setSelectedBlokId(null);
+      setSelectedFeatureId(null);
+
+      const matching = filterLayersByCriteria(rawLayers, {
+        perusahaan: selectedPerusahaan,
+        wilayah: wilayahVal,
+      });
+      const visible = matching.filter((l) => l.terlihat);
+      const targetPool = visible.length > 0 ? visible : matching;
+
+      setSelectedLayerId(targetPool[0]?.id ?? null);
+
+      const bbox = computeUnionBbox(targetPool);
+      if (bbox) {
+        setFitBoundsTarget([...bbox]);
+      } else if (!wilayahVal) {
+        const fallbackBbox = computeUnionBbox(rawLayers);
+        if (fallbackBbox) {
+          setFitBoundsTarget([...fallbackBbox]);
+        }
+      }
+    },
+    [filterLayersByCriteria, rawLayers, selectedPerusahaan]
+  );
+
+  // Handler Kebun (cascading reset + zoom gabungan seluruh layer kebun)
+  const handleSelectKebun = useCallback(
+    (id: number | null) => {
+      setSelectedKebunId(id);
+      setSelectedAfdelingId(null);
+      setSelectedBlokId(null);
+      setSelectedFeatureId(null);
+
+      const matching = filterLayersByCriteria(rawLayers, {
+        perusahaan: selectedPerusahaan,
+        wilayah: selectedWilayah,
+        kebunId: id,
+      });
+      const visible = matching.filter((l) => l.terlihat);
+      const targetPool = visible.length > 0 ? visible : matching;
+
+      if (targetPool.length > 0) {
+        setSelectedLayerId(targetPool[0].id);
+      } else if (id) {
+        setSelectedLayerId(null);
+      }
+
+      const bbox = computeUnionBbox(targetPool);
+      if (bbox) {
+        setFitBoundsTarget([...bbox]);
+      }
+    },
+    [filterLayersByCriteria, rawLayers, selectedPerusahaan, selectedWilayah]
+  );
+
+  // Handler Afdeling (pastikan fokus ke kebun induk milik afdeling + sinkron layer aktif & peta)
+  const handleSelectAfdeling = useCallback(
+    (id: number | null) => {
+      setSelectedAfdelingId(id);
+      setSelectedBlokId(null);
+      setSelectedFeatureId(null);
+
+      if (id) {
+        const afd = effectiveAfdelingList.find((a) => Number(a.id) === Number(id));
+        const targetKebun = afd?.kebun_id ? Number(afd.kebun_id) : selectedKebunId;
+        const matching = filterLayersByCriteria(rawLayers, {
+          perusahaan: selectedPerusahaan,
+          wilayah: selectedWilayah,
+          kebunId: targetKebun || null,
+          afdelingId: id,
+        });
+        const visible = matching.filter((l) => l.terlihat);
+        const targetPool = visible.length > 0 ? visible : matching;
+        if (targetPool.length > 0) {
+          setSelectedLayerId(targetPool[0].id);
+        }
+      } else {
+        const matching = filterLayersByCriteria(rawLayers, {
+          perusahaan: selectedPerusahaan,
+          wilayah: selectedWilayah,
+          kebunId: selectedKebunId,
+        });
+        const visible = matching.filter((l) => l.terlihat);
+        const targetPool = visible.length > 0 ? visible : matching;
+        if (targetPool.length > 0) {
+          setSelectedLayerId(targetPool[0].id);
+          const bbox = computeUnionBbox(targetPool);
+          if (bbox) setFitBoundsTarget([...bbox]);
+        }
+      }
+    },
+    [
+      effectiveAfdelingList,
+      filterLayersByCriteria,
+      rawLayers,
+      selectedPerusahaan,
+      selectedWilayah,
+      selectedKebunId,
+    ]
+  );
 
   // Reset filters
   const handleResetFilters = () => {
@@ -260,9 +524,15 @@ export function MonitoringDashboard() {
     setSelectedKebunId(null);
     setSelectedAfdelingId(null);
     setSelectedBlokId(null);
-    const firstLayerWithBbox = rawLayers.find((l) => l.bbox);
-    if (firstLayerWithBbox?.bbox) {
-      setFitBoundsTarget(firstLayerWithBbox.bbox);
+    setSelectedFeatureId(null);
+    const visible = rawLayers.filter((l) => l.terlihat);
+    const pool = visible.length > 0 ? visible : rawLayers;
+    if (pool.length > 0) {
+      setSelectedLayerId(pool[0].id);
+    }
+    const bbox = computeUnionBbox(pool);
+    if (bbox) {
+      setFitBoundsTarget([...bbox]);
     }
   };
 
@@ -453,7 +723,7 @@ export function MonitoringDashboard() {
   };
 
   // Handler when a parcel/feature is deleted
-  const handleFeatureDeleted = (featId: number, layerId: number) => {
+  const handleFeatureDeleted = () => {
     setSelectedFeatureId(null);
     setDataRevision((prev) => prev + 1);
     refreshStatsAndLayers();
@@ -467,6 +737,7 @@ export function MonitoringDashboard() {
         selectedKebunId={selectedKebunId}
         selectedStatusFilter={selectedStatusFilter}
         onSelectStatusFilter={(val) => setSelectedStatusFilter(val as 'all' | 'ktg' | 'ks_gpa')}
+        activeCommodity={stats?.komoditas}
         onOpenUpload={() => setIsUploadModalOpen(true)}
       />
 
@@ -477,34 +748,25 @@ export function MonitoringDashboard() {
           isOpen={isSidebarOpen}
           onToggle={() => setIsSidebarOpen((prev) => !prev)}
           kebunList={kebunList}
-          afdelingList={afdelingList}
+          afdelingList={effectiveAfdelingList}
           blokList={blokList}
           selectedPerusahaan={selectedPerusahaan}
-          onSelectPerusahaan={setSelectedPerusahaan}
+          onSelectPerusahaan={handleSelectPerusahaan}
           selectedWilayah={selectedWilayah}
-          onSelectWilayah={setSelectedWilayah}
+          onSelectWilayah={handleSelectWilayah}
           selectedKebunId={selectedKebunId}
-          onSelectKebun={(id) => {
-            setSelectedKebunId(id);
-            setSelectedAfdelingId(null);
-            setSelectedBlokId(null);
-            if (id) {
-              const kebunLayers = rawLayers.filter((l) => l.kebun_id === id && l.bbox);
-              if (kebunLayers.length > 0 && kebunLayers[0].bbox) {
-                setFitBoundsTarget(kebunLayers[0].bbox);
-              }
-            }
-          }}
+          onSelectKebun={handleSelectKebun}
           selectedAfdelingId={selectedAfdelingId}
-          onSelectAfdeling={setSelectedAfdelingId}
+          onSelectAfdeling={handleSelectAfdeling}
           selectedBlokId={selectedBlokId}
           onSelectBlok={setSelectedBlokId}
           onResetFilters={handleResetFilters}
           layers={displayedLayers}
+          allLayers={rawLayers}
           selectedLayerId={selectedLayerId}
           onSelectLayer={(id) => setSelectedLayerId(id)}
           onToggleLayerVisibility={handleToggleLayerVisibility}
-          onZoomToLayer={(bbox) => setFitBoundsTarget(bbox)}
+          onZoomToLayer={(bbox) => setFitBoundsTarget([...bbox])}
           onRenameLayer={handleRenameLayer}
           onDeleteLayer={handleDeleteLayer}
           onDeleteWilayah={handleDeleteWilayah}
@@ -520,10 +782,11 @@ export function MonitoringDashboard() {
               layers={displayedLayers}
               rasterLayers={rasterLayers}
               stats={stats}
+              selectedWilayah={selectedWilayah}
               selectedLayerId={selectedLayerId}
               statusFilter={selectedStatusFilter}
               selectedAfdelingId={selectedAfdelingId}
-              afdelingList={afdelingList}
+              afdelingList={effectiveAfdelingList}
               onSelectFeature={(featId, layerId) => {
                 setSelectedFeatureId(featId);
                 if (layerId) setSelectedLayerId(layerId);
@@ -548,12 +811,12 @@ export function MonitoringDashboard() {
             onSelectLayer={(id) => setSelectedLayerId(id)}
             selectedFeatureId={selectedFeatureId}
             onSelectFeature={(id) => setSelectedFeatureId(id)}
-            onZoomToFeature={(bbox) => setFitBoundsTarget(bbox)}
+            onZoomToFeature={(bbox) => setFitBoundsTarget([...bbox])}
             selectedKebunId={selectedKebunId}
             selectedAfdelingId={selectedAfdelingId}
             selectedBlokId={selectedBlokId}
             kebunList={kebunList}
-            afdelingList={afdelingList}
+            afdelingList={effectiveAfdelingList}
             blokList={blokList}
             stats={stats}
             periodYear={selectedYear}
@@ -571,7 +834,7 @@ export function MonitoringDashboard() {
           periodMonth={selectedMonth}
           periodYear={selectedYear}
           activeKebunName={kebunList.find((k) => k.id === selectedKebunId)?.nama_kebun}
-          activeAfdelingName={afdelingList.find((a) => a.id === selectedAfdelingId)?.nama_afdeling}
+          activeAfdelingName={effectiveAfdelingList.find((a) => a.id === selectedAfdelingId)?.nama_afdeling}
         />
       </div>
 

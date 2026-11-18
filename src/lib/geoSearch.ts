@@ -695,3 +695,153 @@ export async function searchLocalData(q: string, signal: AbortSignal): Promise<L
   const json = await res.json();
   return json.data || [];
 }
+
+export interface WilayahBoundaryResult {
+  boundary: GeoJSON.Geometry | GeoJSON.FeatureCollection;
+  bbox: [number, number, number, number] | null;
+  center: [number, number] | null;
+  label: string;
+}
+
+const wilayahBoundaryCache = new Map<string, WilayahBoundaryResult>();
+
+/**
+ * Mengambil poligon batas administratif resmi (outline wilayah) untuk filter Wilayah Dashboard.
+ * Prioritas 3 lapis:
+ * 1. BIG Official BATAS_KABKOTA_AR (Kabupaten/Kota resmi Indonesia)
+ * 2. Nominatim OpenStreetMap Polygon (Kab/Kota/Provinsi)
+ * 3. Multi-source Geocoder (Photon + Esri) + 4-Tier fetchBoundary fallback
+ */
+export async function fetchWilayahBoundary(
+  wilayahName: string,
+  signal?: AbortSignal
+): Promise<WilayahBoundaryResult | null> {
+  const raw = wilayahName.trim();
+  const lower = raw.toLowerCase();
+  if (
+    !raw ||
+    lower === '-' ||
+    lower.includes('belum ditentukan') ||
+    lower.includes('belum diset')
+  ) {
+    return null;
+  }
+
+  const cached = wilayahBoundaryCache.get(lower);
+  if (cached) return cached;
+
+  const isArea = (g?: GeoJSON.Geometry | null): g is GeoJSON.Geometry =>
+    !!g && (g.type === 'Polygon' || g.type === 'MultiPolygon');
+
+  const toResult = (
+    boundary: GeoJSON.Geometry | GeoJSON.FeatureCollection,
+    label: string
+  ): WilayahBoundaryResult => {
+    const bbox = computeGeoJsonBbox(boundary);
+    const center: [number, number] | null = bbox
+      ? [(bbox[1] + bbox[3]) / 2, (bbox[0] + bbox[2]) / 2]
+      : null;
+    const res: WilayahBoundaryResult = { boundary, bbox, center, label };
+    wilayahBoundaryCache.set(lower, res);
+    return res;
+  };
+
+  // Pecah "Kabupaten Cianjur, Jawa Barat" -> primary: "Kabupaten Cianjur", prov: "Jawa Barat"
+  const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const primary = parts[0] || raw;
+  const secondary = parts[1] || '';
+  const isExplicitKota = /^kota\b/i.test(primary);
+  const isExplicitKab = /^(kabupaten|kab\.?)\b/i.test(primary);
+  const cleanName = primary
+    .replace(/^(kabupaten|kab\.?|kota|provinsi|prov\.?|kecamatan|kec\.?)\s+/i, '')
+    .replace(/'/g, '')
+    .trim();
+  const cleanProv = secondary
+    .replace(/^(provinsi|prov\.?)\s+/i, '')
+    .replace(/'/g, '')
+    .trim();
+
+  // LAPIS 1: BIG Official BATAS_KABKOTA_AR
+  if (cleanName.length >= 3) {
+    try {
+      const upperName = cleanName.toUpperCase();
+      let where = `(UPPER(NAMOBJ) LIKE '%${upperName}%' OR UPPER(WADMKK) LIKE '%${upperName}%')`;
+      if (cleanProv.length >= 3) {
+        where += ` AND UPPER(WADMPR) LIKE '%${cleanProv.toUpperCase()}%'`;
+      }
+      const bigUrl =
+        `${BIG_BASE}/BATAS_KABKOTA_AR/MapServer/0/query` +
+        `?where=${encodeURIComponent(where)}` +
+        `&outFields=NAMOBJ,WADMKK,WADMPR&returnGeometry=true` +
+        `&maxAllowableOffset=0.0004&outSR=4326&f=geojson`;
+
+      const res = await fetch(bigUrl, { signal });
+      if (res.ok) {
+        const json = await res.json();
+        const feats: GeoJSON.Feature[] = (json.features || []).filter(
+          (f: GeoJSON.Feature) => isArea(f.geometry)
+        );
+        if (feats.length > 0) {
+          // Pilih kandidat paling cocok (bedakan Kota vs Kabupaten, misal "Kota Bandung" vs "Bandung" vs "Bandung Barat")
+          const scoreFeat = (f: GeoJSON.Feature): number => {
+            const p = (f.properties || {}) as Record<string, string>;
+            const nm = (p.NAMOBJ || p.WADMKK || '').toLowerCase().trim();
+            const target = cleanName.toLowerCase();
+            let score = 0;
+            if (nm === target) score += 100;
+            else if (nm === `kabupaten ${target}` || nm === `kab. ${target}`) score += isExplicitKota ? 10 : 95;
+            else if (nm === `kota ${target}`) score += isExplicitKota ? 100 : 20;
+            else if (nm.startsWith(target)) score += 40;
+            if (isExplicitKota && nm.includes('kota')) score += 50;
+            if (isExplicitKab && !nm.includes('kota')) score += 30;
+            return score;
+          };
+          feats.sort((a, b) => scoreFeat(b) - scoreFeat(a));
+          const best = feats[0];
+          if (best.geometry) {
+            return toResult(best.geometry, raw);
+          }
+        }
+      }
+    } catch {
+      if (signal?.aborted) return null;
+    }
+  }
+
+  // LAPIS 2: Nominatim OpenStreetMap Polygon
+  try {
+    const nomUrl =
+      `https://nominatim.openstreetmap.org/search?format=geojson&polygon_geojson=1` +
+      `&countrycodes=id&limit=5&polygon_threshold=0.0004&q=${encodeURIComponent(raw)}`;
+    const res = await fetch(nomUrl, { signal, headers: { 'Accept-Language': 'id' } });
+    if (res.ok) {
+      const json = await res.json();
+      const hit = (json.features || []).find((f: GeoJSON.Feature) => isArea(f.geometry));
+      if (hit?.geometry) {
+        return toResult(hit.geometry, raw);
+      }
+    }
+  } catch {
+    if (signal?.aborted) return null;
+  }
+
+  // LAPIS 3: Multi-source Geocoder + fetchBoundary
+  try {
+    const controller = signal ? undefined : new AbortController();
+    const activeSignal = signal || controller!.signal;
+    const places = await searchPlaces(raw, activeSignal);
+    if (places.length > 0) {
+      const top =
+        places.find((p) => p.adminLevel === 'kabkota' || p.adminLevel === 'province') ||
+        places[0];
+      const boundary = await fetchBoundary(top, activeSignal);
+      if (boundary) {
+        return toResult(boundary, raw);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
+}

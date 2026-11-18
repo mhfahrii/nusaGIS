@@ -842,7 +842,7 @@ export async function parseShapefileZip(
         }
       }
 
-      let geometries = parseShp(shpBuf, prjWkt);
+      const geometries = parseShp(shpBuf, prjWkt);
 
       let collection: FeatureCollection<Geometry, Record<string, unknown>>;
       if (dbfDiskPath) {

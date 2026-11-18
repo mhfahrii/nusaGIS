@@ -184,6 +184,38 @@ export interface MonitoringStats {
   min_blok_name?: string;
   avg_blok_luas_ha?: number;
   total_keliling_km?: number;
+  // Audit Selisih Luas (Ukur GIS vs Baku Legal)
+  selisih_luas_ha?: number;
+  selisih_luas_pct?: number;
+  audit_status?: 'sesuai' | 'lebih' | 'kurang' | null;
+  // Batas Konsesi Tunggal (misal: Kebun Cibeureum 1 poligon)
+  is_single_boundary?: boolean;
+  luas_m2?: number;
+  keliling_meter?: number;
+  potensi_tanam_efektif_ha?: number;
+  // Estimasi Produksi & Panen Otomatis
+  estimasi_panen_ton?: number;
+  estimasi_olahan_ton?: number | null;
+  commodity_profile?: {
+    key: 'tebu' | 'teh' | 'sawit' | 'agribisnis';
+    label: string;
+    shortLabel: string;
+    yieldPerHa: number;
+    yieldUnit: string;
+    rendemenPct: number | null;
+    processedLabel: string | null;
+    processedUnit: string | null;
+    standardSource: string;
+  };
+  // Rekapitulasi Otomatis per Afdeling / Klaster Blok
+  afdeling_breakdown?: Array<{
+    name: string;
+    count: number;
+    luas_ukur_ha: number;
+    luas_baku_ha: number;
+    estimasi_panen_ton: number;
+    color: string;
+  }>;
 }
 
 export interface LayerRaster {
