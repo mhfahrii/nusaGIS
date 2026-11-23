@@ -34,26 +34,26 @@ export function GisStatusBar({
   };
 
   return (
-    <footer className="h-6 bg-slate-950 border-t border-slate-800 px-3 flex items-center justify-between text-[11px] text-slate-400 select-none shrink-0 z-30 font-mono">
+    <footer className="h-6 bg-slate-950 border-t border-slate-800 px-3 flex items-center justify-between text-caption text-slate-400 select-none shrink-0 z-30 font-mono">
       {/* Left side: CRS & DB */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1.5">
-          <span className="text-slate-500 font-sans text-[10px]">CRS:</span>
-          <span className="font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-900/60 px-1.5 py-0.2 rounded text-[10px]">
+          <span className="text-slate-500 font-sans text-2xs">CRS:</span>
+          <span className="font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-900/60 px-1.5 py-0.2 rounded text-2xs">
             {crs}
           </span>
         </div>
 
         <div className="h-3 w-px bg-slate-800" />
 
-        <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+        <div className="flex items-center gap-1.5 text-2xs text-slate-400">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
           <span>{dbStatus}</span>
         </div>
       </div>
 
       {/* Right side: Scale, Coordinates, Selection */}
-      <div className="flex items-center gap-4 text-[10px]">
+      <div className="flex items-center gap-4 text-2xs">
         <div>
           <span className="text-slate-500 font-sans">Scale:</span>{' '}
           <span className="text-slate-300">{scale}</span>

@@ -44,10 +44,10 @@ export function GisTitleBar({
         {/* Project Name & Status */}
         <div className="hidden md:flex items-center gap-2">
           <span className="text-slate-400">Project:</span>
-          <span className="font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded text-[11px]">
+          <span className="font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded text-caption">
             {projectName}
           </span>
-          <span className="flex items-center gap-1.5 text-[11px] text-slate-400 ml-1">
+          <span className="flex items-center gap-1.5 text-caption text-slate-400 ml-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             PostGIS Aktif
           </span>
@@ -91,7 +91,7 @@ export function GisTitleBar({
         <button
           type="button"
           onClick={onToggleTable}
-          className={`px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
+          className={`px-2 py-1 rounded text-caption font-medium border transition-colors ${
             isTableOpen
               ? 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300'
               : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -104,7 +104,7 @@ export function GisTitleBar({
         <button
           type="button"
           onClick={onToggleProperties}
-          className={`px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
+          className={`px-2 py-1 rounded text-caption font-medium border transition-colors ${
             isPropertiesOpen
               ? 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300'
               : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -119,20 +119,20 @@ export function GisTitleBar({
         {/* User Identity */}
         <div className="flex items-center gap-2">
           <div className="text-right hidden sm:block">
-            <div className="text-[11px] font-semibold text-slate-200 leading-tight">
+            <div className="text-caption font-semibold text-slate-200 leading-tight">
               {user?.nama || 'Administrator'}
             </div>
-            <div className="text-[10px] text-emerald-400 capitalize">
+            <div className="text-2xs text-emerald-400 capitalize">
               {user?.peran || 'admin'}
             </div>
           </div>
-          <div className="w-6 h-6 rounded-full bg-emerald-700 text-white font-bold text-[10px] flex items-center justify-center ring-1 ring-emerald-500/40">
+          <div className="w-6 h-6 rounded-full bg-emerald-700 text-white font-bold text-2xs flex items-center justify-center ring-1 ring-emerald-500/40">
             {user?.nama ? user.nama.substring(0, 2).toUpperCase() : 'AD'}
           </div>
           <button
             type="button"
             onClick={() => logout()}
-            className="text-[11px] text-slate-400 hover:text-rose-400 px-1.5 py-0.5 rounded hover:bg-slate-900 transition-colors"
+            className="text-caption text-slate-400 hover:text-rose-400 px-1.5 py-0.5 rounded hover:bg-slate-900 transition-colors"
             title="Keluar dari sesi"
           >
             Keluar

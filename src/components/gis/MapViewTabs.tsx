@@ -47,7 +47,7 @@ export function MapViewTabs({ viewMode, onViewModeChange }: MapViewTabsProps) {
         <button
           type="button"
           onClick={() => onViewModeChange(viewMode === 'SPLIT' ? '2D' : 'SPLIT')}
-          className={`flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+          className={`flex items-center gap-1 px-2.5 py-0.5 rounded text-caption font-medium border transition-colors ${
             viewMode === 'SPLIT'
               ? 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300'
               : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'

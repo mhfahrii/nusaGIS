@@ -15,7 +15,7 @@ export function SceneViewPlaceholder() {
         </div>
 
         <div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-950 border border-blue-800/60 text-blue-300 text-[11px] font-semibold mb-2">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-950 border border-blue-800/60 text-blue-300 text-caption font-semibold mb-2">
             <span>3D GIS Engine</span>
             <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
           </div>
@@ -28,7 +28,7 @@ export function SceneViewPlaceholder() {
           </p>
         </div>
 
-        <div className="bg-slate-950/80 rounded-lg p-3 text-left border border-slate-800/80 space-y-2 text-[11px]">
+        <div className="bg-slate-950/80 rounded-lg p-3 text-left border border-slate-800/80 space-y-2 text-caption">
           <div className="font-semibold text-slate-300 flex items-center gap-2">
             <IconDatabase className="w-3.5 h-3.5 text-emerald-400" />
             <span>Kebutuhan Data Spasial 3D:</span>
@@ -46,7 +46,7 @@ export function SceneViewPlaceholder() {
           </ul>
         </div>
 
-        <div className="text-[11px] text-slate-500 italic">
+        <div className="text-caption text-slate-500 italic">
           *Sesuai panduan arsitektur: Tidak menampilkan visual 3D palsu tanpa sumber data elevasi nyata.
         </div>
       </div>

@@ -146,7 +146,7 @@ export function ContentsPanel({
             <span className="text-xs font-medium block truncate">
               {layer.nama_layer}
             </span>
-            <span className="text-[10px] text-slate-500 font-mono">
+            <span className="text-2xs text-slate-500 font-mono">
               {layer.jumlah_fitur} fitur ({layer.tipe_geometri})
             </span>
           </div>
@@ -254,7 +254,7 @@ export function ContentsPanel({
           <button
             type="button"
             onClick={() => setViewStyle(viewStyle === 'hierarchy' ? 'flat' : 'hierarchy')}
-            className="text-[10px] px-1.5 py-0.5 rounded text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 transition-colors"
+            className="text-2xs px-1.5 py-0.5 rounded text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 transition-colors"
             title={viewStyle === 'hierarchy' ? 'Ganti ke Tampilan Daftar' : 'Ganti ke Tampilan Hierarki'}
           >
             {viewStyle === 'hierarchy' ? 'Tree' : 'List'}
@@ -271,12 +271,12 @@ export function ContentsPanel({
               placeholder="Filter layer..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-caption text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
             <button
               type="button"
               onClick={onOpenAddData}
-              className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[10px] flex items-center gap-1 transition-colors shadow-xs"
+              className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-2xs flex items-center gap-1 transition-colors shadow-xs"
               title="Add Data / Unggah Shapefile ZIP"
             >
               <IconAddData className="w-3.5 h-3.5" />
@@ -286,9 +286,9 @@ export function ContentsPanel({
 
           {/* Tree View of Layers */}
           <div className="flex-1 p-2 space-y-2 overflow-y-auto text-xs">
-            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1">
+            <div className="flex items-center justify-between text-caption font-semibold text-slate-400 uppercase tracking-wider px-1">
               <span>{viewStyle === 'hierarchy' ? 'Layer / Catalog' : 'Drawing Order · Map'}</span>
-              <span className="text-slate-500 font-mono text-[10px]">{layers.length} Layer</span>
+              <span className="text-slate-500 font-mono text-2xs">{layers.length} Layer</span>
             </div>
 
             {filteredLayers.length === 0 ? (
@@ -329,7 +329,7 @@ export function ContentsPanel({
                           <IconChevronDown className="w-3.5 h-3.5 text-slate-400" />
                         )}
                         <span className="text-slate-200">{group.name}</span>
-                        <span className="text-[10px] text-slate-500 font-normal">
+                        <span className="text-2xs text-slate-500 font-normal">
                           ({group.layers.length})
                         </span>
                       </button>
@@ -356,7 +356,7 @@ export function ContentsPanel({
 
       {activeTab === 'catalog' && (
         <div className="flex-1 p-3 space-y-4 overflow-y-auto text-xs text-slate-300">
-          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="text-caption font-semibold text-slate-400 uppercase tracking-wider">
             Project Datasets (PostGIS)
           </div>
           <div className="space-y-2">
@@ -364,7 +364,7 @@ export function ContentsPanel({
               <IconFolder className="w-4 h-4 text-emerald-400" />
               <span>Layer Tersimpan di PostGIS ({layers.length})</span>
             </div>
-            <div className="pl-6 space-y-1 text-slate-400 text-[11px]">
+            <div className="pl-6 space-y-1 text-slate-400 text-caption">
               {layers.map((l) => (
                 <div
                   key={l.id}
@@ -382,16 +382,16 @@ export function ContentsPanel({
 
       {activeTab === 'history' && (
         <div className="flex-1 p-3 space-y-3 overflow-y-auto text-xs text-slate-300">
-          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+          <div className="text-caption font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
             <IconHistory className="w-3.5 h-3.5 text-emerald-400" />
             <span>Riwayat Aktivitas GIS</span>
           </div>
           <div className="p-2.5 rounded bg-slate-900/70 border border-slate-800 space-y-1">
-            <div className="flex items-center justify-between text-[11px]">
+            <div className="flex items-center justify-between text-caption">
               <span className="font-semibold text-emerald-400">PostGIS 3.6 Connected</span>
-              <span className="text-[10px] text-slate-500">System</span>
+              <span className="text-2xs text-slate-500">System</span>
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-caption text-slate-400">
               Database nusagis siap memproses data spasial Shapefile.
             </p>
           </div>
