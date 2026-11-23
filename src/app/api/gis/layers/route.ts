@@ -22,7 +22,10 @@ interface LayerDbRow {
   nama_kebun: string | null;
   kode_kebun: string | null;
   wilayah: string | null;
+  provinsi: string | null;
+  kabupaten_kota: string | null;
   perusahaan: string | null;
+  komoditas: string | null;
   nama_dataset: string | null;
   dibuat_pada: string;
   min_x: number | null;
@@ -43,7 +46,7 @@ export async function GET(req: NextRequest) {
     const blokIdParam = searchParams.get('blok_id');
 
     const params: unknown[] = [];
-    const whereClauses: string[] = [];
+    const whereClauses: string[] = ['COALESCE(l.is_deleted, FALSE) = FALSE'];
 
     if (kebunIdParam && !isNaN(Number(kebunIdParam)) && Number(kebunIdParam) > 0) {
       params.push(Number(kebunIdParam));
@@ -83,7 +86,10 @@ export async function GET(req: NextRequest) {
         k.nama_kebun,
         k.kode_kebun,
         k.wilayah,
+        k.provinsi,
+        k.kabupaten_kota,
         k.perusahaan,
+        k.komoditas,
         du.nama_data as nama_dataset,
         l.dibuat_pada,
         ST_XMin(ST_Extent(f.geom))::float8 as min_x,
@@ -95,7 +101,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN public.data_unggahan du ON l.unggahan_id = du.id
       LEFT JOIN public.fitur_peta f ON l.id = f.layer_id AND COALESCE(f.is_deleted, FALSE) = FALSE
       ${whereSql}
-      GROUP BY l.id, k.nama_kebun, k.kode_kebun, k.wilayah, k.perusahaan, du.nama_data, du.crs_asal, du.srid_asal
+      GROUP BY l.id, k.nama_kebun, k.kode_kebun, k.wilayah, k.provinsi, k.kabupaten_kota, k.perusahaan, k.komoditas, du.nama_data, du.crs_asal, du.srid_asal
       ORDER BY l.urutan ASC, l.id ASC;
     `,
       params
@@ -123,7 +129,10 @@ export async function GET(req: NextRequest) {
         nama_kebun: row.nama_kebun,
         kode_kebun: row.kode_kebun,
         wilayah: row.wilayah,
+        provinsi: row.provinsi,
+        kabupaten_kota: row.kabupaten_kota,
         perusahaan: row.perusahaan,
+        komoditas: row.komoditas,
         nama_dataset: row.nama_dataset,
         dibuat_pada: row.dibuat_pada,
         bbox: hasExtent
@@ -157,7 +166,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/gis/layers - Mengubah properti layer (visibility, warna, nama, transparansi)
 export async function PATCH(req: NextRequest) {
-  const auth = await requireUser(req);
+  const auth = await requireUser(req, { permission: 'edit_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -229,9 +238,9 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/gis/layers - Menghapus layer tunggal, unit kebun, atau seluruh data satu wilayah
+// DELETE /api/gis/layers - Memindahkan layer tunggal, unit kebun, atau seluruh data satu wilayah ke Tempat Sampah (Soft Delete)
 export async function DELETE(req: NextRequest) {
-  const auth = await requireUser(req);
+  const auth = await requireUser(req, { requireJson: false, permission: 'hapus_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -240,7 +249,7 @@ export async function DELETE(req: NextRequest) {
     const wilayahParam = searchParams.get('wilayah');
     const kebunIdParam = searchParams.get('kebun_id');
 
-    // 1. HAPUS SELURUH WILAYAH
+    // 1. HAPUS SELURUH WILAYAH (MASUK KE TEMPAT SAMPAH)
     if (wilayahParam) {
       const wilayahClean = wilayahParam.trim();
       if (!wilayahClean) {
@@ -253,7 +262,9 @@ export async function DELETE(req: NextRequest) {
       // Cari seluruh kebun yang berada di wilayah ini
       const kebunRes = await query<{ id: number; nama_kebun: string }>(
         `SELECT id, nama_kebun FROM public.kebun 
-         WHERE LOWER(TRIM(wilayah)) = LOWER(TRIM($1)) OR TRIM(wilayah) ILIKE $2`,
+         WHERE LOWER(TRIM(COALESCE(provinsi, ''))) = LOWER(TRIM($1)) 
+            OR LOWER(TRIM(COALESCE(wilayah, ''))) = LOWER(TRIM($1)) 
+            OR TRIM(COALESCE(wilayah, '')) ILIKE $2`,
         [wilayahClean, `%${wilayahClean}%`]
       );
       const kebunIds = kebunRes.rows.map((k) => Number(k.id));
@@ -261,34 +272,37 @@ export async function DELETE(req: NextRequest) {
       let layerIds: number[] = [];
       if (kebunIds.length > 0) {
         const layerRes = await query<{ id: number }>(
-          `SELECT id FROM public.layer_peta WHERE kebun_id = ANY($1::bigint[])`,
+          `SELECT id FROM public.layer_peta WHERE kebun_id = ANY($1::bigint[]) AND COALESCE(is_deleted, FALSE) = FALSE`,
           [kebunIds]
         );
         layerIds = layerRes.rows.map((l) => Number(l.id));
       }
 
-      // Hapus fitur spasial dan layer
+      // Soft-delete fitur spasial dan layer ke Tempat Sampah agar dapat dihapus permanen atau dipulihkan
       if (layerIds.length > 0) {
-        await query(`DELETE FROM public.fitur_peta WHERE layer_id = ANY($1::bigint[])`, [layerIds]);
-        await query(`DELETE FROM public.layer_peta WHERE id = ANY($1::bigint[])`, [layerIds]);
-      }
-
-      // Hapus raster layer jika ada
-      if (kebunIds.length > 0) {
-        await query(`DELETE FROM public.layer_raster WHERE kebun_id = ANY($1::bigint[])`, [kebunIds]);
-        // Hapus kebun (CASCADE akan menghapus afdeling dan blok)
-        await query(`DELETE FROM public.kebun WHERE id = ANY($1::bigint[])`, [kebunIds]);
+        await query(
+          `UPDATE public.fitur_peta 
+           SET is_deleted = TRUE, dihapus_pada = NOW(), dihapus_oleh_user_id = $2 
+           WHERE layer_id = ANY($1::bigint[]) AND COALESCE(is_deleted, FALSE) = FALSE`,
+          [layerIds, auth.user.id]
+        );
+        await query(
+          `UPDATE public.layer_peta 
+           SET is_deleted = TRUE, dihapus_pada = NOW(), dihapus_oleh_user_id = $2 
+           WHERE id = ANY($1::bigint[])`,
+          [layerIds, auth.user.id]
+        );
       }
 
       await catatAktivitas(
         auth.user.id,
         'hapus_wilayah',
-        `Menghapus seluruh data Wilayah "${wilayahClean}" (${kebunIds.length} unit kebun, ${layerIds.length} layer spasial).`
+        `Memindahkan seluruh data Wilayah "${wilayahClean}" (${kebunIds.length} unit kebun, ${layerIds.length} layer spasial) ke Tempat Sampah.`
       );
 
       return NextResponse.json({
         status: 'success',
-        message: `Seluruh data wilayah "${wilayahClean}" (${kebunIds.length} kebun, ${layerIds.length} layer) berhasil dihapus.`,
+        message: `Seluruh data wilayah "${wilayahClean}" (${layerIds.length} layer) dipindahkan ke Tempat Sampah. Buka Settings > Tempat Sampah untuk hapus permanen.`,
         data: {
           wilayah: wilayahClean,
           deletedKebunCount: kebunIds.length,
@@ -299,7 +313,7 @@ export async function DELETE(req: NextRequest) {
       });
     }
 
-    // 2. HAPUS UNIT KEBUN TERTENTU
+    // 2. HAPUS UNIT KEBUN TERTENTU (MASUK KE TEMPAT SAMPAH)
     if (kebunIdParam) {
       const kebunId = parseInt(kebunIdParam, 10);
       const kebunRes = await query<{ id: number; nama_kebun: string; wilayah: string }>(
@@ -315,27 +329,35 @@ export async function DELETE(req: NextRequest) {
       const kebun = kebunRes.rows[0];
 
       const layerRes = await query<{ id: number }>(
-        `SELECT id FROM public.layer_peta WHERE kebun_id = $1`,
+        `SELECT id FROM public.layer_peta WHERE kebun_id = $1 AND COALESCE(is_deleted, FALSE) = FALSE`,
         [kebunId]
       );
       const layerIds = layerRes.rows.map((l) => Number(l.id));
 
       if (layerIds.length > 0) {
-        await query(`DELETE FROM public.fitur_peta WHERE layer_id = ANY($1::bigint[])`, [layerIds]);
-        await query(`DELETE FROM public.layer_peta WHERE id = ANY($1::bigint[])`, [layerIds]);
+        await query(
+          `UPDATE public.fitur_peta 
+           SET is_deleted = TRUE, dihapus_pada = NOW(), dihapus_oleh_user_id = $2 
+           WHERE layer_id = ANY($1::bigint[]) AND COALESCE(is_deleted, FALSE) = FALSE`,
+          [layerIds, auth.user.id]
+        );
+        await query(
+          `UPDATE public.layer_peta 
+           SET is_deleted = TRUE, dihapus_pada = NOW(), dihapus_oleh_user_id = $2 
+           WHERE id = ANY($1::bigint[])`,
+          [layerIds, auth.user.id]
+        );
       }
-      await query(`DELETE FROM public.layer_raster WHERE kebun_id = $1`, [kebunId]);
-      await query(`DELETE FROM public.kebun WHERE id = $1`, [kebunId]);
 
       await catatAktivitas(
         auth.user.id,
         'hapus_kebun',
-        `Menghapus unit kebun "${kebun.nama_kebun}" (${kebun.wilayah}) beserta ${layerIds.length} layer spasial.`
+        `Memindahkan unit kebun "${kebun.nama_kebun}" (${kebun.wilayah}) beserta ${layerIds.length} layer spasial ke Tempat Sampah.`
       );
 
       return NextResponse.json({
         status: 'success',
-        message: `Unit kebun "${kebun.nama_kebun}" dan seluruh layernya berhasil dihapus.`,
+        message: `Unit kebun "${kebun.nama_kebun}" dan seluruh layernya dipindahkan ke Tempat Sampah.`,
         data: {
           kebun_id: kebunId,
           deletedLayerCount: layerIds.length,
@@ -344,7 +366,7 @@ export async function DELETE(req: NextRequest) {
       });
     }
 
-    // 3. HAPUS 1 DATA / FILE LAYER TERTENTU (DENGAN OTOMATIS BERSIHKAN WILAYAH JIKA FILE TERAKHIR)
+    // 3. HAPUS 1 DATA / FILE LAYER TERTENTU (MASUK KE TEMPAT SAMPAH)
     if (idParam) {
       const id = parseInt(idParam, 10);
       const layerRes = await query<{
@@ -371,19 +393,28 @@ export async function DELETE(req: NextRequest) {
       const targetKebunId = layer.kebun_id ? Number(layer.kebun_id) : null;
       const targetWilayah = (layer.wilayah || '').trim();
 
-      // Hapus fitur terkait terlebih dahulu
-      await query('DELETE FROM public.fitur_peta WHERE layer_id = $1;', [id]);
-      // Hapus layer
-      const res = await query('DELETE FROM public.layer_peta WHERE id = $1 RETURNING *;', [id]);
+      // Soft-delete fitur dan layer ke Tempat Sampah
+      await query(
+        `UPDATE public.fitur_peta 
+         SET is_deleted = TRUE, dihapus_pada = NOW(), dihapus_oleh_user_id = $2 
+         WHERE layer_id = $1 AND COALESCE(is_deleted, FALSE) = FALSE`,
+        [id, auth.user.id]
+      );
+      const res = await query(
+        `UPDATE public.layer_peta 
+         SET is_deleted = TRUE, dihapus_pada = NOW(), dihapus_oleh_user_id = $2 
+         WHERE id = $1 RETURNING *;`,
+        [id, auth.user.id]
+      );
 
       let kebunDeleted = false;
       let wilayahDeleted = false;
       let remainingFilesInWilayah = 0;
 
-      // Cek apakah kebun ini masih memiliki layer vektor atau raster lain
+      // Cek apakah kebun ini masih memiliki layer vektor aktif
       if (targetKebunId) {
         const remainingLayersInKebun = await query<{ count: string }>(
-          `SELECT COUNT(*)::text as count FROM public.layer_peta WHERE kebun_id = $1`,
+          `SELECT COUNT(*)::text as count FROM public.layer_peta WHERE kebun_id = $1 AND COALESCE(is_deleted, FALSE) = FALSE`,
           [targetKebunId]
         );
         const remainingRastersInKebun = await query<{ count: string }>(
@@ -395,31 +426,31 @@ export async function DELETE(req: NextRequest) {
         const countRaster = parseInt(remainingRastersInKebun.rows[0]?.count || '0', 10);
 
         if (countVektor === 0 && countRaster === 0) {
-          // Seluruh file di kebun ini telah habis! Hapus kebun otomatis
-          await query(`DELETE FROM public.kebun WHERE id = $1`, [targetKebunId]);
           kebunDeleted = true;
 
-          // Cek apakah di wilayah ini masih ada kebun lain
+          // Cek apakah di wilayah ini masih ada layer aktif pada kebun lain
           if (targetWilayah) {
-            const remainingKebunInWilayah = await query<{ count: string }>(
-              `SELECT COUNT(*)::text as count FROM public.kebun 
-               WHERE LOWER(TRIM(wilayah)) = LOWER(TRIM($1)) OR TRIM(wilayah) ILIKE $2`,
+            const remainingActiveInWilayah = await query<{ count: string }>(
+              `SELECT COUNT(*)::text as count FROM public.layer_peta lp
+               JOIN public.kebun k ON k.id = lp.kebun_id
+               WHERE COALESCE(lp.is_deleted, FALSE) = FALSE
+                 AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) = LOWER(TRIM($1)) OR TRIM(COALESCE(k.wilayah, '')) ILIKE $2)`,
               [targetWilayah, `%${targetWilayah}%`]
             );
-            const kebunCount = parseInt(remainingKebunInWilayah.rows[0]?.count || '0', 10);
+            const activeCount = parseInt(remainingActiveInWilayah.rows[0]?.count || '0', 10);
 
-            if (kebunCount === 0) {
+            if (activeCount === 0) {
               wilayahDeleted = true;
               remainingFilesInWilayah = 0;
             }
           }
         } else {
-          // Masih ada file lain di wilayah ini
           if (targetWilayah) {
             const countRes = await query<{ count: string }>(
               `SELECT COUNT(*)::text as count FROM public.layer_peta lp
                JOIN public.kebun k ON k.id = lp.kebun_id
-               WHERE LOWER(TRIM(k.wilayah)) = LOWER(TRIM($1)) OR TRIM(k.wilayah) ILIKE $2`,
+               WHERE COALESCE(lp.is_deleted, FALSE) = FALSE
+                 AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) = LOWER(TRIM($1)) OR TRIM(COALESCE(k.wilayah, '')) ILIKE $2)`,
               [targetWilayah, `%${targetWilayah}%`]
             );
             remainingFilesInWilayah = parseInt(countRes.rows[0]?.count || '0', 10);
@@ -430,18 +461,12 @@ export async function DELETE(req: NextRequest) {
       await catatAktivitas(
         auth.user.id,
         'hapus_layer',
-        `Menghapus file/layer "${layer.nama_layer}" (ID: ${id}) dari wilayah "${targetWilayah || 'Umum'}".${
-          wilayahDeleted
-            ? ` Seluruh data wilayah "${targetWilayah}" otomatis terhapus karena filenya telah habis.`
-            : ''
-        }`
+        `Memindahkan file/layer "${layer.nama_layer}" (ID: ${id}) dari wilayah "${targetWilayah || 'Umum'}" ke Tempat Sampah.`
       );
 
       return NextResponse.json({
         status: 'success',
-        message: wilayahDeleted
-          ? `File "${layer.nama_layer}" berhasil dihapus. Wilayah "${targetWilayah}" otomatis ikut terhapus karena seluruh datanya telah bersih.`
-          : `File/layer "${layer.nama_layer}" berhasil dihapus.`,
+        message: `File/layer "${layer.nama_layer}" dipindahkan ke Tempat Sampah. Buka Settings > Tempat Sampah untuk hapus permanen.`,
         data: {
           ...res.rows[0],
           kebunDeleted,

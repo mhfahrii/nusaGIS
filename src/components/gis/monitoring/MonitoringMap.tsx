@@ -16,6 +16,7 @@ import {
 import { CreateParcelModal } from './CreateParcelModal';
 import type { LayerPeta, LayerRaster, MonitoringStats } from '@/types/gis';
 import { extractFeatureIntel } from '@/lib/gis/attributeExtractor';
+import { findRpnEntity, formatPerusahaanForPopup } from '@/lib/gis/rpnEntities';
 import {
   searchLocalData,
   searchPlaces,
@@ -29,10 +30,24 @@ import {
   type MapSearchResult,
 } from '@/lib/geoSearch';
 
+export interface CompanyLocationPin {
+  kebunId: number;
+  namaKebun: string;
+  wilayah: string;
+  layerCount: number;
+  totalFitur: number;
+  bbox: [number, number, number, number] | null;
+  center: [number, number] | null;
+}
+
 interface MonitoringMapProps {
   layers: LayerPeta[];
   rasterLayers?: LayerRaster[];
   stats?: MonitoringStats | null;
+  selectedPerusahaan?: string;
+  companyLocations?: CompanyLocationPin[];
+  onSelectCompanyLocation?: (kebunId: number) => void;
+  onClearPerusahaan?: () => void;
   selectedWilayah?: string;
   selectedLayerId?: number | null;
   onSelectFeature?: (featureId: number | null, layerId?: number) => void;
@@ -43,6 +58,8 @@ interface MonitoringMapProps {
   onChangeRasterOpacity?: (id: number, opacity: number) => void;
   onFeatureCreated?: (newFeature: Record<string, unknown>, layerId: number) => void;
   onFeatureDeleted?: (featureId: number, layerId: number) => void;
+  canEdit?: boolean;
+  canDelete?: boolean;
   dataRevision?: number;
   statusFilter?: 'all' | 'ktg' | 'ks_gpa';
   selectedAfdelingId?: number | null;
@@ -189,8 +206,8 @@ export function isFeatureMatchingAfdeling(
     return /gpa\s*[4-8]\b|bakalan\s*[bc]\b/i.test(featName);
   }
 
-  // 5. Jika filter adalah klaster eksplisit (Afdeling A/B/C/D atau Kebun Rakyat) namun fitur tidak cocok di langkah 2, tolak
-  if (/afdeling\s+[a-d]\b|kebun rakyat/i.test(afdNameLower)) {
+  // 5. Jika filter adalah klaster eksplisit (Afdeling A/B/C/D) namun fitur tidak cocok di langkah 2, tolak
+  if (/afdeling\s+[a-d]\b/i.test(afdNameLower)) {
     return false;
   }
 
@@ -314,6 +331,11 @@ function SearchResultRow({
 export function MonitoringMap({
   layers,
   rasterLayers = [],
+  stats = null,
+  selectedPerusahaan = '',
+  companyLocations = [],
+  onSelectCompanyLocation,
+  onClearPerusahaan,
   selectedWilayah = '',
   onSelectFeature,
   selectedFeatureId,
@@ -323,11 +345,17 @@ export function MonitoringMap({
   onChangeRasterOpacity,
   onFeatureCreated,
   onFeatureDeleted,
+  canEdit = true,
+  canDelete = true,
   dataRevision,
   statusFilter = 'all',
   selectedAfdelingId = null,
   afdelingList = [],
 }: MonitoringMapProps) {
+  const canDeleteRef = useRef<boolean>(canDelete);
+  useEffect(() => {
+    canDeleteRef.current = canDelete;
+  }, [canDelete]);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const leafletRef = useRef<typeof LType | null>(null);
   const mapRef = useRef<LType.Map | null>(null);
@@ -338,7 +366,9 @@ export function MonitoringMap({
   const drawGroupRef = useRef<LType.LayerGroup | null>(null);
   const searchGroupRef = useRef<LType.LayerGroup | null>(null);
   const wilayahGroupRef = useRef<LType.LayerGroup | null>(null);
+  const companyPinsGroupRef = useRef<LType.LayerGroup | null>(null);
   const wilayahAbortRef = useRef<AbortController | null>(null);
+  const [isCompanyCardCollapsed, setIsCompanyCardCollapsed] = useState(false);
   const geojsonCacheRef = useRef<Map<number, GeoJSON.FeatureCollection>>(new Map());
   const initialAutoFitDoneRef = useRef<boolean>(false);
   const layersRef = useRef<LayerPeta[]>(layers);
@@ -471,8 +501,10 @@ export function MonitoringMap({
       const intel = extractFeatureIntel(properties, {
         featId,
         layerName: layer.nama_layer,
+        perusahaan: layer.perusahaan,
         namaKebun: layer.nama_kebun,
         wilayah: layer.wilayah,
+        komoditas: layer.komoditas,
         isSingleBoundaryLayer: layer.jumlah_fitur === 1,
       });
 
@@ -502,6 +534,7 @@ export function MonitoringMap({
         'folderpath',
         'shape_leng',
         'shape_area',
+        'area',
         'popupinfo',
         '_luas_geodesik_ha',
         '_bbox',
@@ -511,13 +544,14 @@ export function MonitoringMap({
         'updated_at',
         'luas',
         'luas1',
+        'luas_ha',
         'name',
         'nama_unit',
         'block',
         'label',
       ]);
 
-      // 3. Susun baris atribut yang hanya BERISI DATA (Jika kosong, HILANGKAN row & nama barisnya!)
+      // 3. Susun baris atribut yang hanya BERISI DATA (Jika kosong, HILANGKAN row & nama barisnya)
       const extraAttributes: Array<{ label: string; value: string }> = [];
 
       const rawPerusahaan =
@@ -526,9 +560,15 @@ export function MonitoringMap({
         properties.PERUSAHAAN ||
         properties.holding ||
         layer.perusahaan ||
-        'PT Perkebunan Nusantara I (Regional 4)';
-      if (isValidValue(rawPerusahaan)) {
-        extraAttributes.push({ label: 'Perusahaan', value: String(rawPerusahaan) });
+        '';
+      const popupPerusahaan = formatPerusahaanForPopup(String(rawPerusahaan || ''), {
+        namaKebun: layer.nama_kebun,
+        wilayah: layer.wilayah,
+        layerName: layer.nama_layer,
+        komoditas: layer.komoditas,
+      });
+      if (isValidValue(popupPerusahaan)) {
+        extraAttributes.push({ label: 'Perusahaan', value: popupPerusahaan });
       }
 
       extraAttributes.push({ label: 'Komoditas', value: intel.commodity.label });
@@ -684,7 +724,7 @@ export function MonitoringMap({
 
       const wrapper = document.createElement('div');
       wrapper.style.cssText =
-        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; width: 340px; max-width: 370px; max-height: min(480px, 72vh); display: flex; flex-direction: column; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.8), 0 10px 20px -4px rgba(0, 0, 0, 0.5);';
+        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; width: min(340px, calc(100vw - 36px)); max-width: calc(100vw - 36px); max-height: min(460px, 64dvh); display: flex; flex-direction: column; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.8), 0 10px 20px -4px rgba(0, 0, 0, 0.5);';
 
       wrapper.innerHTML = `
         <!-- 1. ArcGIS Pro Header -->
@@ -727,9 +767,13 @@ export function MonitoringMap({
           <a href="/api/gis/export?feature_id=${featId}&format=kml" target="_blank" download="${String(nameVal)}.kml" style="color: #7dd3fc; background: #132238; border: 1px solid #1e2942; font-size: 10px; font-weight: 700; text-decoration: none; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Unduh KML Google Earth">
             <span>KML</span>
           </a>
-          <button type="button" data-action="delete" style="color: #f87171; background: #450a0a; border: 1px solid #991b1b; font-size: 10px; font-weight: 700; cursor: pointer; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Hapus Lahan ini dari Database">
-            <span>Hapus</span>
-          </button>
+          ${
+            canDeleteRef.current
+              ? `<button type="button" data-action="delete" style="color: #f87171; background: #450a0a; border: 1px solid #991b1b; font-size: 10px; font-weight: 700; cursor: pointer; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Hapus Lahan ini dari Database">
+                  <span>Hapus</span>
+                </button>`
+              : ''
+          }
         </div>
       `;
 
@@ -781,7 +825,7 @@ export function MonitoringMap({
     ): HTMLElement => {
       const wrapper = document.createElement('div');
       wrapper.style.cssText =
-        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #0f172a; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px; overflow: hidden; min-width: 300px; max-width: 380px; box-shadow: 0 14px 35px -4px rgba(0, 0, 0, 0.4);';
+        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #0f172a; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px; overflow: hidden; width: min(320px, calc(100vw - 36px)); max-width: calc(100vw - 36px); box-shadow: 0 14px 35px -4px rgba(0, 0, 0, 0.4);';
 
       const val = pixelData.primaryValue;
 
@@ -915,6 +959,10 @@ export function MonitoringMap({
       // Group untuk pin marker hasil pencarian lokasi
       const searchGrp = L.layerGroup().addTo(map);
       searchGroupRef.current = searchGrp;
+
+      // Group untuk pin lokasi kebun milik Perusahaan / Puslit terpilih
+      const companyPinsGrp = L.layerGroup().addTo(map);
+      companyPinsGroupRef.current = companyPinsGrp;
 
       mapRef.current = map;
       setMapReady(true);
@@ -1114,6 +1162,53 @@ export function MonitoringMap({
       }).addTo(group);
     }
   }, [isDrawingMode, drawingPoints, mouseLatLng]);
+
+  // 4B. Render pin penanda lokasi kebun/wilayah saat filter Perusahaan / Puslit aktif
+  const onSelectCompanyLocationRef = useRef(onSelectCompanyLocation);
+  useEffect(() => {
+    onSelectCompanyLocationRef.current = onSelectCompanyLocation;
+  }, [onSelectCompanyLocation]);
+
+  useEffect(() => {
+    const L = leafletRef.current;
+    const group = companyPinsGroupRef.current;
+    if (!L || !group || !mapReady) return;
+
+    group.clearLayers();
+    if (!selectedPerusahaan || companyLocations.length === 0) return;
+
+    const entity = findRpnEntity(selectedPerusahaan);
+    const pinColor = entity?.color || '#00D2FF';
+
+    companyLocations.forEach((loc, idx) => {
+      if (!loc.center) return;
+      const [lat, lng] = loc.center;
+      const safeName = loc.namaKebun.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeWil = loc.wilayah.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      const icon = L.divIcon({
+        className: 'rpn-company-pin',
+        html: `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(13,19,34,0.95);border:1.5px solid ${pinColor};border-radius:9999px;padding:3px 9px 3px 4px;box-shadow:0 6px 18px rgba(0,0,0,0.65);white-space:nowrap;cursor:pointer;transform:translate(-50%,-100%);">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:9999px;background:${pinColor};color:#0a0e1a;font-weight:800;font-size:10px;font-family:ui-monospace,monospace;">${idx + 1}</span>
+          <span style="display:flex;flex-direction:column;line-height:1.15;">
+            <span style="color:#f0f6fc;font-weight:700;font-size:10.5px;">${safeName}</span>
+            <span style="color:#94a3b8;font-size:9px;">${safeWil}</span>
+          </span>
+        </div>`,
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+      });
+
+      const marker = L.marker([lat, lng], { icon, zIndexOffset: 600 });
+      marker.on('click', () => {
+        if (loc.bbox) {
+          zoomToBounds(loc.bbox);
+        }
+        onSelectCompanyLocationRef.current?.(loc.kebunId);
+      });
+      marker.addTo(group);
+    });
+  }, [selectedPerusahaan, companyLocations, mapReady, zoomToBounds]);
 
   // 4. Render layer RASTER (GeoTIFF Overlay)
   useEffect(() => {
@@ -1385,8 +1480,14 @@ export function MonitoringMap({
               const popupLatLng =
                 featBounds && featBounds.isValid() ? featBounds.getCenter() : e.latlng;
 
-              // Pusatkan peta ke tengah poligon/wilayah yang diklik
-              map.panTo(popupLatLng, { animate: true, duration: 0.35 });
+              // Geser titik fokus kamera sedikit ke atas poligon agar seluruh kartu popup berada tepat di tengah layar tanpa terpotong header
+              const currentZoom = map.getZoom();
+              const projected = map.project(popupLatLng, currentZoom);
+              const centeredLatLng = map.unproject(
+                L.point(projected.x, projected.y - 175),
+                currentZoom
+              );
+              map.panTo(centeredLatLng, { animate: true, duration: 0.35 });
 
               const popupEl = buildPopupElement(
                 map,
@@ -1402,9 +1503,11 @@ export function MonitoringMap({
                 maxWidth: 380,
                 minWidth: 320,
                 closeButton: true,
-                autoPan: false,
-                keepInView: false,
-                offset: [0, -14],
+                autoPan: true,
+                autoPanPaddingTopLeft: L.point(24, 72),
+                autoPanPaddingBottomRight: L.point(24, 28),
+                keepInView: true,
+                offset: [0, -10],
               })
                 .setLatLng(popupLatLng)
                 .setContent(popupEl)
@@ -1911,6 +2014,12 @@ export function MonitoringMap({
   };
 
   const allSearchResults: MapSearchResult[] = [...localResults, ...placeResults];
+  const selectedEntityInfo = selectedPerusahaan ? findRpnEntity(selectedPerusahaan) : null;
+  const companyAccentColor = selectedEntityInfo?.color || '#00D2FF';
+  const companyUniqueWilayah = Array.from(
+    new Set(companyLocations.map((c) => c.wilayah).filter(Boolean))
+  );
+  const companyTotalLayersCount = companyLocations.reduce((s, c) => s + c.layerCount, 0);
 
   return (
     <div className="relative w-full h-full bg-slate-950 overflow-hidden">
@@ -1920,9 +2029,11 @@ export function MonitoringMap({
       {/* 1. MAP SEARCH & LOCATION LOCATOR BAR (Pencarian Lokasi Global & Regional Indonesia) */}
       <div
         ref={searchContainerRef}
-        className="absolute top-3 left-3 z-[1000] w-48 sm:w-56 md:w-64 select-text"
+        className={`${
+          isToolbarOpen || isDrawingMode ? 'hidden sm:block' : 'block'
+        } absolute top-2.5 sm:top-3 left-2.5 sm:left-3 right-[108px] sm:right-auto sm:w-56 md:w-64 z-[1000] select-text`}
       >
-        <div className="relative flex items-center bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] focus-within:border-[#00D2FF] rounded-lg shadow-xl transition-all">
+        <div className="relative flex items-center bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] focus-within:border-[#00D2FF] rounded-lg shadow-xl transition-all min-h-9 sm:min-h-0">
           <div className="pl-2.5 text-[#00D2FF]">
             {isSearching ? (
               <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -2011,7 +2122,7 @@ export function MonitoringMap({
 
         {/* Active Location Banner with 1-Click "Buat Lahan di Sini" */}
         {activeLocationPin && !isDrawingMode && (
-          <div className="mt-2 bg-[#0E3A5D]/95 backdrop-blur-md border border-[#00B4D8] rounded-xl p-2.5 shadow-xl flex items-center justify-between gap-2 text-xs animate-in fade-in slide-in-from-top-1">
+          <div className="mt-2 bg-[#0E3A5D]/95 backdrop-blur-md border border-[#00B4D8] rounded-xl p-2.5 shadow-xl flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 text-xs animate-in fade-in slide-in-from-top-1">
             <div className="min-w-0 flex-1">
               <div className="text-[10px] text-[#7DD3FC] font-bold uppercase tracking-wider flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-[#00D2FF] animate-pulse" />
@@ -2046,8 +2157,8 @@ export function MonitoringMap({
 
       {/* Floating Digitize Toolbar (Muncul saat Mode Gambar Lahan Aktif) */}
       {isDrawingMode && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1100] bg-[#0D1322]/95 backdrop-blur-md border border-[#00D2FF] rounded-xl shadow-2xl p-2.5 flex items-center gap-3 animate-in fade-in slide-in-from-top-3">
-          <div className="flex items-center gap-2 pr-3 border-r border-[#1E2942]">
+        <div className="absolute top-2.5 sm:top-4 left-2.5 right-2.5 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-[1100] bg-[#0D1322]/95 backdrop-blur-md border border-[#00D2FF] rounded-xl shadow-2xl p-2 sm:p-2.5 flex flex-wrap items-center justify-between sm:justify-center gap-2 sm:gap-3 animate-in fade-in slide-in-from-top-3">
+          <div className="flex items-center gap-2 sm:pr-3 sm:border-r border-[#1E2942]">
             <span className="w-2.5 h-2.5 rounded-full bg-[#00D2FF] animate-ping" />
             <div className="flex items-center gap-1.5 text-xs font-bold text-[#F0F6FC]">
               <IconPencil className="w-4 h-4 text-[#00D2FF]" />
@@ -2100,20 +2211,21 @@ export function MonitoringMap({
 
       {/* Top Right Quick Controls Toolbar (Buka / Tutup Collapsible) */}
       {!isToolbarOpen && !isDrawingMode ? (
-        <div className="absolute top-3 right-3 z-[1000]">
+        <div className="absolute top-2.5 sm:top-3 right-2.5 sm:right-3 z-[1000]">
           <button
             type="button"
             onClick={() => setIsToolbarOpen(true)}
-            className="flex items-center gap-2 bg-[#0D1322]/95 hover:bg-[#12192B] border border-[#1E2942] hover:border-[#00D2FF] text-[#F0F6FC] px-3 py-1.5 rounded-lg shadow-xl text-xs font-semibold backdrop-blur-md transition-all cursor-pointer group"
+            className="min-h-9 sm:min-h-0 flex items-center gap-1.5 sm:gap-2 bg-[#0D1322]/95 hover:bg-[#12192B] border border-[#1E2942] hover:border-[#00D2FF] text-[#F0F6FC] px-2.5 sm:px-3 py-1.5 rounded-lg shadow-xl text-xs font-semibold backdrop-blur-md transition-all cursor-pointer group"
             title="Buka Toolbar Kontrol Peta & Gambar Lahan"
           >
             <IconPencil className="w-3.5 h-3.5 text-[#00D2FF] group-hover:scale-110 transition-transform" />
-            <span>Kontrol Peta</span>
-            <span className="text-[10px] text-[#00D2FF] bg-[#0E3A5D]/70 px-1.5 py-0.2 rounded font-mono">Buka ▾</span>
+            <span className="sm:hidden">Kontrol</span>
+            <span className="hidden sm:inline">Kontrol Peta</span>
+            <span className="hidden sm:inline text-[10px] text-[#00D2FF] bg-[#0E3A5D]/70 px-1.5 py-0.2 rounded font-mono">Buka ▾</span>
           </button>
         </div>
-      ) : (
-        <div className="absolute top-3 right-3 z-[1000] flex items-center gap-1.5 bg-[#0D1322]/95 backdrop-blur-md p-1 rounded-xl border border-[#1E2942] shadow-2xl animate-in fade-in zoom-in-95 duration-100">
+      ) : !isDrawingMode ? (
+        <div className="absolute top-2.5 sm:top-3 left-2.5 right-2.5 sm:left-auto sm:right-3 z-[1000] flex flex-wrap items-center justify-end gap-1.5 bg-[#0D1322]/95 backdrop-blur-md p-1.5 sm:p-1 rounded-xl border border-[#1E2942] shadow-2xl animate-in fade-in zoom-in-95 duration-100">
           {/* Full Extent / Home */}
           <button
             type="button"
@@ -2131,27 +2243,28 @@ export function MonitoringMap({
             <IconFullExtent className="w-4 h-4" />
           </button>
 
-          {/* TOOL PENSIL: Digitasi Lahan Baru */}
-          <button
-            type="button"
-            onClick={() => {
-              if (isDrawingMode) {
-                handleCancelDrawing();
-              } else {
-                setIsDrawingMode(true);
-                setDrawingPoints([]);
-              }
-            }}
-            className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
-              isDrawingMode
-                ? 'bg-[#00D2FF] border-[#00B4D8] text-[#0A0E1A] font-extrabold shadow-lg shadow-[#00D2FF]/20'
-                : 'bg-[#12192B] border-[#1E2942] text-[#00D2FF] hover:bg-[#19233A] hover:border-[#00D2FF]'
-            }`}
-            title="Klik untuk mengaktifkan Tool Digitasi Poligon Lahan di Peta"
-          >
-            <IconPencil className="w-3.5 h-3.5" />
-            <span>{isDrawingMode ? 'Mode Digitasi Aktif' : 'Digitasi'}</span>
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => {
+                if (isDrawingMode) {
+                  handleCancelDrawing();
+                } else {
+                  setIsDrawingMode(true);
+                  setDrawingPoints([]);
+                }
+              }}
+              className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                isDrawingMode
+                  ? 'bg-[#00D2FF] border-[#00B4D8] text-[#0A0E1A] font-extrabold shadow-lg shadow-[#00D2FF]/20'
+                  : 'bg-[#12192B] border-[#1E2942] text-[#00D2FF] hover:bg-[#19233A] hover:border-[#00D2FF]'
+              }`}
+              title="Klik untuk mengaktifkan Tool Digitasi Poligon Lahan di Peta"
+            >
+              <IconPencil className="w-3.5 h-3.5" />
+              <span>{isDrawingMode ? 'Mode Digitasi Aktif' : 'Digitasi'}</span>
+            </button>
+          )}
 
           {/* Panel Manajemen Layer & Konten (Vektor & Raster) */}
           <button
@@ -2280,16 +2393,17 @@ export function MonitoringMap({
             }}
             className="px-2 py-1 rounded-md hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#EF4444] transition-colors cursor-pointer border-l border-[#1E2942] ml-0.5 flex items-center gap-1 text-[11px] font-semibold"
             title="Tutup Toolbar Kontrol"
+            aria-label="Tutup Toolbar Kontrol"
           >
             <span>✕</span>
             <span className="hidden sm:inline">Tutup</span>
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* Floating Layer & Contents Panel */}
       {isLayersPanelOpen && (
-        <div className="absolute top-14 right-3 z-[1000] w-84 bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh] animate-in fade-in slide-in-from-top-2 duration-150">
+        <div className="absolute top-14 left-2.5 right-2.5 sm:left-auto sm:right-3 z-[1000] sm:w-84 bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[60dvh] sm:max-h-[75vh] animate-in fade-in slide-in-from-top-2 duration-150">
           <div className="h-10 px-3.5 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between">
             <div className="flex items-center gap-2">
               <IconLayers className="w-4 h-4 text-[#00D2FF]" />
@@ -2457,6 +2571,120 @@ export function MonitoringMap({
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Kartu Ringkasan Sebaran Lokasi / Wilayah Perusahaan Terpilih */}
+      {selectedPerusahaan && !isDrawingMode && (
+        <div className="absolute bottom-9 left-2.5 sm:bottom-10 sm:left-3 z-[990] w-[calc(100%-20px)] max-w-[310px] bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] rounded-xl shadow-2xl overflow-hidden text-xs">
+          <div
+            className="px-3 py-2 bg-[#12192B] border-b border-[#1E2942] flex items-center justify-between gap-2"
+            style={{ borderTopWidth: 2, borderTopColor: companyAccentColor }}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: companyAccentColor }}
+                />
+                <span className="font-bold text-[#F0F6FC] truncate">
+                  {selectedEntityInfo
+                    ? `${selectedEntityInfo.code} · ${selectedEntityInfo.commodityLabel}`
+                    : selectedPerusahaan}
+                </span>
+              </div>
+              <div className="text-[10px] text-[#8B9BB4] truncate mt-0.5">
+                {selectedEntityInfo ? `${selectedEntityInfo.fullName} (PT RPN)` : 'Lingkup PT RPN'}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsCompanyCardCollapsed((prev) => !prev)}
+                aria-label={isCompanyCardCollapsed ? 'Perluas daftar lokasi' : 'Ringkas daftar lokasi'}
+                className="px-1.5 py-0.5 rounded text-[10px] text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#19233A] transition-colors cursor-pointer"
+              >
+                {isCompanyCardCollapsed ? 'Buka' : 'Tutup'}
+              </button>
+              {onClearPerusahaan && (
+                <button
+                  type="button"
+                  onClick={onClearPerusahaan}
+                  aria-label="Hapus filter perusahaan"
+                  className="p-1 rounded text-[#8B9BB4] hover:text-[#EF4444] hover:bg-[#19233A] transition-colors cursor-pointer"
+                  title="Tampilkan semua perusahaan PT RPN"
+                >
+                  <IconClose className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Ringkasan Angka Wilayah & Lokasi */}
+          <div className="grid grid-cols-3 divide-x divide-[#1E2942] bg-[#0A0E1A]/80 border-b border-[#1E2942] text-center py-1.5">
+            <div className="px-1.5">
+              <div className="text-sm font-black font-mono tabular-nums" style={{ color: companyAccentColor }}>
+                {companyUniqueWilayah.length}
+              </div>
+              <div className="text-[9.5px] text-[#8B9BB4]">Wilayah</div>
+            </div>
+            <div className="px-1.5">
+              <div className="text-sm font-black text-[#F0F6FC] font-mono tabular-nums">
+                {companyLocations.length}
+              </div>
+              <div className="text-[9.5px] text-[#8B9BB4]">Kebun / Lokasi</div>
+            </div>
+            <div className="px-1.5">
+              <div className="text-sm font-black text-[#10B981] font-mono tabular-nums">
+                {stats?.total_luas_ha
+                  ? `${Number(stats.total_luas_ha).toLocaleString('id-ID', { maximumFractionDigits: 1 })} Ha`
+                  : `${companyTotalLayersCount} Lyr`}
+              </div>
+              <div className="text-[9.5px] text-[#8B9BB4]">
+                {stats?.total_luas_ha ? 'Total Luas' : 'Layer SHP'}
+              </div>
+            </div>
+          </div>
+
+          {!isCompanyCardCollapsed && (
+            <div className="max-h-36 overflow-y-auto p-2 space-y-1">
+              {companyLocations.length === 0 ? (
+                <div className="p-2 text-[11px] text-[#8B9BB4] leading-relaxed text-center">
+                  Belum ada peta lokasi untuk <strong className="text-[#F0F6FC]">{selectedPerusahaan}</strong>. Unggah folder SHP dari Drive melalui tombol <strong className="text-[#00D2FF]">Upload Data</strong>.
+                </div>
+              ) : (
+                companyLocations.map((loc, idx) => (
+                  <button
+                    key={loc.kebunId}
+                    type="button"
+                    onClick={() => {
+                      if (loc.bbox) zoomToBounds(loc.bbox);
+                      onSelectCompanyLocation?.(loc.kebunId);
+                    }}
+                    className="w-full text-left px-2 py-1.5 rounded-lg bg-[#12192B] hover:bg-[#19233A] border border-[#1E2942] hover:border-[#00D2FF] transition-colors flex items-center justify-between gap-2 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-5 h-5 rounded-full text-[10px] font-extrabold font-mono flex items-center justify-center shrink-0 text-[#0A0E1A]"
+                        style={{ backgroundColor: companyAccentColor }}
+                      >
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-[#F0F6FC] text-[11px] truncate">
+                          {loc.namaKebun}
+                        </div>
+                        <div className="text-[10px] text-[#8B9BB4] truncate">{loc.wilayah}</div>
+                      </div>
+                    </div>
+                    <span className="text-[9.5px] font-mono text-[#00D2FF] shrink-0">
+                      {loc.layerCount} SHP
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
       )}
 

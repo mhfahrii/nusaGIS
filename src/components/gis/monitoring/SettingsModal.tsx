@@ -11,6 +11,7 @@ import {
   IconHistory,
   IconDatabase,
   IconCheck,
+  IconLayers,
 } from '@/components/gis/GisIcons';
 
 interface DeletedFeature {
@@ -26,6 +27,21 @@ interface DeletedFeature {
   dibuat_pada: string;
 }
 
+interface DeletedLayerItem {
+  id: number;
+  item_type: 'layer' | 'orphan_upload';
+  unggahan_id: number | null;
+  nama_layer: string;
+  nama_file: string | null;
+  tipe_geometri: string;
+  jumlah_fitur: number;
+  nama_kebun: string;
+  wilayah: string;
+  luas_ha: number | null;
+  ukuran_bytes: number;
+  dihapus_pada: string;
+}
+
 interface ActivityLog {
   id: number;
   aktivitas: string;
@@ -36,20 +52,40 @@ interface ActivityLog {
 }
 
 interface HistoryResponse {
+  deleted_layers: DeletedLayerItem[];
   deleted_features: DeletedFeature[];
   activity_logs: ActivityLog[];
   counts: {
     total_deleted: number;
+    total_deleted_layers?: number;
+    total_deleted_features?: number;
     total_active: number;
     total_logs: number;
+    cache_bytes?: number;
+    temp_cache_files?: number;
   };
 }
 
+type ConfirmTarget =
+  | { kind: 'all' }
+  | { kind: 'feature'; id: number; name: string }
+  | { kind: 'layer'; id: number; name: string }
+  | { kind: 'orphan_upload'; id: number; name: string };
+
 interface SettingsModalProps {
   isOpen: boolean;
-  onClose: () => void;
+  onClose?: () => void;
   onDataChanged?: () => void;
   initialTab?: 'backup' | 'history';
+  embedded?: boolean;
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 KB';
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 export default function SettingsModal({
@@ -57,6 +93,7 @@ export default function SettingsModal({
   onClose,
   onDataChanged,
   initialTab = 'backup',
+  embedded = false,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<'backup' | 'history'>(initialTab);
   const [loading, setLoading] = useState<boolean>(false);
@@ -64,8 +101,8 @@ export default function SettingsModal({
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [processingId, setProcessingId] = useState<number | null>(null);
-  const [showConfirmPermanent, setShowConfirmPermanent] = useState<number | 'all' | null>(null);
+  const [processingKey, setProcessingKey] = useState<string | null>(null);
+  const [showConfirmPermanent, setShowConfirmPermanent] = useState<ConfirmTarget | null>(null);
   const [viewAuditLog, setViewAuditLog] = useState<boolean>(false);
 
   // Load data history & trash
@@ -100,16 +137,40 @@ export default function SettingsModal({
   // Flash message auto clear
   useEffect(() => {
     if (actionMessage) {
-      const timer = setTimeout(() => setActionMessage(null), 4500);
+      const timer = setTimeout(() => setActionMessage(null), 5000);
       return () => clearTimeout(timer);
     }
   }, [actionMessage]);
 
   if (!isOpen) return null;
 
+  // Handler: Pulihkan Layer / File
+  const handleRestoreLayer = async (layerId: number) => {
+    setProcessingKey(`layer-${layerId}`);
+    try {
+      const res = await fetch('/api/gis/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'restore_layer', layer_id: layerId }),
+      });
+      const json = await res.json();
+      if (json.status === 'success') {
+        setActionMessage({ type: 'success', text: json.message });
+        await fetchHistory();
+        onDataChanged?.();
+      } else {
+        setActionMessage({ type: 'error', text: json.message || 'Gagal memulihkan file/layer.' });
+      }
+    } catch {
+      setActionMessage({ type: 'error', text: 'Gagal memulihkan file/layer karena kesalahan jaringan.' });
+    } finally {
+      setProcessingKey(null);
+    }
+  };
+
   // Handler: Pulihkan Fitur (Restore)
-  const handleRestore = async (id: number) => {
-    setProcessingId(id);
+  const handleRestoreFeature = async (id: number) => {
+    setProcessingKey(`feat-${id}`);
     try {
       const res = await fetch('/api/gis/history', {
         method: 'POST',
@@ -127,7 +188,7 @@ export default function SettingsModal({
     } catch {
       setActionMessage({ type: 'error', text: 'Gagal memulihkan data karena kesalahan jaringan.' });
     } finally {
-      setProcessingId(null);
+      setProcessingKey(null);
     }
   };
 
@@ -155,11 +216,18 @@ export default function SettingsModal({
     }
   };
 
-  // Handler: Hapus Permanen Single
-  const handlePermanentDelete = async (id: number) => {
-    setProcessingId(id);
+  // Handler: Hapus Permanen Single Item (Layer, Orphan Upload, atau Feature)
+  const handlePermanentDeleteItem = async (target: Exclude<ConfirmTarget, { kind: 'all' }>) => {
+    const key = `${target.kind}-${target.id}`;
+    setProcessingKey(key);
     try {
-      const res = await fetch(`/api/gis/history?id=${id}`, {
+      const queryParam =
+        target.kind === 'layer'
+          ? `layer_id=${target.id}`
+          : target.kind === 'orphan_upload'
+          ? `upload_id=${target.id}`
+          : `id=${target.id}`;
+      const res = await fetch(`/api/gis/history?${queryParam}`, {
         method: 'DELETE',
       });
       const json = await res.json();
@@ -174,11 +242,11 @@ export default function SettingsModal({
     } catch {
       setActionMessage({ type: 'error', text: 'Gagal menghapus permanen karena kesalahan jaringan.' });
     } finally {
-      setProcessingId(null);
+      setProcessingKey(null);
     }
   };
 
-  // Handler: Kosongkan Tempat Sampah (Empty Trash)
+  // Handler: Kosongkan Tempat Sampah & Bersihkan Cache
   const handleEmptyTrash = async () => {
     setLoading(true);
     try {
@@ -204,7 +272,6 @@ export default function SettingsModal({
   // Handler: Download Backup
   const handleDownloadBackup = () => {
     setIsExporting(true);
-    // Langsung trigger unduhan dari API route
     const link = document.createElement('a');
     link.href = '/api/gis/backup?download=true';
     link.download = `nusagis-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -222,11 +289,25 @@ export default function SettingsModal({
     }, 1200);
   };
 
-  // Filtered deleted items
-  const filteredDeleted = (data?.deleted_features || []).filter((item) => {
+  // Filter deleted layers / archives
+  const filteredDeletedLayers = (data?.deleted_layers || []).filter((item) => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
-    const name = String(item.atribut?.Name || item.atribut?.nama_blok || item.atribut?.KODE_BLOK || '').toLowerCase();
+    return (
+      (item.nama_layer || '').toLowerCase().includes(term) ||
+      (item.nama_file || '').toLowerCase().includes(term) ||
+      (item.nama_kebun || '').toLowerCase().includes(term) ||
+      (item.wilayah || '').toLowerCase().includes(term)
+    );
+  });
+
+  // Filter deleted individual features
+  const filteredDeletedFeatures = (data?.deleted_features || []).filter((item) => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    const name = String(
+      item.atribut?.Name || item.atribut?.nama_blok || item.atribut?.nama_unit || item.atribut?.KODE_BLOK || ''
+    ).toLowerCase();
     const layer = (item.nama_layer || '').toLowerCase();
     const kebun = (item.nama_kebun || '').toLowerCase();
     const afd = (item.nama_afdeling || '').toLowerCase();
@@ -234,45 +315,68 @@ export default function SettingsModal({
   });
 
   const deletedCount = data?.counts.total_deleted || 0;
+  const restorableCount =
+    (data?.deleted_layers || []).filter((l) => l.item_type === 'layer').length +
+    (data?.deleted_features || []).length;
   const activeCount = data?.counts.total_active || 0;
+  const cacheBytes = data?.counts.cache_bytes || 0;
+  const hasTrashOrCache = deletedCount > 0 || cacheBytes > 0 || (data?.counts.temp_cache_files || 0) > 0;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-fadeIn">
-      <div className="relative w-full max-w-4xl max-h-[90vh] bg-[#0D1322] border border-[#1E2942] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-[#E2E8F0]">
+    <div
+      role={embedded ? 'region' : 'dialog'}
+      aria-modal={embedded ? undefined : 'true'}
+      aria-label="Backup dan Riwayat Data GIS"
+      className={
+        embedded
+          ? 'w-full'
+          : 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 backdrop-blur-sm p-2 sm:p-4 animate-fadeIn'
+      }
+    >
+      <div
+        className={
+          embedded
+            ? 'relative w-full bg-[#0D1322] border border-[#1E2942] rounded-2xl shadow-xl flex flex-col overflow-hidden text-[#E2E8F0]'
+            : 'relative w-full max-w-4xl max-h-[92dvh] bg-[#0D1322] border border-[#1E2942] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-[#E2E8F0]'
+        }
+      >
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 bg-[#090D18] border-b border-[#1E2942] flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#00D2FF]/10 border border-[#00D2FF]/30 flex items-center justify-center text-[#00D2FF] shadow-sm">
+        <div className="p-3.5 sm:p-5 bg-[#090D18] border-b border-[#1E2942] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#00D2FF]/10 border border-[#00D2FF]/30 flex items-center justify-center text-[#00D2FF] shadow-sm shrink-0">
               <IconSettings className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
-                  Settings & Pemeliharaan Data GIS
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-sm sm:text-lg font-bold text-white tracking-wide truncate">
+                  Backup &amp; Riwayat Data GIS
                 </h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-[#12192B] text-[#00D2FF] border border-[#1E2942]">
+                <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-[#12192B] text-[#00D2FF] border border-[#1E2942]">
                   PostGIS Engine
                 </span>
               </div>
-              <p className="text-xs text-[#8B9BB4] mt-0.5">
-                Pusat cadangan dataset spasial, pemulihan lahan terhapus, dan audit riwayat aktivitas.
+              <p className="text-[11px] sm:text-xs text-[#8B9BB4] mt-0.5 line-clamp-1">
+                Pusat cadangan dataset spasial, pemulihan file/folder terhapus, dan pembersihan permanen cache server.
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-lg bg-[#12192B] hover:bg-[#1E2942] text-[#8B9BB4] hover:text-white transition-colors cursor-pointer"
-            title="Tutup dialog"
-          >
-            <IconClose className="w-4 h-4" />
-          </button>
+          {!embedded && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Tutup dialog settings"
+              className="min-w-9 min-h-9 flex items-center justify-center rounded-lg bg-[#12192B] hover:bg-[#1E2942] text-[#8B9BB4] hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Tutup dialog"
+            >
+              <IconClose className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Tab Navigation */}
-        <div className="px-5 pt-3 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="px-3 sm:px-5 pt-2.5 sm:pt-3 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between gap-2 overflow-x-auto">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setActiveTab('backup')}
@@ -296,7 +400,7 @@ export default function SettingsModal({
               }`}
             >
               <IconHistory className="w-4 h-4" />
-              <span>History & Tempat Sampah</span>
+              <span>History &amp; Tempat Sampah</span>
               {deletedCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-[#EF4444] text-white">
                   {deletedCount}
@@ -328,9 +432,9 @@ export default function SettingsModal({
           >
             <div className="flex items-center gap-2">
               {actionMessage.type === 'success' ? (
-                <IconCheck className="w-4 h-4 flex-shrink-0" />
+                <IconCheck className="w-4 h-4 shrink-0" />
               ) : (
-                <IconTrash className="w-4 h-4 flex-shrink-0" />
+                <IconTrash className="w-4 h-4 shrink-0" />
               )}
               <span>{actionMessage.text}</span>
             </div>
@@ -367,7 +471,7 @@ export default function SettingsModal({
                   </div>
                   <div>
                     <div className="text-[11px] text-[#8B9BB4]">Format Cadangan</div>
-                    <div className="text-sm font-bold text-[#10B981]">GeoJSON & DB JSON</div>
+                    <div className="text-sm font-bold text-[#10B981]">GeoJSON &amp; DB JSON</div>
                   </div>
                 </div>
 
@@ -376,8 +480,10 @@ export default function SettingsModal({
                     <IconHistory className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="text-[11px] text-[#8B9BB4]">Data Terhapus (Trash)</div>
-                    <div className="text-lg font-bold text-[#F59E0B] font-mono">{deletedCount} Poligon</div>
+                    <div className="text-[11px] text-[#8B9BB4]">Item di Tempat Sampah</div>
+                    <div className="text-lg font-bold text-[#F59E0B] font-mono">
+                      {deletedCount} Item ({formatBytes(cacheBytes)})
+                    </div>
                   </div>
                 </div>
               </div>
@@ -410,10 +516,10 @@ export default function SettingsModal({
 
                 <div className="pt-3 border-t border-[#1E2942] grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-[#8B9BB4]">
                   <div className="flex items-center gap-2">
-                    <span className="text-[#00D2FF]">✓</span> Kompatibel dengan ArcGIS Pro & QGIS GeoJSON
+                    <span className="text-[#00D2FF]">✓</span> Kompatibel dengan ArcGIS Pro &amp; QGIS GeoJSON
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[#00D2FF]">✓</span> Mencakup seluruh histori atribut & luas legal
+                    <span className="text-[#00D2FF]">✓</span> Mencakup seluruh histori atribut &amp; luas legal
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[#00D2FF]">✓</span> Dilengkapi stempel waktu ekspor ISO 8601
@@ -427,12 +533,13 @@ export default function SettingsModal({
               {/* Info Panduan Keamanan Data */}
               <div className="p-4 bg-[#090D18] border border-[#1E2942] rounded-xl text-xs text-[#8B9BB4] space-y-2">
                 <div className="font-semibold text-white flex items-center gap-2">
-                  <span className="text-[#10B981]">●</span> Protokol Perlindungan Data Spasial:
+                  <span className="text-[#10B981]">●</span> Protokol Tempat Sampah &amp; Hapus Permanen:
                 </div>
                 <p className="leading-relaxed text-[11px]">
-                  Setiap penghapusan lahan dari peta menggunakan mekanisme <strong>Soft Delete</strong> (penghapusan
-                  logis). Data geometri fisik di server PostgreSQL tetap tersimpan aman di tempat sampah dan dapat
-                  dipulihkan sewaktu-waktu melalui tab <strong>History & Tempat Sampah</strong>.
+                  Setiap file/layer, folder wilayah, maupun poligon lahan yang dihapus dari panel kiri akan masuk ke tab{' '}
+                  <strong>History &amp; Tempat Sampah</strong>. Anda dapat memulihkannya kembali ke peta atau menekan{' '}
+                  <strong>Hapus Permanen / Kosongkan Sampah</strong> untuk menghapus data PostGIS beserta arsip fisik
+                  ZIP dan cache server sampai bersih.
                 </p>
               </div>
             </div>
@@ -448,7 +555,7 @@ export default function SettingsModal({
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Cari lahan terhapus berdasarkan nama blok, afdeling, kebun..."
+                    placeholder="Cari file/folder layer, arsip ZIP, atau lahan terhapus..."
                     className="w-full bg-[#0D1322] border border-[#1E2942] rounded-lg pl-3 pr-8 py-1.5 text-xs text-white placeholder-[#566680] focus:outline-none focus:border-[#00D2FF]"
                   />
                   {searchTerm && (
@@ -462,7 +569,7 @@ export default function SettingsModal({
                   )}
                 </div>
 
-                <div className="flex items-center gap-2 self-end sm:self-auto">
+                <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
                   <button
                     type="button"
                     onClick={() => setViewAuditLog(!viewAuditLog)}
@@ -476,134 +583,280 @@ export default function SettingsModal({
                     <span>{viewAuditLog ? 'Lihat Tempat Sampah' : 'Lihat Log Aktivitas'}</span>
                   </button>
 
-                  {!viewAuditLog && deletedCount > 0 && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleRestoreAll}
-                        disabled={loading}
-                        className="px-3 py-1.5 rounded-lg bg-[#10B981]/20 hover:bg-[#10B981]/30 border border-[#10B981]/50 text-[#10B981] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                        title="Pulihkan seluruh data terhapus kembali ke peta"
-                      >
-                        <IconRotateCcw className="w-3.5 h-3.5" />
-                        <span>Pulihkan Semua</span>
-                      </button>
+                  {!viewAuditLog && restorableCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRestoreAll}
+                      disabled={loading}
+                      className="px-3 py-1.5 rounded-lg bg-[#10B981]/20 hover:bg-[#10B981]/30 border border-[#10B981]/50 text-[#10B981] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Pulihkan seluruh layer dan poligon terhapus kembali ke peta"
+                    >
+                      <IconRotateCcw className="w-3.5 h-3.5" />
+                      <span>Pulihkan Semua</span>
+                    </button>
+                  )}
 
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPermanent('all')}
-                        disabled={loading}
-                        className="px-3 py-1.5 rounded-lg bg-[#EF4444]/20 hover:bg-[#EF4444]/30 border border-[#EF4444]/50 text-[#EF4444] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                        title="Hapus permanen semua item dari database"
-                      >
-                        <IconTrash className="w-3.5 h-3.5" />
-                        <span>Kosongkan Sampah</span>
-                      </button>
-                    </>
+                  {!viewAuditLog && hasTrashOrCache && (
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPermanent({ kind: 'all' })}
+                      disabled={loading}
+                      className="px-3 py-1.5 rounded-lg bg-[#EF4444]/20 hover:bg-[#EF4444]/30 border border-[#EF4444]/50 text-[#EF4444] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Hapus permanen semua item dari database dan bersihkan file arsip/cache"
+                    >
+                      <IconTrash className="w-3.5 h-3.5" />
+                      <span>Kosongkan Sampah &amp; Cache ({formatBytes(cacheBytes)})</span>
+                    </button>
                   )}
                 </div>
               </div>
 
-              {/* View 1: DAFTAR TEMPAT SAMPAH (RECYCLE BIN) */}
+              {/* View 1: DAFTAR TEMPAT SAMPAH (LAYER/FILE + POLIGON LAHAN) */}
               {!viewAuditLog && (
-                <div className="space-y-3">
-                  {filteredDeleted.length === 0 ? (
+                <div className="space-y-4">
+                  {filteredDeletedLayers.length === 0 && filteredDeletedFeatures.length === 0 ? (
                     <div className="py-12 px-4 text-center bg-[#12192B]/50 border border-dashed border-[#1E2942] rounded-xl">
                       <div className="w-12 h-12 mx-auto rounded-full bg-[#10B981]/10 text-[#10B981] flex items-center justify-center mb-3">
                         <IconCheck className="w-6 h-6" />
                       </div>
-                      <h4 className="text-sm font-semibold text-white">Tempat Sampah Spasial Bersih</h4>
+                      <h4 className="text-sm font-semibold text-white">Tempat Sampah &amp; Cache Spasial Bersih</h4>
                       <p className="text-xs text-[#8B9BB4] mt-1 max-w-sm mx-auto">
                         {searchTerm
                           ? 'Tidak ada data terhapus yang cocok dengan kata kunci pencarian Anda.'
-                          : 'Tidak ada lahan yang sedang terhapus. Semua data lahan aktif dan aman ditampilkan di peta.'}
+                          : 'Tidak ada file/folder layer, arsip sisa, maupun poligon yang berada di tempat sampah.'}
                       </p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto border border-[#1E2942] rounded-xl bg-[#090D18]">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-[#12192B] text-[#8B9BB4] border-b border-[#1E2942]">
-                            <th className="py-2.5 px-3 font-semibold">Nama Lahan / Blok</th>
-                            <th className="py-2.5 px-3 font-semibold">Layer & Kebun</th>
-                            <th className="py-2.5 px-3 font-semibold">Luas GIS</th>
-                            <th className="py-2.5 px-3 font-semibold">Waktu Dihapus</th>
-                            <th className="py-2.5 px-3 font-semibold text-right">Tindakan</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#1E2942]">
-                          {filteredDeleted.map((item) => {
-                            const name = String(
-                              item.atribut?.Name ||
-                              item.atribut?.nama_blok ||
-                              item.atribut?.KODE_BLOK ||
-                              `Fitur #${item.id}`
-                            );
-                            const isProcessing = processingId === item.id;
-                            const deleteDate = item.dihapus_pada
-                              ? new Date(item.dihapus_pada).toLocaleString('id-ID', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  year: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : '-';
+                    <>
+                      {/* SEKSI A: FILE / LAYER & FOLDER ATAU ARSIP SISA TERHAPUS */}
+                      {filteredDeletedLayers.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs font-bold text-[#F0F6FC] px-1">
+                            <div className="flex items-center gap-2">
+                              <IconLayers className="w-4 h-4 text-[#00D2FF]" />
+                              <span>File / Folder Layer &amp; Arsip Terhapus ({filteredDeletedLayers.length})</span>
+                            </div>
+                            <span className="text-[11px] font-mono text-[#8B9BB4]">
+                              Total Ukuran File: {formatBytes(cacheBytes)}
+                            </span>
+                          </div>
 
-                            return (
-                              <tr
-                                key={item.id}
-                                className="hover:bg-[#12192B]/60 transition-colors group"
-                              >
-                                <td className="py-2.5 px-3 font-medium text-white">
-                                  <div className="flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-[#EF4444]"></span>
-                                    <span>{name}</span>
-                                  </div>
-                                </td>
-                                <td className="py-2.5 px-3 text-[#8B9BB4]">
-                                  <div className="text-white text-[11px] font-mono">{item.nama_layer}</div>
-                                  <div className="text-[10px] text-[#566680]">
-                                    {item.nama_kebun} • {item.nama_afdeling}
-                                  </div>
-                                </td>
-                                <td className="py-2.5 px-3 font-mono text-[#00D2FF]">
-                                  {item.luas_ha ? `${item.luas_ha.toFixed(2)} Ha` : '-'}
-                                </td>
-                                <td className="py-2.5 px-3 text-[#8B9BB4] text-[11px] font-mono">
-                                  {deleteDate}
-                                </td>
-                                <td className="py-2.5 px-3 text-right">
-                                  <div className="flex items-center justify-end gap-1.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRestore(item.id)}
-                                      disabled={isProcessing}
-                                      className="px-2.5 py-1 rounded bg-[#10B981]/15 hover:bg-[#10B981]/25 border border-[#10B981]/40 text-[#10B981] hover:text-[#34D399] transition-all cursor-pointer font-medium flex items-center gap-1"
-                                      title="Pulihkan kembali ke peta aktif"
-                                    >
-                                      <IconRotateCcw className={`w-3 h-3 ${isProcessing ? 'animate-spin' : ''}`} />
-                                      <span>Pulihkan</span>
-                                    </button>
+                          <div className="overflow-x-auto border border-[#1E2942] rounded-xl bg-[#090D18]">
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="bg-[#12192B] text-[#8B9BB4] border-b border-[#1E2942]">
+                                  <th className="py-2.5 px-3 font-semibold">Nama File / Layer</th>
+                                  <th className="py-2.5 px-3 font-semibold">Kebun &amp; Wilayah</th>
+                                  <th className="py-2.5 px-3 font-semibold">Poligon / File</th>
+                                  <th className="py-2.5 px-3 font-semibold">Waktu</th>
+                                  <th className="py-2.5 px-3 font-semibold text-right">Tindakan</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-[#1E2942]">
+                                {filteredDeletedLayers.map((item) => {
+                                  const itemKey = `${item.item_type}-${item.id}`;
+                                  const isProcessing = processingKey === itemKey;
+                                  const deleteDate = item.dihapus_pada
+                                    ? new Date(item.dihapus_pada).toLocaleString('id-ID', {
+                                        day: 'numeric',
+                                        month: 'short',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : '-';
 
-                                    <button
-                                      type="button"
-                                      onClick={() => setShowConfirmPermanent(item.id)}
-                                      disabled={isProcessing}
-                                      className="px-2.5 py-1 rounded bg-[#EF4444]/15 hover:bg-[#EF4444]/25 border border-[#EF4444]/40 text-[#EF4444] hover:text-[#F87171] transition-all cursor-pointer font-medium flex items-center gap-1"
-                                      title="Hapus permanen dari basis data"
+                                  return (
+                                    <tr key={itemKey} className="hover:bg-[#12192B]/60 transition-colors">
+                                      <td className="py-2.5 px-3 font-medium text-white">
+                                        <div className="flex items-center gap-2">
+                                          <span
+                                            className={`w-2 h-2 rounded-full shrink-0 ${
+                                              item.item_type === 'layer' ? 'bg-[#F59E0B]' : 'bg-[#EF4444]'
+                                            }`}
+                                          />
+                                          <div>
+                                            <div className="font-semibold text-white">{item.nama_layer}</div>
+                                            {item.nama_file && (
+                                              <div className="text-[10px] text-[#8B9BB4] font-mono">
+                                                {item.nama_file}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="py-2.5 px-3 text-[#8B9BB4]">
+                                        <div className="text-white text-[11px]">{item.nama_kebun}</div>
+                                        <div className="text-[10px] text-[#566680]">{item.wilayah}</div>
+                                      </td>
+                                      <td className="py-2.5 px-3 font-mono">
+                                        {item.item_type === 'layer' ? (
+                                          <div>
+                                            <span className="text-[#00D2FF]">{item.jumlah_fitur} Poligon</span>
+                                            {item.luas_ha ? (
+                                              <span className="text-[#8B9BB4] text-[10px] block">
+                                                {item.luas_ha.toFixed(2)} Ha • {formatBytes(item.ukuran_bytes)}
+                                              </span>
+                                            ) : (
+                                              <span className="text-[#8B9BB4] text-[10px] block">
+                                                {formatBytes(item.ukuran_bytes)}
+                                              </span>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div>
+                                            <span className="text-amber-400">File Sisa / Cache</span>
+                                            <span className="text-[#8B9BB4] text-[10px] block">
+                                              {formatBytes(item.ukuran_bytes)}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td className="py-2.5 px-3 text-[#8B9BB4] text-[11px] font-mono">
+                                        {deleteDate}
+                                      </td>
+                                      <td className="py-2.5 px-3 text-right">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          {item.item_type === 'layer' && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleRestoreLayer(item.id)}
+                                              disabled={isProcessing}
+                                              className="px-2.5 py-1 rounded bg-[#10B981]/15 hover:bg-[#10B981]/25 border border-[#10B981]/40 text-[#10B981] hover:text-[#34D399] transition-all cursor-pointer font-medium flex items-center gap-1"
+                                              title="Pulihkan file/layer beserta seluruh poligonnya ke peta"
+                                            >
+                                              <IconRotateCcw className={`w-3 h-3 ${isProcessing ? 'animate-spin' : ''}`} />
+                                              <span>Pulihkan</span>
+                                            </button>
+                                          )}
+
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setShowConfirmPermanent({
+                                                kind: item.item_type,
+                                                id: item.id,
+                                                name: item.nama_layer,
+                                              })
+                                            }
+                                            disabled={isProcessing}
+                                            className="px-2.5 py-1 rounded bg-[#EF4444]/15 hover:bg-[#EF4444]/25 border border-[#EF4444]/40 text-[#EF4444] hover:text-[#F87171] transition-all cursor-pointer font-medium flex items-center gap-1"
+                                            title="Hapus permanen dari database dan hapus file fisik ZIP dari server"
+                                          >
+                                            <IconTrash className="w-3 h-3" />
+                                            <span>Hapus Permanen</span>
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* SEKSI B: POLIGON LAHAN INDIVIDUAL TERHAPUS */}
+                      {filteredDeletedFeatures.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-xs font-bold text-[#F0F6FC] px-1">
+                            Poligon Petak Lahan Terhapus ({filteredDeletedFeatures.length})
+                          </div>
+                          <div className="overflow-x-auto border border-[#1E2942] rounded-xl bg-[#090D18]">
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="bg-[#12192B] text-[#8B9BB4] border-b border-[#1E2942]">
+                                  <th className="py-2.5 px-3 font-semibold">Nama Lahan / Blok</th>
+                                  <th className="py-2.5 px-3 font-semibold">Layer &amp; Kebun</th>
+                                  <th className="py-2.5 px-3 font-semibold">Luas GIS</th>
+                                  <th className="py-2.5 px-3 font-semibold">Waktu Dihapus</th>
+                                  <th className="py-2.5 px-3 font-semibold text-right">Tindakan</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-[#1E2942]">
+                                {filteredDeletedFeatures.map((item) => {
+                                  const name = String(
+                                    item.atribut?.Name ||
+                                      item.atribut?.nama_blok ||
+                                      item.atribut?.nama_unit ||
+                                      item.atribut?.KODE_BLOK ||
+                                      `Fitur #${item.id}`
+                                  );
+                                  const isProcessing = processingKey === `feat-${item.id}`;
+                                  const deleteDate = item.dihapus_pada
+                                    ? new Date(item.dihapus_pada).toLocaleString('id-ID', {
+                                        day: 'numeric',
+                                        month: 'short',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : '-';
+
+                                  return (
+                                    <tr
+                                      key={item.id}
+                                      className="hover:bg-[#12192B]/60 transition-colors group"
                                     >
-                                      <IconTrash className="w-3 h-3" />
-                                      <span>Hapus Permanen</span>
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                                      <td className="py-2.5 px-3 font-medium text-white">
+                                        <div className="flex items-center gap-2">
+                                          <span className="w-2 h-2 rounded-full bg-[#EF4444]"></span>
+                                          <span>{name}</span>
+                                        </div>
+                                      </td>
+                                      <td className="py-2.5 px-3 text-[#8B9BB4]">
+                                        <div className="text-white text-[11px] font-mono">{item.nama_layer}</div>
+                                        <div className="text-[10px] text-[#566680]">
+                                          {item.nama_kebun} • {item.nama_afdeling}
+                                        </div>
+                                      </td>
+                                      <td className="py-2.5 px-3 font-mono text-[#00D2FF]">
+                                        {item.luas_ha ? `${item.luas_ha.toFixed(2)} Ha` : '-'}
+                                      </td>
+                                      <td className="py-2.5 px-3 text-[#8B9BB4] text-[11px] font-mono">
+                                        {deleteDate}
+                                      </td>
+                                      <td className="py-2.5 px-3 text-right">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRestoreFeature(item.id)}
+                                            disabled={isProcessing}
+                                            className="px-2.5 py-1 rounded bg-[#10B981]/15 hover:bg-[#10B981]/25 border border-[#10B981]/40 text-[#10B981] hover:text-[#34D399] transition-all cursor-pointer font-medium flex items-center gap-1"
+                                            title="Pulihkan kembali ke peta aktif"
+                                          >
+                                            <IconRotateCcw className={`w-3 h-3 ${isProcessing ? 'animate-spin' : ''}`} />
+                                            <span>Pulihkan</span>
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setShowConfirmPermanent({
+                                                kind: 'feature',
+                                                id: item.id,
+                                                name,
+                                              })
+                                            }
+                                            disabled={isProcessing}
+                                            className="px-2.5 py-1 rounded bg-[#EF4444]/15 hover:bg-[#EF4444]/25 border border-[#EF4444]/40 text-[#EF4444] hover:text-[#F87171] transition-all cursor-pointer font-medium flex items-center gap-1"
+                                            title="Hapus permanen dari basis data"
+                                          >
+                                            <IconTrash className="w-3 h-3" />
+                                            <span>Hapus Permanen</span>
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -633,7 +886,10 @@ export default function SettingsModal({
                           });
 
                           return (
-                            <div key={log.id} className="p-3 hover:bg-[#12192B]/50 transition-colors text-xs flex items-start justify-between gap-4">
+                            <div
+                              key={log.id}
+                              className="p-3 hover:bg-[#12192B]/50 transition-colors text-xs flex items-start justify-between gap-4"
+                            >
                               <div className="space-y-1">
                                 <div className="flex items-center gap-2">
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-[#12192B] text-[#00D2FF] border border-[#1E2942]">
@@ -672,9 +928,9 @@ export default function SettingsModal({
               <div>
                 <h3 className="text-base font-bold text-white">Konfirmasi Hapus Permanen</h3>
                 <p className="text-xs text-[#8B9BB4] mt-1.5 leading-relaxed">
-                  {showConfirmPermanent === 'all'
-                    ? 'Apakah Anda yakin ingin MENGOSONGKAN seluruh tempat sampah? Seluruh poligon terhapus akan dimusnahkan secara permanen dari server database PostGIS dan TIDAK DAPAT DIPULIHKAN KEMBALI.'
-                    : 'Apakah Anda yakin ingin menghapus permanen lahan ini dari basis data? Poligon fisik spasial akan dimusnahkan selamanya dan tidak dapat dipulihkan.'}
+                  {showConfirmPermanent.kind === 'all'
+                    ? 'Apakah Anda yakin ingin MENGOSONGKAN seluruh tempat sampah & cache? Seluruh file/layer terhapus, poligon, dan berkas arsip ZIP sisa di server akan dimusnahkan permanen dan TIDAK DAPAT DIPULIHKAN.'
+                    : `Apakah Anda yakin ingin menghapus permanen "${showConfirmPermanent.name}" dari server database & menghapus file fisiknya? Tindakan ini tidak dapat dibatalkan.`}
                 </p>
               </div>
 
@@ -690,10 +946,10 @@ export default function SettingsModal({
                 <button
                   type="button"
                   onClick={() => {
-                    if (showConfirmPermanent === 'all') {
+                    if (showConfirmPermanent.kind === 'all') {
                       handleEmptyTrash();
-                    } else if (typeof showConfirmPermanent === 'number') {
-                      handlePermanentDelete(showConfirmPermanent);
+                    } else {
+                      handlePermanentDeleteItem(showConfirmPermanent);
                     }
                   }}
                   className="px-4 py-2 rounded-xl bg-[#EF4444] hover:bg-[#DC2626] text-white text-xs font-bold shadow-lg shadow-[#EF4444]/30 transition-all cursor-pointer"
@@ -711,16 +967,17 @@ export default function SettingsModal({
             <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
             <span>GIS Monitoring Spatial Manager</span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-[#12192B] hover:bg-[#1E2942] text-xs text-white transition-colors cursor-pointer"
-          >
-            Tutup
-          </button>
+          {!embedded && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-1.5 rounded-lg bg-[#12192B] hover:bg-[#1E2942] text-xs text-white transition-colors cursor-pointer"
+            >
+              Tutup
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 }
-

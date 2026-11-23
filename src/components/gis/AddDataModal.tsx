@@ -318,7 +318,7 @@ export function AddDataModal({ isOpen, onClose, onUploadSuccess }: AddDataModalP
                         <span className="text-emerald-400">kumpulan file .shp, .dbf, .prj</span>
                       </p>
                       <p className="text-[11px] text-slate-400 mt-1">
-                        Mendukung pemilihan langsung seluruh komponen Shapefile sekaligus (Maks. 50 MB)
+                        Mendukung pemilihan langsung seluruh komponen Shapefile sekaligus (Maks. 250 MB)
                       </p>
                     </div>
                   )}

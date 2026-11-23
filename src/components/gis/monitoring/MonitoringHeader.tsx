@@ -1,7 +1,9 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
+import { hasPermission } from '@/types/auth';
 import { IconTree } from '@/components/icons';
 import { IconAddData } from '../GisIcons';
 
@@ -33,27 +35,27 @@ export function MonitoringHeader({
   activeCommodity,
   onOpenUpload,
 }: MonitoringHeaderProps) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const activeKebun = selectedKebunId ? kebunList.find((k) => k.id === selectedKebunId) : null;
 
   return (
-    <header className="h-13 bg-[#0D1322] border-b border-[#1E2942] px-4 flex items-center justify-between text-xs select-none shrink-0 z-30 shadow-md">
+    <header className="min-h-12 sm:h-13 bg-[#0D1322] border-b border-[#1E2942] px-2.5 sm:px-4 py-1.5 sm:py-0 flex items-center justify-between gap-2 text-xs select-none shrink-0 z-30 shadow-md">
       {/* 1. Brand Logo & Title */}
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-[#0E3A5D] border border-[#00D2FF]/50 flex items-center justify-center text-[#00D2FF] shadow-xs">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <div className="w-8 h-8 rounded-lg bg-[#0E3A5D] border border-[#00D2FF]/50 flex items-center justify-center text-[#00D2FF] shadow-xs shrink-0">
           <IconTree className="w-4.5 h-4.5" />
         </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-extrabold tracking-wider text-[#F0F6FC] text-sm uppercase">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span className="font-extrabold tracking-wider text-[#F0F6FC] text-xs sm:text-sm uppercase truncate">
               GIS Monitoring
             </span>
-            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-[#0E3A5D]/80 border border-[#00B4D8]/60 text-[#00D2FF] font-mono">
+            <span className="hidden sm:inline-block px-1.5 py-0.2 rounded text-[10px] font-bold bg-[#0E3A5D]/80 border border-[#00B4D8]/60 text-[#00D2FF] font-mono shrink-0">
               PostGIS
             </span>
           </div>
-          <p className="text-[10px] text-[#8B9BB4] leading-none">
-            Monitoring Spasial Kebun &amp; Blok Lahan (Tebu / Agribisnis)
+          <p className="hidden sm:block text-[10px] text-[#8B9BB4] leading-none truncate">
+            PT Riset Perkebunan Nusantara (PT RPN) · Monitoring Spasial Kebun &amp; Blok Lahan
           </p>
         </div>
       </div>
@@ -81,9 +83,9 @@ export function MonitoringHeader({
         <div className="flex flex-col justify-center">
           <span className="text-[10px] text-[#8B9BB4] font-semibold">Komoditas Lahan</span>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#10B981]/20 border border-[#10B981]/50 text-[#10B981] flex items-center gap-1 max-w-[200px] truncate" title={activeCommodity || 'Tebu (PSKA 942)'}>
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#10B981]/20 border border-[#10B981]/50 text-[#10B981] flex items-center gap-1 max-w-[200px] truncate" title={activeCommodity || 'Semua Komoditas'}>
               <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse shrink-0"></span>
-              <span className="truncate">{activeCommodity || 'Tebu (PSKA 942)'}</span>
+              <span className="truncate">{activeCommodity || 'Semua Komoditas'}</span>
             </span>
           </div>
         </div>
@@ -103,42 +105,52 @@ export function MonitoringHeader({
       </div>
 
       {/* 3. Action Buttons & User Profile */}
-      <div className="flex items-center gap-3">
-        {/* Tombol Upload Data GIS */}
-        <button
-          type="button"
-          onClick={onOpenUpload}
-          className="px-3.5 py-1.5 rounded-lg bg-[#00D2FF] hover:bg-[#38BDF8] text-[#0A0E1A] font-bold text-xs shadow-md shadow-[#00D2FF]/20 transition-all flex items-center gap-1.5 cursor-pointer"
-          title="Upload File GIS (ZIP Shapefile / GeoJSON)"
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        {hasPermission(user, 'upload_layer') && (
+          <>
+            <button
+              type="button"
+              onClick={onOpenUpload}
+              className="min-h-9 sm:min-h-0 px-2.5 sm:px-3.5 py-1.5 rounded-lg bg-[#00D2FF] hover:bg-[#38BDF8] active:bg-[#0EA5E9] text-[#0A0E1A] font-bold text-xs shadow-md shadow-[#00D2FF]/20 transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Upload File GIS (ZIP Shapefile / GeoJSON)"
+              aria-label="Upload Data GIS"
+            >
+              <IconAddData className="w-3.5 h-3.5 shrink-0" />
+              <span className="sm:hidden">Upload</span>
+              <span className="hidden sm:inline">Upload Data</span>
+            </button>
+
+            <div className="h-5 w-px bg-[#1E2942] hidden sm:block" />
+          </>
+        )}
+
+        {/* User Identity Pill Button -> Navigates to Dashboard Manajemen Karyawan & Pengaturan */}
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2.5 pl-1 pr-3.5 py-1 rounded-full bg-[#12192B] hover:bg-[#172136] border border-[#1E2942] hover:border-[#00D2FF]/70 shadow-sm transition-all cursor-pointer group"
+          title="Buka Dashboard Manajemen Karyawan, Create Account & Backup Riwayat"
         >
-          <IconAddData className="w-3.5 h-3.5" />
-          <span>Upload Data</span>
-        </button>
-
-        <div className="h-5 w-px bg-[#1E2942] hidden sm:block" />
-
-        {/* User Identity */}
-        <div className="flex items-center gap-2">
-          <div className="text-right hidden md:block">
-            <div className="text-[11px] font-semibold text-[#F0F6FC] leading-tight">
-              {user?.nama || 'Administrator'}
+          <div className="w-8 h-8 rounded-full bg-[#0E3A5D] border border-[#00D2FF]/50 group-hover:border-[#00D2FF] text-[#00D2FF] font-bold text-xs flex items-center justify-center overflow-hidden shadow-xs shrink-0 transition-colors">
+            {user?.foto_profil ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={user.foto_profil}
+                alt={user.nama || 'Profil'}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span>{user?.nama ? user.nama.substring(0, 2).toUpperCase() : 'FA'}</span>
+            )}
+          </div>
+          <div className="text-left min-w-0">
+            <div className="text-xs font-bold text-[#F0F6FC] group-hover:text-[#00D2FF] transition-colors leading-tight truncate max-w-[110px]">
+              {user?.nama || 'fahri'}
             </div>
-            <div className="text-[10px] text-[#00D2FF] font-medium capitalize">
-              {user?.peran || 'admin'}
+            <div className="text-[10px] text-[#8B9BB4] group-hover:text-[#00D2FF]/85 font-medium leading-tight">
+              {user?.peran === 'admin' ? 'Admin' : 'Karyawan'}
             </div>
           </div>
-          <div className="w-7 h-7 rounded-full bg-[#12192B] border border-[#1E2942] text-[#00D2FF] font-bold text-xs flex items-center justify-center shadow-xs">
-            {user?.nama ? user.nama.substring(0, 2).toUpperCase() : 'AD'}
-          </div>
-          <button
-            type="button"
-            onClick={() => logout()}
-            className="text-[11px] text-[#8B9BB4] hover:text-[#EF4444] px-1.5 py-0.5 rounded hover:bg-[#12192B] transition-colors cursor-pointer"
-            title="Keluar dari sesi"
-          >
-            Keluar
-          </button>
-        </div>
+        </Link>
       </div>
     </header>
   );

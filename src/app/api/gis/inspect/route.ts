@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createWriteStream } from 'node:fs';
+import { once } from 'node:events';
+import { finished } from 'node:stream/promises';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -14,115 +17,226 @@ import {
   UploadedFileItem,
   MAX_ZIP_SIZE_BYTES,
 } from '@/lib/gis/shapefile';
+import { parseWilayahHierarchy } from '@/lib/gis/wilayah';
 import { parseGeoTiffMetadata } from '@/lib/gis/geotiff';
 import type { DetectedDataset } from '@/types/gis';
 
+export const maxDuration = 300;
+
+function decodeUploadFileName(rawHeader: string | null): string {
+  if (!rawHeader) return 'dataset.zip';
+  try {
+    return path.basename(decodeURIComponent(rawHeader).replace(/\\/g, '/')) || 'dataset.zip';
+  } catch {
+    return path.basename(rawHeader.replace(/\\/g, '/')) || 'dataset.zip';
+  }
+}
+
 export async function POST(req: NextRequest) {
-  const auth = await requireUser(req, { requireJson: false });
+  const auth = await requireUser(req, { requireJson: false, permission: 'upload_layer' });
   if (auth.response) return auth.response;
 
-  try {
-    const formData = await req.formData();
-    let rawFiles = formData.getAll('files') as File[];
-    if (rawFiles.length === 0) {
-      rawFiles = formData.getAll('file') as File[];
-    }
-    const fallbackCrs = (formData.get('fallback_crs') as string | null)?.trim() || null;
+  const tempId = crypto.randomBytes(16).toString('hex');
+  const tempDir = path.join(os.tmpdir(), 'nusagis-upload-cache');
+  const tempFilePath = path.join(tempDir, `${tempId}.bin`);
+  const tempMetaPath = path.join(tempDir, `${tempId}.meta.json`);
+  let alreadySavedTempFile = false;
 
-    if (rawFiles.length === 0) {
-      return NextResponse.json(
-        { status: 'error', message: 'File GIS wajib diunggah untuk pemeriksaan.' },
-        { status: 400 }
-      );
-    }
+  const cleanupTempFile = async () => {
+    await fs.unlink(tempFilePath).catch(() => {});
+  };
+
+  try {
+    await fs.mkdir(tempDir, { recursive: true });
+    const contentType = req.headers.get('content-type') || '';
 
     let fileBuffer: Buffer;
     let fileName = '';
+    let fallbackCrs: string | null = null;
     let isZip = false;
     let isGeoTiff = false;
 
-    if (
-      rawFiles.length === 1 &&
-      (rawFiles[0].name.toLowerCase().endsWith('.tif') ||
-        rawFiles[0].name.toLowerCase().endsWith('.tiff'))
-    ) {
-      const f = rawFiles[0];
-      fileName = f.name;
-      fileBuffer = Buffer.from(await f.arrayBuffer());
-      isGeoTiff = true;
-    } else if (
-      rawFiles.length === 1 &&
-      (rawFiles[0].name.toLowerCase().endsWith('.geojson') ||
-        rawFiles[0].name.toLowerCase().endsWith('.json'))
-    ) {
-      const f = rawFiles[0];
-      fileName = f.name;
-      fileBuffer = Buffer.from(await f.arrayBuffer());
-    } else if (rawFiles.length === 1 && rawFiles[0].name.toLowerCase().endsWith('.zip')) {
-      const f = rawFiles[0];
-      fileName = f.name;
-      fileBuffer = Buffer.from(await f.arrayBuffer());
-      isZip = true;
-    } else {
-      // Kumpulan file terpisah (.shp, .dbf, .shx, .prj, .cpg, .sbn, .sbx, .xml)
-      const fileItems: UploadedFileItem[] = [];
-      for (const f of rawFiles) {
-        fileItems.push({
-          name: f.name,
-          buffer: Buffer.from(await f.arrayBuffer()),
-        });
+    if (contentType.includes('application/octet-stream')) {
+      if (!req.body) {
+        return NextResponse.json(
+          { status: 'error', message: 'File GIS wajib diunggah untuk pemeriksaan.' },
+          { status: 400 }
+        );
       }
+
+      fileName = decodeUploadFileName(req.headers.get('x-file-name'));
+      fallbackCrs = req.headers.get('x-fallback-crs')?.trim() || null;
+
+      const contentLength = Number(req.headers.get('content-length') || 0);
+      if (Number.isFinite(contentLength) && contentLength > MAX_ZIP_SIZE_BYTES) {
+        return NextResponse.json(
+          {
+            status: 'error',
+            message: `Ukuran file (${(contentLength / (1024 * 1024)).toFixed(1)} MB) melebihi batas maksimum (${MAX_ZIP_SIZE_BYTES / (1024 * 1024)} MB).`,
+          },
+          { status: 413 }
+        );
+      }
+
+      // Stream raw file body to disk to avoid cloning/buffering large payloads via FormData in memory
+      const reader = req.body.getReader();
+      const writeStream = createWriteStream(tempFilePath);
+      let totalBytes = 0;
 
       try {
-        const bundled = bundleLooseFilesToZip(fileItems);
-        fileBuffer = bundled.zipBuffer;
-        fileName = `${bundled.primaryName}.zip`;
-        isZip = true;
-      } catch (err) {
-        if (err instanceof ShapefileValidationError) {
-          return NextResponse.json(
-            {
-              status: 'error',
-              code: err.code,
-              message: err.message,
-            },
-            { status: 422 }
-          );
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value || value.byteLength === 0) continue;
+
+          totalBytes += value.byteLength;
+          if (totalBytes > MAX_ZIP_SIZE_BYTES) {
+            await reader.cancel().catch(() => {});
+            writeStream.destroy();
+            await cleanupTempFile();
+            return NextResponse.json(
+              {
+                status: 'error',
+                message: `Ukuran file (${(totalBytes / (1024 * 1024)).toFixed(1)} MB) melebihi batas maksimum (${MAX_ZIP_SIZE_BYTES / (1024 * 1024)} MB).`,
+              },
+              { status: 413 }
+            );
+          }
+
+          if (!writeStream.write(value)) {
+            await once(writeStream, 'drain');
+          }
         }
-        throw err;
+        writeStream.end();
+        await finished(writeStream);
+      } catch (streamErr) {
+        await reader.cancel().catch(() => {});
+        writeStream.destroy();
+        await cleanupTempFile();
+        throw streamErr;
       }
-    }
 
-    if (fileBuffer.length === 0) {
-      return NextResponse.json(
-        { status: 'error', message: 'File yang diunggah kosong (0 bytes).' },
-        { status: 400 }
-      );
-    }
+      if (totalBytes === 0) {
+        await cleanupTempFile();
+        return NextResponse.json(
+          { status: 'error', message: 'File yang diunggah kosong (0 bytes).' },
+          { status: 400 }
+        );
+      }
 
-    if (fileBuffer.length > MAX_ZIP_SIZE_BYTES) {
-      return NextResponse.json(
-        {
-          status: 'error',
-          message: `Ukuran file (${(fileBuffer.length / (1024 * 1024)).toFixed(1)} MB) melebihi batas maksimum (${MAX_ZIP_SIZE_BYTES / (1024 * 1024)} MB).`,
-        },
-        { status: 413 }
-      );
+      alreadySavedTempFile = true;
+      const lowerName = fileName.toLowerCase();
+      isGeoTiff = lowerName.endsWith('.tif') || lowerName.endsWith('.tiff');
+      isZip = lowerName.endsWith('.zip');
+      fileBuffer = await fs.readFile(tempFilePath);
+    } else {
+      let formData: FormData;
+      try {
+        formData = await req.formData();
+      } catch (formErr) {
+        const detailMsg = formErr instanceof Error ? formErr.message : String(formErr);
+        console.error('Inspect GIS FormData Error:', detailMsg);
+        return NextResponse.json(
+          {
+            status: 'error',
+            message:
+              'Gagal membaca berkas unggahan (ukuran total melebihi batas atau koneksi terputus). Pastikan ukuran total komponen Shapefile di bawah 250 MB.',
+            detail: detailMsg,
+          },
+          { status: 413 }
+        );
+      }
+
+      let rawFiles = formData.getAll('files') as File[];
+      if (rawFiles.length === 0) {
+        rawFiles = formData.getAll('file') as File[];
+      }
+      fallbackCrs = (formData.get('fallback_crs') as string | null)?.trim() || null;
+
+      if (rawFiles.length === 0) {
+        return NextResponse.json(
+          { status: 'error', message: 'File GIS wajib diunggah untuk pemeriksaan.' },
+          { status: 400 }
+        );
+      }
+
+      if (
+        rawFiles.length === 1 &&
+        (rawFiles[0].name.toLowerCase().endsWith('.tif') ||
+          rawFiles[0].name.toLowerCase().endsWith('.tiff'))
+      ) {
+        const f = rawFiles[0];
+        fileName = path.basename(f.name.replace(/\\/g, '/'));
+        fileBuffer = Buffer.from(await f.arrayBuffer());
+        isGeoTiff = true;
+      } else if (
+        rawFiles.length === 1 &&
+        (rawFiles[0].name.toLowerCase().endsWith('.geojson') ||
+          rawFiles[0].name.toLowerCase().endsWith('.json'))
+      ) {
+        const f = rawFiles[0];
+        fileName = path.basename(f.name.replace(/\\/g, '/'));
+        fileBuffer = Buffer.from(await f.arrayBuffer());
+      } else if (rawFiles.length === 1 && rawFiles[0].name.toLowerCase().endsWith('.zip')) {
+        const f = rawFiles[0];
+        fileName = path.basename(f.name.replace(/\\/g, '/'));
+        fileBuffer = Buffer.from(await f.arrayBuffer());
+        isZip = true;
+      } else {
+        const fileItems: UploadedFileItem[] = [];
+        for (const f of rawFiles) {
+          fileItems.push({
+            name: f.name,
+            buffer: Buffer.from(await f.arrayBuffer()),
+          });
+        }
+
+        try {
+          const bundled = bundleLooseFilesToZip(fileItems);
+          fileBuffer = bundled.zipBuffer;
+          fileName = `${bundled.primaryName}.zip`;
+          isZip = true;
+        } catch (err) {
+          if (err instanceof ShapefileValidationError) {
+            return NextResponse.json(
+              {
+                status: 'error',
+                code: err.code,
+                message: err.message,
+              },
+              { status: 422 }
+            );
+          }
+          throw err;
+        }
+      }
+
+      if (fileBuffer.length === 0) {
+        return NextResponse.json(
+          { status: 'error', message: 'File yang diunggah kosong (0 bytes).' },
+          { status: 400 }
+        );
+      }
+
+      if (fileBuffer.length > MAX_ZIP_SIZE_BYTES) {
+        return NextResponse.json(
+          {
+            status: 'error',
+            message: `Ukuran file (${(fileBuffer.length / (1024 * 1024)).toFixed(1)} MB) melebihi batas maksimum (${MAX_ZIP_SIZE_BYTES / (1024 * 1024)} MB).`,
+          },
+          { status: 413 }
+        );
+      }
     }
 
     const detectedDatasets: DetectedDataset[] = [];
-    const tempId = crypto.randomBytes(16).toString('hex');
-    const tempDir = path.join(os.tmpdir(), 'nusagis-upload-cache');
-    await fs.mkdir(tempDir, { recursive: true });
-    const tempFilePath = path.join(tempDir, `${tempId}.bin`);
-    const tempMetaPath = path.join(tempDir, `${tempId}.meta.json`);
 
     if (isGeoTiff) {
-      // GeoTIFF Raster
       let meta;
       try {
         meta = await parseGeoTiffMetadata(fileBuffer);
       } catch (err) {
+        await cleanupTempFile();
         const msg = err instanceof Error ? err.message : String(err);
         return NextResponse.json(
           { status: 'error', message: `Gagal membaca file GeoTIFF: ${msg}` },
@@ -168,6 +282,7 @@ export async function POST(req: NextRequest) {
       try {
         extracted = await parseShapefileZip(fileBuffer, { fallbackCrs });
       } catch (err) {
+        await cleanupTempFile();
         if (err instanceof ShapefileValidationError) {
           return NextResponse.json(
             {
@@ -239,6 +354,9 @@ export async function POST(req: NextRequest) {
         );
 
         const suggestedWilayah = dbfWilayahName || detectedLoc.wilayah;
+        const parsedWil = parseWilayahHierarchy(suggestedWilayah);
+        const suggestedProvinsi = detectedLoc.provinsi || parsedWil.provinsi;
+        const suggestedKabupatenKota = detectedLoc.kabupatenKota || parsedWil.kabupatenKota;
 
         let suggestedAfdelingName: string | undefined = dbfAfdelingName;
         if (!suggestedAfdelingName && item.folderName) {
@@ -263,6 +381,8 @@ export async function POST(req: NextRequest) {
           folderName: item.folderName,
           suggestedKebunName,
           suggestedWilayah,
+          suggestedProvinsi,
+          suggestedKabupatenKota,
           suggestedAfdelingName,
           format: 'shapefile',
           geometryType: item.geometryType,
@@ -283,6 +403,7 @@ export async function POST(req: NextRequest) {
       try {
         parsed = parseGeoJsonBuffer(fileBuffer, fileName);
       } catch (err) {
+        await cleanupTempFile();
         if (err instanceof ShapefileValidationError) {
           return NextResponse.json(
             {
@@ -321,8 +442,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Simpan buffer dan metadata sementara untuk konfirmasi di Step 2
-    await fs.writeFile(tempFilePath, fileBuffer);
+    // Persist temp artifact only when multipart/form-data assembled it in memory
+    if (!alreadySavedTempFile) {
+      await fs.writeFile(tempFilePath, fileBuffer);
+    }
     await fs.writeFile(
       tempMetaPath,
       JSON.stringify({
@@ -344,6 +467,7 @@ export async function POST(req: NextRequest) {
       datasets: detectedDatasets,
     });
   } catch (err: unknown) {
+    await cleanupTempFile();
     const error = err as Error;
     console.error('Inspect GIS Error:', error);
     return NextResponse.json(

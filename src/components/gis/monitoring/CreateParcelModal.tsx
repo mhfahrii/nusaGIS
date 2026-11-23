@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { IconClose, IconPencil, IconCheck } from '../GisIcons';
+import { DEFAULT_PERUSAHAAN, RPN_ENTITY_OPTIONS } from '@/lib/gis/rpnEntities';
 import type { LayerPeta } from '@/types/gis';
 
 interface KebunItem {
@@ -52,7 +53,7 @@ export function CreateParcelModal({
   const [isNewKebun, setIsNewKebun] = useState(false);
   const [newKebunNama, setNewKebunNama] = useState('');
   const [newKebunWilayah, setNewKebunWilayah] = useState('');
-  const [newKebunPerusahaan, setNewKebunPerusahaan] = useState('PT Perkebunan Nusantara I (Regional 4)');
+  const [newKebunPerusahaan, setNewKebunPerusahaan] = useState(RPN_ENTITY_OPTIONS[0]);
   const [isNewAfdeling, setIsNewAfdeling] = useState(false);
   const [newAfdelingNama, setNewAfdelingNama] = useState('');
   const [komoditas, setKomoditas] = useState('Tebu');
@@ -181,19 +182,24 @@ export function CreateParcelModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="w-full max-w-lg bg-[#0D1322] border border-[#1E2942] rounded-xl shadow-2xl overflow-hidden flex flex-col text-[#F0F6FC] animate-in fade-in zoom-in-95 duration-150">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Simpan Lahan Hasil Digitasi"
+      className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/80 backdrop-blur-xs p-2.5 sm:p-4 overflow-y-auto"
+    >
+      <div className="w-full max-w-lg max-h-[92dvh] bg-[#0D1322] border border-[#1E2942] rounded-xl shadow-2xl overflow-hidden flex flex-col text-[#F0F6FC] animate-in fade-in zoom-in-95 duration-150">
         {/* Header Modal */}
-        <div className="h-12 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-[#0E3A5D] border border-[#00B4D8]/50 flex items-center justify-center text-[#00D2FF]">
+        <div className="min-h-12 px-3.5 sm:px-4 py-2 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-[#0E3A5D] border border-[#00B4D8]/50 flex items-center justify-center text-[#00D2FF] shrink-0">
               <IconPencil className="w-4 h-4" />
             </div>
-            <div>
-              <h3 className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider">
+            <div className="min-w-0">
+              <h3 className="text-xs font-bold text-[#F0F6FC] uppercase tracking-wider truncate">
                 Simpan Lahan Hasil Digitasi
               </h3>
-              <p className="text-[10px] text-[#8B9BB4]">
+              <p className="text-[10px] text-[#8B9BB4] truncate">
                 Data poligon otomatis disesuaikan dan disimpan ke database PostGIS
               </p>
             </div>
@@ -201,7 +207,8 @@ export function CreateParcelModal({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-lg hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#F0F6FC] transition-colors cursor-pointer"
+            aria-label="Tutup modal"
+            className="min-w-9 min-h-9 flex items-center justify-center rounded-lg hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#F0F6FC] transition-colors cursor-pointer shrink-0"
           >
             <IconClose className="w-4 h-4" />
           </button>
@@ -209,13 +216,13 @@ export function CreateParcelModal({
 
         {/* Error Alert */}
         {errorMsg && (
-          <div className="mx-4 mt-3 p-2.5 bg-rose-950/80 border border-rose-800 rounded-lg text-rose-300 text-xs">
+          <div className="mx-4 mt-3 p-2.5 bg-rose-950/80 border border-rose-800 rounded-lg text-rose-300 text-xs shrink-0">
             {errorMsg}
           </div>
         )}
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-4 space-y-3.5 text-xs">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-3.5 text-xs">
           {/* Summary Box Hasil Digitasi */}
           <div className="bg-[#12192B] border border-[#1E2942] rounded-lg p-2.5 flex items-center justify-between shadow-xs">
             <div className="flex items-center gap-2">
@@ -254,7 +261,7 @@ export function CreateParcelModal({
           </div>
 
           {/* Grid: Nama & Kode Blok */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
                 Nama Lahan / Blok <span className="text-rose-400">*</span>
@@ -302,7 +309,7 @@ export function CreateParcelModal({
             </div>
 
             {!isNewKebun ? (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
                     Pilih Unit Kebun
@@ -377,7 +384,7 @@ export function CreateParcelModal({
               </div>
             ) : (
               <div className="space-y-2 border-t border-[#1E2942] pt-2">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
                       Nama Kebun Baru <span className="text-rose-400">*</span>
@@ -406,18 +413,25 @@ export function CreateParcelModal({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
-                      Perusahaan / Holding
+                      Perusahaan / Puslit (PT RPN)
                     </label>
                     <input
                       type="text"
-                      placeholder="misal: PT Perkebunan Nusantara I"
+                      list="rpn-entity-list"
+                      placeholder="Pilih atau ketik Puslit / Perusahaan..."
                       value={newKebunPerusahaan}
                       onChange={(e) => setNewKebunPerusahaan(e.target.value)}
                       className="w-full bg-[#12192B] border border-[#1E2942] rounded-lg px-2.5 py-1.5 text-xs text-[#F0F6FC]"
                     />
+                    <datalist id="rpn-entity-list">
+                      {RPN_ENTITY_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt} />
+                      ))}
+                      <option value={DEFAULT_PERUSAHAAN} />
+                    </datalist>
                   </div>
                   <div>
                     <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
@@ -437,7 +451,7 @@ export function CreateParcelModal({
           </div>
 
           {/* Grid: Komoditas & Tahun Tanam */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
                 Komoditas
@@ -471,7 +485,7 @@ export function CreateParcelModal({
           </div>
 
           {/* Grid: Status Lahan & Luas Baku Dokumen */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">
                 Status Pengelolaan Lahan

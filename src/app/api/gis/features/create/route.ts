@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { requireUser, catatAktivitas } from '@/lib/auth/guard';
+import { inferRpnEntityFromContext, normalizePerusahaanName } from '@/lib/gis/rpnEntities';
 
 interface CreateFeatureBody {
   layer_id: number;
@@ -23,7 +24,7 @@ interface CreateFeatureBody {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireUser(req);
+  const auth = await requireUser(req, { permission: 'edit_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -108,7 +109,9 @@ export async function POST(req: NextRequest) {
     if ((!finalKebunId || body.new_kebun_nama) && body.new_kebun_nama?.trim()) {
       const kNama = body.new_kebun_nama.trim();
       const kWil = body.new_kebun_wilayah?.trim() || 'Wilayah Belum Ditentukan';
-      const kPer = body.new_kebun_perusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)';
+      const kPer = body.new_kebun_perusahaan?.trim()
+        ? normalizePerusahaanName(body.new_kebun_perusahaan)
+        : inferRpnEntityFromContext({ namaKebun: kNama, wilayah: kWil, komoditas });
       const kKode = `KBN-${kNama.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'NEW'}-${Date.now().toString().slice(-4)}`;
 
       const existingK = await query<{ id: number; nama_kebun: string; kode_kebun: string }>(

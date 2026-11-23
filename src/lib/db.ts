@@ -63,15 +63,15 @@ export function getPool(): Pool {
   return pool;
 }
 
-let migrationExecuted = false;
+let migrationPromise: Promise<void> | null = null;
 
 /**
  * Auto-Init Migration: Memastikan Indeks Spasial PostGIS GiST, GIN, dan Indeks Relasional
  * selalu terpasang sesuai standar Enterprise Web GIS tanpa menghapus data yang ada.
  */
 export async function ensureGisSpatialIndices(): Promise<void> {
-  if (migrationExecuted) return;
-  migrationExecuted = true;
+  if (migrationPromise) return migrationPromise;
+  migrationPromise = (async () => {
   try {
     // 1. Indeks Spasial R-Tree / GiST pada kolom geometri fitur_peta (Pencarian & Bounding Box)
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_fitur_peta_geom ON public.fitur_peta USING GIST (geom);`);
@@ -178,18 +178,60 @@ export async function ensureGisSpatialIndices(): Promise<void> {
       LEFT JOIN public.kebun k ON k.id = lp.kebun_id
       LEFT JOIN public.afdeling a ON a.id = lp.afdeling_id;
     `);
+    // 8. Migrasi idempoten perusahaan & komoditas spesifik tiap kebun berdasarkan PT Puslit naungannya
+    await pool.query(`
+      UPDATE public.kebun
+      SET perusahaan = 'P3GI (Gula / Tebu)',
+          komoditas = 'Tebu'
+      WHERE LOWER(COALESCE(nama_kebun, '')) LIKE '%bakalan%'
+         OR LOWER(COALESCE(nama_kebun, '')) LIKE '%sragi%'
+         OR LOWER(COALESCE(perusahaan, '')) LIKE '%p3gi%';
+    `);
+    await pool.query(`
+      UPDATE public.kebun
+      SET perusahaan = 'PPTK (Teh & Kina)',
+          komoditas = CASE
+            WHEN LOWER(COALESCE(nama_kebun, '')) LIKE '%kina%' OR LOWER(COALESCE(nama_kebun, '')) LIKE '%bukit tunggul%' THEN 'Kina'
+            ELSE 'Teh'
+          END
+      WHERE LOWER(COALESCE(nama_kebun, '')) LIKE '%cibeureum%'
+         OR LOWER(COALESCE(nama_kebun, '')) LIKE '%cibereum%'
+         OR LOWER(COALESCE(nama_kebun, '')) LIKE '%sarongge%'
+         OR LOWER(COALESCE(nama_kebun, '')) LIKE '%gambung%'
+         OR (LOWER(COALESCE(perusahaan, '')) LIKE '%pptk%' AND (komoditas IS NULL OR TRIM(komoditas) = '' OR LOWER(komoditas) LIKE '%&%'));
+    `);
+    await pool.query(`
+      UPDATE public.kebun
+      SET perusahaan = 'PPKS (Kelapa Sawit)',
+          komoditas = 'Kelapa Sawit'
+      WHERE LOWER(COALESCE(nama_kebun, '')) LIKE '%aek pancur%'
+         OR LOWER(COALESCE(nama_kebun, '')) LIKE '%marihat%'
+         OR LOWER(COALESCE(perusahaan, '')) LIKE '%ppks%';
+    `);
+    await pool.query(`
+      UPDATE public.kebun
+      SET perusahaan = 'PPK (Karet)',
+          komoditas = 'Karet'
+      WHERE LOWER(COALESCE(nama_kebun, '')) LIKE '%sembawa%'
+         OR LOWER(COALESCE(nama_kebun, '')) LIKE '%sungai putih%'
+         OR LOWER(COALESCE(perusahaan, '')) LIKE 'ppk%';
+    `);
   } catch (err) {
     // Abaikan jika tabel belum ada atau indeks sedang dibuat paralel
     console.warn('Notice (Spatial Indices Check):', (err as Error).message);
   }
+  })();
+  return migrationPromise;
 }
 
 export async function query<T extends QueryResultRow = Record<string, unknown>>(
   text: string,
   params?: unknown[]
 ): Promise<QueryResult<T>> {
-  if (!migrationExecuted) {
-    ensureGisSpatialIndices().catch(() => {});
+  if (!migrationPromise) {
+    await ensureGisSpatialIndices().catch(() => {});
+  } else {
+    await migrationPromise.catch(() => {});
   }
   return pool.query<T>(text, params);
 }

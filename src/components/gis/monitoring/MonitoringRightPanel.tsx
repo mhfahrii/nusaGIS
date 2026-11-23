@@ -1,12 +1,14 @@
 'use client';
 
 import React from 'react';
-import { IconChevronRight } from '../GisIcons';
+import { IconChevronRight, IconClose } from '../GisIcons';
 import type { MonitoringStats } from '@/types/gis';
 
 interface MonitoringRightPanelProps {
   isOpen: boolean;
   onToggle: () => void;
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
   stats: MonitoringStats | null;
   periodMonth: string;
   periodYear: string;
@@ -23,20 +25,23 @@ const fmt = (val: number | undefined | null, digits = 2) =>
 export function MonitoringRightPanel({
   isOpen,
   onToggle,
+  isMobileOpen = false,
+  onCloseMobile,
   stats,
   periodMonth,
   periodYear,
   activeKebunName,
   activeAfdelingName,
 }: MonitoringRightPanelProps) {
-  if (!isOpen) {
+  if (!isOpen && !isMobileOpen) {
     return (
-      <div className="w-10 bg-[#0D1322] border-l border-[#1E2942] flex flex-col items-center py-3 select-none shrink-0 z-20">
+      <div className="hidden lg:flex w-10 bg-[#0D1322] border-l border-[#1E2942] flex-col items-center py-3 select-none shrink-0 z-20">
         <button
           type="button"
           onClick={onToggle}
           className="p-2 rounded-lg bg-[#12192B] border border-[#1E2942] hover:border-[#00D2FF] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors shadow-md cursor-pointer"
           title="Buka Panel Ringkasan Spasial & Produksi"
+          aria-label="Buka Panel Ringkasan Spasial dan Produksi"
         >
           <span className="text-[10px] font-bold text-[#00D2FF] font-mono">GIS</span>
         </button>
@@ -47,7 +52,7 @@ export function MonitoringRightPanel({
   const luasUkurHa = stats?.total_luas_ha ?? 0;
   const luasBakuHa = stats?.total_luas_baku_ha;
   const totalBlok = stats?.total_fitur || stats?.total_blok || 0;
-  const komoditas = stats?.komoditas || 'Agribisnis Perkebunan';
+  const komoditas = stats?.komoditas || 'Belum ditentukan';
   const crsAsal = stats?.crs_asal || 'GCS_WGS_1984 (EPSG:4326)';
   const isSingleBoundary = Boolean(stats?.is_single_boundary);
 
@@ -82,27 +87,70 @@ export function MonitoringRightPanel({
       : 'Fisik Lebih Kecil';
 
   return (
-    <aside className="w-64 sm:w-72 bg-[#0D1322] border-l border-[#1E2942] flex flex-col select-none shrink-0 z-20 h-full overflow-hidden text-[#F0F6FC]">
-      {/* 1. Header Panel */}
-      <div className="h-12 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between shrink-0">
-        <div>
-          <div className="text-sm font-bold text-[#F0F6FC] font-mono tracking-tight tabular-nums">
-            {periodMonth} {periodYear}
-          </div>
-          <div className="text-[10px] text-[#00D2FF] font-medium">
-            {isSingleBoundary ? 'Profil Batas Konsesi (ArcGIS)' : 'KPI Spasial & Produksi (ArcGIS)'}
-          </div>
-        </div>
+    <>
+      {isMobileOpen && (
+        <div
+          className="fixed inset-0 z-[1190] bg-black/60 backdrop-blur-[1px] lg:hidden"
+          onClick={onCloseMobile}
+          aria-hidden="true"
+        />
+      )}
 
-        <button
-          type="button"
-          onClick={onToggle}
-          className="p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
-          title="Sembunyikan Panel Informasi"
-        >
-          <IconChevronRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      {!isOpen && (
+        <div className="hidden lg:flex w-10 bg-[#0D1322] border-l border-[#1E2942] flex-col items-center py-3 select-none shrink-0 z-20">
+          <button
+            type="button"
+            onClick={onToggle}
+            className="p-2 rounded-lg bg-[#12192B] border border-[#1E2942] hover:border-[#00D2FF] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors shadow-md cursor-pointer"
+            title="Buka Panel Ringkasan Spasial & Produksi"
+            aria-label="Buka Panel Ringkasan Spasial dan Produksi"
+          >
+            <span className="text-[10px] font-bold text-[#00D2FF] font-mono">GIS</span>
+          </button>
+        </div>
+      )}
+
+      <aside
+        className={`${
+          isMobileOpen
+            ? 'fixed inset-y-0 right-0 z-[1200] flex w-[88vw] max-w-[340px] shadow-2xl'
+            : 'hidden'
+        } ${
+          isOpen ? 'lg:static lg:z-20 lg:flex lg:w-64 xl:w-72 lg:shadow-none' : 'lg:hidden'
+        } bg-[#0D1322] border-l border-[#1E2942] flex-col select-none shrink-0 h-full overflow-hidden text-[#F0F6FC]`}
+      >
+        {/* 1. Header Panel */}
+        <div className="h-12 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between shrink-0">
+          <div>
+            <div className="text-sm font-bold text-[#F0F6FC] font-mono tracking-tight tabular-nums">
+              {periodMonth} {periodYear}
+            </div>
+            <div className="text-[10px] text-[#00D2FF] font-medium">
+              {isSingleBoundary ? 'Profil Batas Konsesi (ArcGIS)' : 'KPI Spasial & Produksi (ArcGIS)'}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onToggle}
+            className="hidden lg:inline-flex p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
+            title="Sembunyikan Panel Informasi"
+            aria-label="Sembunyikan Panel Informasi"
+          >
+            <IconChevronRight className="w-3.5 h-3.5" />
+          </button>
+          {onCloseMobile && (
+            <button
+              type="button"
+              onClick={onCloseMobile}
+              className="lg:hidden min-w-10 min-h-10 flex items-center justify-center rounded-lg text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
+              title="Tutup Panel KPI"
+              aria-label="Tutup Panel KPI"
+            >
+              <IconClose className="w-4 h-4" />
+            </button>
+          )}
+        </div>
 
       {/* 2. Body Panel — 100% Ekstraksi Data Shapefile & PostGIS */}
       <div className="flex-1 overflow-y-auto p-3.5 space-y-3">
@@ -475,11 +523,12 @@ export function MonitoringRightPanel({
       {/* Footer Info */}
       <div className="p-2.5 bg-[#0D1322] border-t border-[#1E2942] text-[10px] text-[#8B9BB4] flex items-center justify-between shrink-0">
         <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
+          <span className="w-2 h-2 rounded-full bg-[#10B981]" />
           <span>100% Ekstraksi Multi-Kolom</span>
         </span>
-        <span className="text-[#566680] font-mono">PostGIS</span>
+        <span className="text-[#8B9BB4] font-mono">PostGIS</span>
       </div>
     </aside>
+    </>
   );
 }

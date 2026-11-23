@@ -6,8 +6,8 @@ import {
   IconChevronUp,
   IconTable,
   IconSearch,
-  IconZoomTo,
   IconDownload,
+  IconClose,
 } from '../GisIcons';
 import type { LayerPeta, MonitoringStats } from '@/types/gis';
 import { ShapefileInsightPanel } from './ShapefileInsightPanel';
@@ -41,17 +41,19 @@ interface BlokItem {
 }
 
 interface MonitoringBottomPanelProps {
-  isOpen: boolean;
-  onToggle: () => void;
+  isOpen?: boolean;
+  onToggle?: () => void;
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
+  embedded?: boolean;
   layers: LayerPeta[];
   selectedLayerId: number | null;
-  onSelectLayer: (id: number) => void;
+  onSelectLayer?: (id: number) => void;
   selectedFeatureId: number | null;
   onSelectFeature: (id: number | null) => void;
   onZoomToFeature?: (bbox: [number, number, number, number]) => void;
   selectedKebunId?: number | null;
   selectedAfdelingId?: number | null;
-  selectedBlokId?: number | null;
   kebunList?: KebunItem[];
   afdelingList?: AfdelingItem[];
   blokList?: BlokItem[];
@@ -62,55 +64,12 @@ interface MonitoringBottomPanelProps {
   dataRevision?: number;
 }
 
-type MetricCategory =
-  | 'produksi'
-  | 'produktivitas'
-  | 'tandan'
-  | 'pemupukan'
-  | 'pemeliharaan'
-  | 'hama';
-
-const MONTH_NAMES = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
-  'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
-];
-
-/**
- * Menghitung angka skala (ticks) sumbu Y yang rapi dan teratur (0, 25%, 50%, 75%, 100%)
- */
-function getNiceTicks(maxVal: number, count = 4): { max: number; ticks: number[] } {
-  if (maxVal <= 0) return { max: 10, ticks: [0, 2.5, 5, 7.5, 10] };
-  const rawStep = maxVal / count;
-  const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(rawStep, 0.0001))));
-  const residual = rawStep / magnitude;
-  let niceStep = magnitude;
-  if (residual > 5) niceStep = 10 * magnitude;
-  else if (residual > 2) niceStep = 5 * magnitude;
-  else if (residual > 1) niceStep = 2 * magnitude;
-
-  const niceMax = Math.max(niceStep * count, maxVal);
-  const actualStep = niceMax / count;
-  const ticks: number[] = [];
-  for (let i = 0; i <= count; i++) {
-    ticks.push(Number((actualStep * i).toFixed(actualStep < 1 ? 2 : 1)));
-  }
-  return { max: niceMax, ticks };
-}
-
-/**
- * Format angka pada label sumbu agar ringkas dan elegan (misal: 1k, 1.5k, 500, dsb)
- */
-function formatAxisLabel(val: number): string {
-  if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`.replace('.0M', 'M');
-  if (val >= 10000) return `${Math.round(val / 1000)}k`;
-  if (val >= 1000) return `${(val / 1000).toFixed(1)}k`.replace('.0k', 'k');
-  if (Number.isInteger(val)) return String(val);
-  return val.toFixed(1);
-}
-
 export function MonitoringBottomPanel({
-  isOpen,
+  isOpen = true,
   onToggle,
+  isMobileOpen = false,
+  onCloseMobile,
+  embedded = false,
   layers,
   selectedLayerId,
   selectedFeatureId,
@@ -118,24 +77,19 @@ export function MonitoringBottomPanel({
   onZoomToFeature,
   selectedKebunId = null,
   selectedAfdelingId = null,
-  selectedBlokId = null,
   kebunList = [],
   afdelingList = [],
   stats = null,
-  periodYear = '2026',
   onFeatureDeleted,
   dataRevision,
 }: MonitoringBottomPanelProps) {
-  // Mode tampilan: 'chart' (Visualisasi Grafik Utama RPN) atau 'table' (Tabel Atribut)
   const [panelView, setPanelView] = useState<'chart' | 'table'>('chart');
-
-  // Attribute Table state
   const [columns, setColumns] = useState<string[]>([]);
   const [records, setRecords] = useState<AttributeRecord[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const page = 1;
+  const pageSize = 50;
   const [loading, setLoading] = useState(false);
 
   // Ambil record fitur yang sedang dipilih
@@ -278,20 +232,20 @@ export function MonitoringBottomPanel({
     URL.revokeObjectURL(url);
   };
 
-  // State tertutup (Collapsible Bar di bawah layar)
-  if (!isOpen) {
+  // State tertutup (Collapsible Bar di bawah layar, hanya desktop karena mobile pakai bottom nav)
+  if (!isOpen && !isMobileOpen) {
     return (
-      <div className="h-9 bg-[#0D1322] border-t border-[#1E2942] flex items-center justify-between px-4 select-none shrink-0 z-20">
-        <div className="flex items-center gap-3">
+      <div className="hidden lg:flex h-9 bg-[#0D1322] border-t border-[#1E2942] items-center justify-between px-4 select-none shrink-0 z-20">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={onToggle}
-            className="flex items-center gap-1.5 text-xs font-bold text-[#F0F6FC] hover:text-[#00D2FF] transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 text-xs font-bold text-[#F0F6FC] hover:text-[#00D2FF] transition-colors cursor-pointer truncate"
           >
-            <IconChevronUp className="w-4 h-4 text-[#00D2FF]" />
-            <span>Analisis Atribut Shapefile ({activeScope.label})</span>
+            <IconChevronUp className="w-4 h-4 text-[#00D2FF] shrink-0" />
+            <span className="truncate">Analisis Atribut Shapefile ({activeScope.label})</span>
           </button>
-          <span className="text-[10px] text-[#8B9BB4] font-mono hidden sm:inline tabular-nums">
+          <span className="text-[10px] text-[#8B9BB4] font-mono hidden sm:inline tabular-nums shrink-0">
             Luas Ukur GIS: <strong className="text-[#00D2FF]">{activeScope.luasHa} Ha</strong>
           </span>
         </div>
@@ -301,6 +255,7 @@ export function MonitoringBottomPanel({
           onClick={onToggle}
           className="p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
           title="Buka Panel Visualisasi"
+          aria-label="Buka Panel Visualisasi"
         >
           <IconChevronUp className="w-4 h-4" />
         </button>
@@ -309,76 +264,144 @@ export function MonitoringBottomPanel({
   }
 
   return (
-    <div className="h-64 sm:h-72 bg-[#0D1322] border-t border-[#1E2942] flex flex-col select-none shrink-0 z-20 shadow-2xl overflow-hidden text-[#F0F6FC]">
-      {/* 1. TOP HEADER PANEL BAWAH: Judul Analitik & Scope Wilayah */}
-      <div className="h-9 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#00D2FF] animate-pulse" />
-            <h4 className="text-xs font-bold text-[#F0F6FC] tracking-tight">
-              Analisis Atribut Shapefile: {layers.find((l) => l.id === selectedLayerId)?.nama_layer || 'Semua Layer Aktif'}
-            </h4>
-          </div>
+    <>
+      {isMobileOpen && (
+        <div
+          className="fixed inset-0 z-[1140] bg-black/55 backdrop-blur-[1px] lg:hidden"
+          onClick={onCloseMobile}
+          aria-hidden="true"
+        />
+      )}
 
-          {/* Badge Indikator Wilayah Aktif */}
-          <div className="flex items-center gap-1.5 bg-[#0A0E1A] border border-[#1E2942] px-2.5 py-0.5 rounded-full text-[10px]">
-            <span className="text-[#00D2FF] font-bold">
-              {activeScope.type === 'blok' ? '📍' : activeScope.type === 'afdeling' ? '🏢' : '🌐'}
-            </span>
-            <span className="font-semibold text-[#F0F6FC] truncate max-w-[200px]">
-              {activeScope.title}
-            </span>
-            {selectedFeatureId && (
-              <button
-                type="button"
-                onClick={() => onSelectFeature(null)}
-                className="ml-1 text-[10px] text-[#00D2FF] hover:underline cursor-pointer"
-                title="Batalkan pilihan blok & tampilkan semua afdeling"
-              >
-                (Reset ke Semua)
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Tab Switcher: Grafik vs Tabel Atribut & Tombol Tutup */}
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-md bg-[#0A0E1A] border border-[#1E2942] p-0.5 text-[11px]">
+      {!isOpen && (
+        <div className="hidden lg:flex h-9 bg-[#0D1322] border-t border-[#1E2942] items-center justify-between px-4 select-none shrink-0 z-20">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
-              onClick={() => setPanelView('chart')}
-              className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                panelView === 'chart'
-                  ? 'bg-[#00D2FF] text-[#0A0E1A] shadow-xs'
-                  : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
-              }`}
+              onClick={onToggle}
+              className="flex items-center gap-1.5 text-xs font-bold text-[#F0F6FC] hover:text-[#00D2FF] transition-colors cursor-pointer truncate"
             >
-              Visualisasi Grafik
+              <IconChevronUp className="w-4 h-4 text-[#00D2FF] shrink-0" />
+              <span className="truncate">Analisis Atribut Shapefile ({activeScope.label})</span>
             </button>
-            <button
-              type="button"
-              onClick={() => setPanelView('table')}
-              className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                panelView === 'table'
-                  ? 'bg-[#00D2FF] text-[#0A0E1A] shadow-xs'
-                  : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
-              }`}
-            >
-              <IconTable className="w-3 h-3" />
-              <span>Tabel Atribut</span>
-            </button>
+            <span className="text-[10px] text-[#8B9BB4] font-mono hidden sm:inline tabular-nums shrink-0">
+              Luas Ukur GIS: <strong className="text-[#00D2FF]">{activeScope.luasHa} Ha</strong>
+            </span>
           </div>
 
           <button
             type="button"
             onClick={onToggle}
             className="p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
-            title="Kecilkan Panel Bawah"
+            title="Buka Panel Visualisasi"
+            aria-label="Buka Panel Visualisasi"
           >
-            <IconChevronDown className="w-4 h-4" />
+            <IconChevronUp className="w-4 h-4" />
           </button>
         </div>
-      </div>
+      )}
+
+      <div
+        className={
+          embedded
+            ? 'flex h-[480px] w-full rounded-2xl border border-[#1E2942] bg-[#0D1322] flex-col select-none shadow-xl overflow-hidden text-[#F0F6FC]'
+            : `${
+                isMobileOpen
+                  ? 'fixed inset-x-0 bottom-[56px] z-[1150] flex h-[64dvh] max-h-[540px] rounded-t-2xl border-t border-[#283858]'
+                  : 'hidden'
+              } ${
+                isOpen
+                  ? 'lg:static lg:inset-auto lg:bottom-auto lg:z-20 lg:flex lg:h-64 xl:h-72 lg:max-h-none lg:rounded-none lg:border-[#1E2942]'
+                  : 'lg:hidden'
+              } bg-[#0D1322] border-t flex-col select-none shrink-0 shadow-2xl overflow-hidden text-[#F0F6FC]`
+        }
+      >
+        {!embedded && (
+          <div className="flex justify-center pt-1.5 pb-0.5 lg:hidden shrink-0">
+            <span className="w-10 h-1 rounded-full bg-[#283858]" aria-hidden="true" />
+          </div>
+        )}
+
+        <div className="min-h-11 px-4 py-1.5 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-2 h-2 rounded-full bg-[#00D2FF] shrink-0" />
+              <h4 className="text-xs font-bold text-[#F0F6FC] tracking-tight truncate">
+                <span className="hidden sm:inline">Analisis Atribut Shapefile: </span>
+                {layers.find((l) => l.id === selectedLayerId)?.nama_layer || 'Semua Layer Aktif'}
+              </h4>
+            </div>
+
+            <div className="hidden md:flex items-center gap-1.5 bg-[#0A0E1A] border border-[#1E2942] px-2.5 py-0.5 rounded-full text-[10px] shrink-0">
+              <span className="font-semibold text-[#F0F6FC] truncate max-w-[180px]">
+                {activeScope.title}
+              </span>
+              {selectedFeatureId && (
+                <button
+                  type="button"
+                  onClick={() => onSelectFeature(null)}
+                  className="ml-1 text-[10px] text-[#00D2FF] hover:underline cursor-pointer"
+                  title="Batalkan pilihan blok & tampilkan semua afdeling"
+                >
+                  (Reset ke Semua)
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="inline-flex rounded-md bg-[#0A0E1A] border border-[#1E2942] p-0.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setPanelView('chart')}
+                className={`min-h-8 lg:min-h-0 px-2.5 py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                  panelView === 'chart'
+                    ? 'bg-[#00D2FF] text-[#0A0E1A] shadow-xs'
+                    : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
+                }`}
+              >
+                <span className="sm:hidden">Grafik</span>
+                <span className="hidden sm:inline">Visualisasi Grafik</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPanelView('table')}
+                className={`min-h-8 lg:min-h-0 px-2.5 py-1 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                  panelView === 'table'
+                    ? 'bg-[#00D2FF] text-[#0A0E1A] shadow-xs'
+                    : 'text-[#8B9BB4] hover:text-[#F0F6FC]'
+                }`}
+              >
+                <IconTable className="w-3 h-3 shrink-0" />
+                <span className="sm:hidden">Tabel</span>
+                <span className="hidden sm:inline">Tabel Atribut</span>
+              </button>
+            </div>
+
+            {!embedded && onToggle && (
+              <button
+                type="button"
+                onClick={onToggle}
+                className="hidden lg:inline-flex p-1 rounded text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
+                title="Kecilkan Panel Bawah"
+                aria-label="Kecilkan Panel Bawah"
+              >
+                <IconChevronDown className="w-4 h-4" />
+              </button>
+            )}
+            {!embedded && onCloseMobile && (
+              <button
+                type="button"
+                onClick={onCloseMobile}
+                className="lg:hidden min-w-9 min-h-9 flex items-center justify-center rounded-lg text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B] transition-colors cursor-pointer"
+                title="Tutup Panel Analisis"
+                aria-label="Tutup Panel Analisis"
+              >
+                <IconClose className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
 
       {/* 2. BODY CONTENT: ANALISIS ATRIBUT SHAPEFILE (Luas, Status Lahan, Varietas & MT) */}
       {panelView === 'chart' ? (
@@ -395,25 +418,25 @@ export function MonitoringBottomPanel({
       ) : (
         /* 4. TAMPILAN TABEL ATRIBUT (Bila Pengguna Memilih Tab Tabel) */
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-          <div className="h-9 px-4 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-[#F0F6FC]">
+          <div className="min-h-9 px-3 sm:px-4 py-1.5 sm:py-0 bg-[#0D1322] border-b border-[#1E2942] flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-bold text-[#F0F6FC] truncate max-w-[180px] sm:max-w-none">
                 Layer: {layers.find((l) => l.id === selectedLayerId)?.nama_layer || 'Pilih Layer'}
               </span>
-              <span className="text-[10px] text-[#8B9BB4] font-mono tabular-nums">
-                ({totalRecords} baris fitur)
+              <span className="text-[10px] text-[#8B9BB4] font-mono tabular-nums shrink-0">
+                ({totalRecords} baris)
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="relative w-36">
-                <IconSearch className="w-3 h-3 text-[#566680] absolute left-2 top-1.5 pointer-events-none" />
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <div className="relative w-32 sm:w-36">
+                <IconSearch className="w-3 h-3 text-[#8B9BB4] absolute left-2 top-2 sm:top-1.5 pointer-events-none" />
                 <input
                   type="text"
                   placeholder="Cari atribut..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-[#0A0E1A] border border-[#1E2942] rounded pl-6 pr-2 py-0.5 text-[10px] text-[#F0F6FC] placeholder-[#566680] focus:outline-none focus:border-[#00D2FF]"
+                  className="w-full min-h-8 sm:min-h-0 bg-[#0A0E1A] border border-[#1E2942] rounded pl-6 pr-2 py-1 sm:py-0.5 text-[10px] text-[#F0F6FC] placeholder-[#8B9BB4] focus:outline-none focus:border-[#00D2FF]"
                 />
               </div>
 
@@ -421,13 +444,13 @@ export function MonitoringBottomPanel({
                 type="button"
                 onClick={exportCsv}
                 disabled={records.length === 0}
-                className="px-2.5 py-0.5 rounded text-[10px] font-bold border bg-[#12192B] border-[#1E2942] text-[#00D2FF] hover:bg-[#19233A] transition-colors flex items-center gap-1 cursor-pointer"
+                className="min-h-8 sm:min-h-0 px-2.5 py-1 sm:py-0.5 rounded text-[10px] font-bold border bg-[#12192B] border-[#1E2942] text-[#00D2FF] hover:bg-[#19233A] transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <IconDownload className="w-3 h-3" />
-                <span>Export CSV</span>
+                <span>CSV</span>
               </button>
 
-              {selectedFeatureId && (
+              {selectedFeatureId && onFeatureDeleted && (
                 <button
                   type="button"
                   onClick={async () => {
@@ -540,5 +563,6 @@ export function MonitoringBottomPanel({
         </div>
       )}
     </div>
+    </>
   );
 }

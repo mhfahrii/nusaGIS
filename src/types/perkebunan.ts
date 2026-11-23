@@ -4,6 +4,8 @@ export interface Kebun {
   nama_kebun: string;
   perusahaan?: string | null;
   wilayah: string | null;
+  provinsi?: string | null;
+  kabupaten_kota?: string | null;
   komoditas: string | null;
   keterangan: string | null;
   dibuat_pada: string | null;

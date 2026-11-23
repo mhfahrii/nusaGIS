@@ -5,6 +5,7 @@ import {
   extractFeatureIntel,
   detectCommodityProfile,
 } from '@/lib/gis/attributeExtractor';
+import { findRpnEntity, normalizePerusahaanName } from '@/lib/gis/rpnEntities';
 
 export async function GET(req: NextRequest) {
   const auth = await requireUser(req);
@@ -17,9 +18,17 @@ export async function GET(req: NextRequest) {
     const layerIdParam = searchParams.get('layer_id');
     const layerId = layerIdParam ? parseInt(layerIdParam, 10) : null;
     const wilayahParam = searchParams.get('wilayah')?.trim() || null;
+    const perusahaanParam = searchParams.get('perusahaan')?.trim() || null;
 
     const validKebunId = kebunId && !isNaN(kebunId) && kebunId > 0 ? kebunId : null;
     const validLayerId = layerId && !isNaN(layerId) && layerId > 0 ? layerId : null;
+    const normalizedPerusahaan = perusahaanParam ? normalizePerusahaanName(perusahaanParam) : null;
+    const matchedEntity = perusahaanParam ? findRpnEntity(perusahaanParam) : null;
+
+    // Helper SQL filter perusahaan (cocokkan nama kanonik maupun kode singkat Puslit)
+    const perusahaanSqlCond = matchedEntity
+      ? `(LOWER(TRIM(k.perusahaan)) = LOWER(TRIM($1)) OR LOWER(TRIM(k.perusahaan)) = LOWER($2) OR LOWER(TRIM(k.perusahaan)) LIKE LOWER($3))`
+      : `LOWER(TRIM(k.perusahaan)) = LOWER(TRIM($1))`;
 
     // 1. Query agregasi dasar (total kebun, afdeling, blok, layer, fitur, unggahan)
     let statsQuery = '';
@@ -31,20 +40,51 @@ export async function GET(req: NextRequest) {
           (SELECT COUNT(*)::int FROM public.kebun WHERE id = $1) AS total_kebun,
           (SELECT COUNT(*)::int FROM public.afdeling WHERE kebun_id = $1) AS total_afdeling,
           (SELECT COUNT(*)::int FROM public.blok b JOIN public.afdeling a ON a.id = b.afdeling_id WHERE a.kebun_id = $1) AS total_blok,
-          (SELECT COUNT(*)::int FROM public.layer_peta WHERE kebun_id = $1) AS total_layer,
-          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id WHERE lp.kebun_id = $1 AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
+          (SELECT COUNT(*)::int FROM public.layer_peta WHERE kebun_id = $1 AND COALESCE(is_deleted, FALSE) = FALSE) AS total_layer,
+          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id WHERE lp.kebun_id = $1 AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
           (SELECT COUNT(*)::int FROM public.data_unggahan WHERE kebun_id = $1) AS total_unggahan;
+      `;
+    } else if (wilayahParam && normalizedPerusahaan) {
+      params.push(normalizedPerusahaan);
+      let wilParamIdx = 2;
+      if (matchedEntity) {
+        params.push(matchedEntity.code, `${matchedEntity.code} %`);
+        wilParamIdx = 4;
+      }
+      params.push(wilayahParam);
+      statsQuery = `
+        SELECT
+          (SELECT COUNT(*)::int FROM public.kebun k WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%')) AS total_kebun,
+          (SELECT COUNT(*)::int FROM public.afdeling a JOIN public.kebun k ON k.id = a.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%')) AS total_afdeling,
+          (SELECT COUNT(*)::int FROM public.blok b JOIN public.afdeling a ON a.id = b.afdeling_id JOIN public.kebun k ON k.id = a.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%')) AS total_blok,
+          (SELECT COUNT(*)::int FROM public.layer_peta lp JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%') AND COALESCE(lp.is_deleted, FALSE) = FALSE) AS total_layer,
+          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%') AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
+          (SELECT COUNT(*)::int FROM public.data_unggahan du JOIN public.kebun k ON k.id = du.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%')) AS total_unggahan;
       `;
     } else if (wilayahParam) {
       params.push(wilayahParam);
       statsQuery = `
         SELECT
-          (SELECT COUNT(*)::int FROM public.kebun WHERE LOWER(TRIM(wilayah)) = LOWER(TRIM($1))) AS total_kebun,
-          (SELECT COUNT(*)::int FROM public.afdeling a JOIN public.kebun k ON k.id = a.kebun_id WHERE LOWER(TRIM(k.wilayah)) = LOWER(TRIM($1))) AS total_afdeling,
-          (SELECT COUNT(*)::int FROM public.blok b JOIN public.afdeling a ON a.id = b.afdeling_id JOIN public.kebun k ON k.id = a.kebun_id WHERE LOWER(TRIM(k.wilayah)) = LOWER(TRIM($1))) AS total_blok,
-          (SELECT COUNT(*)::int FROM public.layer_peta lp JOIN public.kebun k ON k.id = lp.kebun_id WHERE LOWER(TRIM(k.wilayah)) = LOWER(TRIM($1))) AS total_layer,
-          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id JOIN public.kebun k ON k.id = lp.kebun_id WHERE LOWER(TRIM(k.wilayah)) = LOWER(TRIM($1)) AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
-          (SELECT COUNT(*)::int FROM public.data_unggahan du JOIN public.kebun k ON k.id = du.kebun_id WHERE LOWER(TRIM(k.wilayah)) = LOWER(TRIM($1))) AS total_unggahan;
+          (SELECT COUNT(*)::int FROM public.kebun WHERE LOWER(TRIM(COALESCE(provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AS total_kebun,
+          (SELECT COUNT(*)::int FROM public.afdeling a JOIN public.kebun k ON k.id = a.kebun_id WHERE LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AS total_afdeling,
+          (SELECT COUNT(*)::int FROM public.blok b JOIN public.afdeling a ON a.id = b.afdeling_id JOIN public.kebun k ON k.id = a.kebun_id WHERE LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AS total_blok,
+          (SELECT COUNT(*)::int FROM public.layer_peta lp JOIN public.kebun k ON k.id = lp.kebun_id WHERE (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AND COALESCE(lp.is_deleted, FALSE) = FALSE) AS total_layer,
+          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id JOIN public.kebun k ON k.id = lp.kebun_id WHERE (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
+          (SELECT COUNT(*)::int FROM public.data_unggahan du JOIN public.kebun k ON k.id = du.kebun_id WHERE LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AS total_unggahan;
+      `;
+    } else if (normalizedPerusahaan) {
+      params.push(normalizedPerusahaan);
+      if (matchedEntity) {
+        params.push(matchedEntity.code, `${matchedEntity.code} %`);
+      }
+      statsQuery = `
+        SELECT
+          (SELECT COUNT(*)::int FROM public.kebun k WHERE ${perusahaanSqlCond}) AS total_kebun,
+          (SELECT COUNT(*)::int FROM public.afdeling a JOIN public.kebun k ON k.id = a.kebun_id WHERE ${perusahaanSqlCond}) AS total_afdeling,
+          (SELECT COUNT(*)::int FROM public.blok b JOIN public.afdeling a ON a.id = b.afdeling_id JOIN public.kebun k ON k.id = a.kebun_id WHERE ${perusahaanSqlCond}) AS total_blok,
+          (SELECT COUNT(*)::int FROM public.layer_peta lp JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND COALESCE(lp.is_deleted, FALSE) = FALSE) AS total_layer,
+          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
+          (SELECT COUNT(*)::int FROM public.data_unggahan du JOIN public.kebun k ON k.id = du.kebun_id WHERE ${perusahaanSqlCond}) AS total_unggahan;
       `;
     } else {
       statsQuery = `
@@ -52,8 +92,8 @@ export async function GET(req: NextRequest) {
           (SELECT COUNT(*)::int FROM public.kebun) AS total_kebun,
           (SELECT COUNT(*)::int FROM public.afdeling) AS total_afdeling,
           (SELECT COUNT(*)::int FROM public.blok) AS total_blok,
-          (SELECT COUNT(*)::int FROM public.layer_peta) AS total_layer,
-          (SELECT COUNT(*)::int FROM public.fitur_peta WHERE COALESCE(is_deleted, FALSE) = FALSE) AS total_fitur,
+          (SELECT COUNT(*)::int FROM public.layer_peta WHERE COALESCE(is_deleted, FALSE) = FALSE) AS total_layer,
+          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id WHERE COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
           (SELECT COUNT(*)::int FROM public.data_unggahan) AS total_unggahan;
       `;
     }
@@ -80,6 +120,7 @@ export async function GET(req: NextRequest) {
     const featWhereClauses: string[] = [
       "ST_GeometryType(fp.geom) IN ('ST_Polygon', 'ST_MultiPolygon')",
       'COALESCE(fp.is_deleted, FALSE) = FALSE',
+      'COALESCE(lp.is_deleted, FALSE) = FALSE',
     ];
     const featParams: unknown[] = [];
 
@@ -89,9 +130,26 @@ export async function GET(req: NextRequest) {
     } else if (validKebunId) {
       featParams.push(validKebunId);
       featWhereClauses.push(`lp.kebun_id = $${featParams.length}`);
-    } else if (wilayahParam) {
-      featParams.push(wilayahParam);
-      featWhereClauses.push(`LOWER(TRIM(k.wilayah)) = LOWER(TRIM($${featParams.length}))`);
+    } else {
+      if (wilayahParam) {
+        featParams.push(wilayahParam);
+        featWhereClauses.push(
+          `(LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${featParams.length})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${featParams.length})) || '%')`
+        );
+      }
+      if (normalizedPerusahaan) {
+        if (matchedEntity) {
+          const p1 = featParams.push(normalizedPerusahaan);
+          const p2 = featParams.push(matchedEntity.code);
+          const p3 = featParams.push(`${matchedEntity.code} %`);
+          featWhereClauses.push(
+            `(LOWER(TRIM(k.perusahaan)) = LOWER(TRIM($${p1})) OR LOWER(TRIM(k.perusahaan)) = LOWER($${p2}) OR LOWER(TRIM(k.perusahaan)) LIKE LOWER($${p3}))`
+          );
+        } else {
+          const p1 = featParams.push(normalizedPerusahaan);
+          featWhereClauses.push(`LOWER(TRIM(k.perusahaan)) = LOWER(TRIM($${p1}))`);
+        }
+      }
     }
 
     const featQuery = `
@@ -100,6 +158,7 @@ export async function GET(req: NextRequest) {
         fp.atribut,
         lp.nama_layer,
         lp.crs_asal,
+        k.perusahaan,
         k.nama_kebun,
         k.wilayah,
         k.komoditas,
@@ -117,6 +176,7 @@ export async function GET(req: NextRequest) {
       atribut: Record<string, unknown>;
       nama_layer: string | null;
       crs_asal: string | null;
+      perusahaan: string | null;
       nama_kebun: string | null;
       wilayah: string | null;
       komoditas: string | null;
@@ -172,11 +232,14 @@ export async function GET(req: NextRequest) {
     >();
 
     let primaryCommodity = detectCommodityProfile({
+      perusahaan: normalizedPerusahaan || featRes.rows[0]?.perusahaan,
       wilayah: wilayahParam,
       namaKebun: featRes.rows[0]?.nama_kebun,
       layerName: featRes.rows[0]?.nama_layer,
       komoditas: featRes.rows[0]?.komoditas,
     });
+
+    const commodityAreaByKey = new Map<string, { profile: typeof primaryCommodity; area: number; count: number }>();
 
     for (const row of featRes.rows) {
       const intel = extractFeatureIntel(row.atribut || {}, {
@@ -184,13 +247,21 @@ export async function GET(req: NextRequest) {
         geomLuasHa: row.geom_luas_ha,
         geomKelilingKm: row.geom_keliling_km,
         layerName: row.nama_layer,
+        perusahaan: row.perusahaan || normalizedPerusahaan,
         namaKebun: row.nama_kebun,
         wilayah: row.wilayah || wilayahParam,
         komoditas: row.komoditas,
         isSingleBoundaryLayer: isSingleBoundary,
       });
 
-      primaryCommodity = intel.commodity;
+      const curComm = commodityAreaByKey.get(intel.commodity.key) || {
+        profile: intel.commodity,
+        area: 0,
+        count: 0,
+      };
+      curComm.area += intel.luasUkurHa > 0 ? intel.luasUkurHa : 1;
+      curComm.count += 1;
+      commodityAreaByKey.set(intel.commodity.key, curComm);
 
       sumLuasUkur += intel.luasUkurHa;
       if (intel.luasBakuHa !== null && intel.luasBakuHa > 0) {
@@ -252,12 +323,15 @@ export async function GET(req: NextRequest) {
     const parsedStatusLahan = [...statusSet].join(' · ');
     const parsedMT = [...mtSet].join(', ');
 
-    // Pastikan label komoditas membawa varietas bila ditemukan (misal: "Tebu (PSKA 942)")
-    if (parsedVarietas && primaryCommodity.key === 'tebu') {
-      primaryCommodity = {
-        ...primaryCommodity,
-        label: `Tebu (${parsedVarietas})`,
-      };
+    // Pilih komoditas dominan berdasarkan luas areal terbesar pada scope yang dipilih
+    if (commodityAreaByKey.size > 0) {
+      let bestArea = -1;
+      for (const entry of commodityAreaByKey.values()) {
+        if (entry.profile.key !== 'belum_ditentukan' && entry.area > bestArea) {
+          bestArea = entry.area;
+          primaryCommodity = entry.profile;
+        }
+      }
     }
 
     const finalLuasHa = Number(sumLuasUkur.toFixed(2));

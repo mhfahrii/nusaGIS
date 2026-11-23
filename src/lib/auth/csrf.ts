@@ -16,8 +16,10 @@ const BODY_METHODS = new Set(['POST', 'PATCH', 'PUT']);
 
 function allowedHosts(req: NextRequest): Set<string> {
   const hosts = new Set<string>();
-  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
-  if (host) hosts.add(host.toLowerCase());
+  const directHost = req.headers.get('host')?.trim();
+  if (directHost) hosts.add(directHost.toLowerCase());
+  const forwardedHost = req.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+  if (forwardedHost) hosts.add(forwardedHost.toLowerCase());
   for (const origin of (process.env.APP_ALLOWED_ORIGINS ?? '').split(',')) {
     const trimmed = origin.trim();
     if (!trimmed) continue;

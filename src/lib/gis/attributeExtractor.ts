@@ -3,13 +3,26 @@
  *
  * Menyatukan pembacaan atribut dari berbagai standar Shapefile/DBF/KML/GeoJSON:
  * - Kebun Bakalan (Pasuruan): Name, luas, PopupInfo (Luas Baku, Status Lahan, Varietas PSKA 942, MT 08/24)
- * - Kebun Sarongge (Cianjur): nama_unit, Block, nama_kebun, Luas (baku), Luas1 (ukur GIS), klaster A/B/C/Kebun Rakyat
+ * - Kebun Sarongge (Cianjur): nama_unit, Block, nama_kebun, Luas (baku), Luas1 (ukur GIS), klaster A/B/C
  * - Kebun Cibeureum (Bandung): Batas Konsesi tunggal (Shape_Leng, Shape_Area, Luas)
+ * - Peta Kebun Sei Aek Pancur (Deli Serdang): TT (tahun tanam / komoditas petak), area, luas_ha
  * - Format umum ArcGIS / QGIS / PostGIS lainnya
  */
 
+import { findRpnEntity } from './rpnEntities';
+
+export type CommodityKey =
+  | 'tebu'
+  | 'teh'
+  | 'kina'
+  | 'sawit'
+  | 'kopi'
+  | 'kakao'
+  | 'karet'
+  | 'belum_ditentukan';
+
 export interface CommodityProfile {
-  key: 'tebu' | 'teh' | 'sawit' | 'agribisnis';
+  key: CommodityKey;
   label: string;
   shortLabel: string;
   yieldPerHa: number;
@@ -20,6 +33,105 @@ export interface CommodityProfile {
   effectivePlantableRatio: number;
   standardSource: string;
 }
+
+export const COMMODITY_PROFILES: Record<CommodityKey, CommodityProfile> = {
+  tebu: {
+    key: 'tebu',
+    label: 'Tebu',
+    shortLabel: 'Tebu',
+    yieldPerHa: 85,
+    yieldUnit: 'Ton Tebu',
+    rendemenPct: 7.5,
+    processedLabel: 'Proyeksi Gula (7,5%)',
+    processedUnit: 'Ton Gula',
+    effectivePlantableRatio: 0.85,
+    standardSource: 'Standar P3GI (85 Ton/Ha · Rendemen 7,5%)',
+  },
+  teh: {
+    key: 'teh',
+    label: 'Teh',
+    shortLabel: 'Teh',
+    yieldPerHa: 10.0,
+    yieldUnit: 'Ton Pucuk Basah',
+    rendemenPct: 23.0,
+    processedLabel: 'Teh Kering (23%)',
+    processedUnit: 'Ton Teh Kering',
+    effectivePlantableRatio: 0.85,
+    standardSource: 'Standar PPTK (10 Ton Pucuk/Ha/Thn · 23% Kering)',
+  },
+  kina: {
+    key: 'kina',
+    label: 'Kina',
+    shortLabel: 'Kina',
+    yieldPerHa: 2.5,
+    yieldUnit: 'Ton Kulit Kering',
+    rendemenPct: null,
+    processedLabel: null,
+    processedUnit: null,
+    effectivePlantableRatio: 0.85,
+    standardSource: 'Standar PPTK (2,5 Ton Kulit Kering/Ha/Thn)',
+  },
+  sawit: {
+    key: 'sawit',
+    label: 'Kelapa Sawit',
+    shortLabel: 'Kelapa Sawit',
+    yieldPerHa: 22.0,
+    yieldUnit: 'Ton TBS',
+    rendemenPct: 22.0,
+    processedLabel: 'Proyeksi CPO (22%)',
+    processedUnit: 'Ton CPO',
+    effectivePlantableRatio: 0.85,
+    standardSource: 'Standar PPKS (22 Ton TBS/Ha/Thn · OER 22%)',
+  },
+  kopi: {
+    key: 'kopi',
+    label: 'Kopi',
+    shortLabel: 'Kopi',
+    yieldPerHa: 1.8,
+    yieldUnit: 'Ton Biji Kering',
+    rendemenPct: null,
+    processedLabel: null,
+    processedUnit: null,
+    effectivePlantableRatio: 0.85,
+    standardSource: 'Standar PPKKI (1,8 Ton Biji Kering/Ha/Thn)',
+  },
+  kakao: {
+    key: 'kakao',
+    label: 'Kakao',
+    shortLabel: 'Kakao',
+    yieldPerHa: 1.5,
+    yieldUnit: 'Ton Biji Kering',
+    rendemenPct: null,
+    processedLabel: null,
+    processedUnit: null,
+    effectivePlantableRatio: 0.85,
+    standardSource: 'Standar PPKKI (1,5 Ton Biji Kering/Ha/Thn)',
+  },
+  karet: {
+    key: 'karet',
+    label: 'Karet',
+    shortLabel: 'Karet',
+    yieldPerHa: 1.6,
+    yieldUnit: 'Ton Karet Kering',
+    rendemenPct: null,
+    processedLabel: null,
+    processedUnit: null,
+    effectivePlantableRatio: 0.85,
+    standardSource: 'Standar PPK (1,6 Ton KKK/Ha/Thn)',
+  },
+  belum_ditentukan: {
+    key: 'belum_ditentukan',
+    label: 'Belum ditentukan',
+    shortLabel: 'Belum ditentukan',
+    yieldPerHa: 0,
+    yieldUnit: 'Ton Hasil',
+    rendemenPct: null,
+    processedLabel: null,
+    processedUnit: null,
+    effectivePlantableRatio: 0.85,
+    standardSource: 'Komoditas belum ditentukan',
+  },
+};
 
 export interface ExtractedFeatureIntel {
   blokName: string;
@@ -52,6 +164,7 @@ export interface ExtractContext {
   geomLuasHa?: number | null;
   geomKelilingKm?: number | null;
   layerName?: string | null;
+  perusahaan?: string | null;
   namaKebun?: string | null;
   wilayah?: string | null;
   komoditas?: string | null;
@@ -73,19 +186,19 @@ const BULAN_ID = [
   'Desember',
 ];
 
-export const AFDELING_COLOR_MAP: Record<string, string> = {
+const AFDELING_COLOR_MAP: Record<string, string> = {
   'Afdeling A': '#00D2FF',
-  'Afdeling A (Rayon A)': '#00D2FF',
   'Afdeling B': '#10B981',
-  'Afdeling B (Rayon B)': '#10B981',
   'Afdeling C': '#F59E0B',
-  'Afdeling C (Rayon C)': '#F59E0B',
   'Afdeling D': '#A78BFA',
+  'Afdeling A (Rayon A)': '#00D2FF',
+  'Afdeling B (Rayon B)': '#10B981',
+  'Afdeling C (Rayon C)': '#F59E0B',
   'Kebun Rakyat': '#EC4899',
 };
 
-export function isMeaningfulValue(val: unknown): boolean {
-  if (val === undefined || val === null) return false;
+function isMeaningfulValue(val: unknown): boolean {
+  if (val === null || val === undefined) return false;
   const s = String(val).trim();
   if (
     s === '' ||
@@ -160,108 +273,227 @@ function pickAttr(
 }
 
 /**
- * Deteksi Profil Komoditas & Standar Produktivitas Agronomi
+ * Mencocokkan teks atribut/nama kebun secara spesifik ke 1 komoditas tunggal.
+ * Mengabaikan string gabungan ambigu seperti "Teh & Kina" atau "Kopi & Kakao" agar bisa diulik lebih dalam.
+ */
+export function matchSingleCommodityFromText(rawText?: string | null): CommodityProfile | null {
+  if (!rawText || !rawText.trim()) return null;
+  const text = rawText.trim().toLowerCase();
+
+  // Abaikan jika teks berisi nama perusahaan induk RPN atau label gabungan dua komoditas
+  const isAmbiguousTehKina = text.includes('teh') && text.includes('kina');
+  const isAmbiguousKopiKakao = text.includes('kopi') && text.includes('kakao');
+
+  // 1. Tebu
+  if (
+    /\btebu\b/.test(text) ||
+    /\bpska\b/.test(text) ||
+    /\bpsjk\b/.test(text) ||
+    /\bbl\b/.test(text) && text.includes('varietas') ||
+    /\bktg\b/.test(text) ||
+    /\bks\s*gpa\b/.test(text) ||
+    /\bgpa\s*[0-9]\b/.test(text) ||
+    /\bsugarcane\b/.test(text) ||
+    /\bbakalan\b/.test(text) ||
+    /\bsragi\b/.test(text)
+  ) {
+    return COMMODITY_PROFILES.tebu;
+  }
+
+  // 2. Kakao vs Kopi (hanya bila tidak ambigu "Kopi & Kakao")
+  if (!isAmbiguousKopiKakao) {
+    if (
+      /\bkakao\b/.test(text) ||
+      /\bcacao\b/.test(text) ||
+      /\bcocoa\b/.test(text) ||
+      /\bcoklat\b/.test(text) ||
+      /\bkaliwining\b/.test(text) ||
+      /\bkendenglembu\b/.test(text) ||
+      /\bjatirono\b/.test(text)
+    ) {
+      return COMMODITY_PROFILES.kakao;
+    }
+
+    if (
+      /\bkopi\b/.test(text) ||
+      /\bcoffee\b/.test(text) ||
+      /\barabika\b/.test(text) ||
+      /\barabica\b/.test(text) ||
+      /\brobusta\b/.test(text) ||
+      /\bandungsari\b/.test(text) ||
+      /\bbelawan\b/.test(text) ||
+      /\bkalisat\b/.test(text) ||
+      /\bjampit\b/.test(text)
+    ) {
+      return COMMODITY_PROFILES.kopi;
+    }
+  }
+
+  // 3. Kina vs Teh (hanya bila tidak ambigu "Teh & Kina")
+  if (!isAmbiguousTehKina) {
+    if (
+      /\bkina\b/.test(text) ||
+      /\bcinchona\b/.test(text) ||
+      /\bbukit\s*tunggul\b/.test(text)
+    ) {
+      return COMMODITY_PROFILES.kina;
+    }
+
+    if (
+      /\bteh\b/.test(text) ||
+      /\btea\b/.test(text) ||
+      /\bpucuk\b/.test(text) ||
+      /\bgmb\s*[0-9]?\b/.test(text) ||
+      /\bsarongge\b/.test(text) ||
+      /\bcibeureum\b/.test(text) ||
+      /\bcibereum\b/.test(text) ||
+      /\bgambung\b/.test(text) ||
+      /\bmalabar\b/.test(text) ||
+      /\brancabali\b/.test(text) ||
+      /\bsedep\b/.test(text) ||
+      /\bpangalengan\b/.test(text)
+    ) {
+      return COMMODITY_PROFILES.teh;
+    }
+  }
+
+  // 4. Kelapa Sawit
+  if (
+    /\bsawit\b/.test(text) ||
+    /\bkelapa\s*sawit\b/.test(text) ||
+    /\btbs\b/.test(text) ||
+    /\bcpo\b/.test(text) ||
+    /\bpembibitan\s*ks\b/.test(text) ||
+    /\beks\.?\s*pks\b/.test(text) ||
+    /\baek\s*pancur\b/.test(text) ||
+    /\bmarihat\b/.test(text) ||
+    /\boil\s*palm\b/.test(text)
+  ) {
+    return COMMODITY_PROFILES.sawit;
+  }
+
+  // 5. Karet
+  if (
+    /\bkaret\b/.test(text) ||
+    /\blateks\b/.test(text) ||
+    /\bhevea\b/.test(text) ||
+    /\brubber\b/.test(text) ||
+    /\bsembawa\b/.test(text) ||
+    /\bsungai\s*putih\b/.test(text) ||
+    /\bsungei\s*putih\b/.test(text) ||
+    /\bgetas\b/.test(text)
+  ) {
+    return COMMODITY_PROFILES.karet;
+  }
+
+  return null;
+}
+
+/**
+ * Deteksi Profil Komoditas dengan 3 Tingkat Prioritas:
+ * 1) Data langsung dari Folder / Atribut DBF Fitur (Tanaman, Komoditas, Varietas, Status Lahan, TT, Nama Blok)
+ * 2) Isian Komoditas pada Data Kebun Induk atau Identitas Spesifik Kebun/Layer (misal Sarongge -> Teh, Bakalan -> Tebu)
+ * 3) Komoditas Bawaan PT / Puslit:
+ *    - Single-commodity PT (P3GI -> Tebu, PPKS -> Kelapa Sawit, PPK -> Karet) langsung terisi.
+ *    - Multi-commodity PT (PPTK -> Teh atau Kina, PPKKI -> Kopi atau Kakao) diulik dari konteks kebun/wilayah/atribut.
+ * 4) Fallback: "Belum ditentukan" (tidak pernah menggunakan nama PT atau "Riset Perkebunan (PT RPN)" sebagai komoditas).
  */
 export function detectCommodityProfile(ctx: {
   tanaman?: string;
   varietas?: string;
   statusLahan?: string;
+  tt?: string;
+  blokName?: string;
   komoditas?: string | null;
+  perusahaan?: string | null;
   namaKebun?: string | null;
   wilayah?: string | null;
   layerName?: string | null;
 }): CommodityProfile {
-  const combined = [
+  // PRIORITAS 1: Data Atribut Fitur dari Folder / DBF / PopupInfo
+  const folderFeatureSignal = [
     ctx.tanaman,
     ctx.varietas,
     ctx.statusLahan,
-    ctx.komoditas,
-    ctx.namaKebun,
-    ctx.wilayah,
-    ctx.layerName,
+    ctx.tt,
+    ctx.blokName,
   ]
     .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+    .join(' ');
 
-  // 1. Tebu (Pasuruan / Kebun Bakalan / Varietas PSKA / KTG / KS GPA)
-  if (
-    combined.includes('tebu') ||
-    combined.includes('pska') ||
-    combined.includes('ktg') ||
-    combined.includes('gpa') ||
-    combined.includes('bakalan') ||
-    combined.includes('pasuruan')
-  ) {
-    return {
-      key: 'tebu',
-      label: ctx.varietas ? `Tebu (${ctx.varietas})` : 'Tebu (KTG / KS GPA)',
-      shortLabel: 'Tebu',
-      yieldPerHa: 85, // Standar PTPN / P3GI: 80-90 Ton Tebu / Ha
-      yieldUnit: 'Ton Tebu',
-      rendemenPct: 7.5, // Standar Rendemen Gula ~7.5%
-      processedLabel: 'Proyeksi Gula (7,5%)',
-      processedUnit: 'Ton Gula',
-      effectivePlantableRatio: 0.85,
-      standardSource: 'Standar PTPN / P3GI (85 Ton/Ha · Rendemen 7,5%)',
-    };
+  const fromFolderFeature = matchSingleCommodityFromText(folderFeatureSignal);
+  if (fromFolderFeature) {
+    return fromFolderFeature;
   }
 
-  // 2. Teh Dataran Tinggi / Agribisnis (Cianjur / Sarongge, Bandung / Cibeureum / Pangalengan)
-  if (
-    combined.includes('teh') ||
-    combined.includes('sarongge') ||
-    combined.includes('cibeureum') ||
-    combined.includes('cibereum') ||
-    combined.includes('pangalengan') ||
-    combined.includes('cianjur') ||
-    combined.includes('bandung') ||
-    combined.includes('pacet') ||
-    combined.includes('gedeh')
-  ) {
-    return {
-      key: 'teh',
-      label: 'Teh Dataran Tinggi / Agribisnis',
-      shortLabel: 'Teh / Agribisnis',
-      yieldPerHa: 10.0, // Standar PTPN Jabar: ~10 Ton Pucuk Teh Basah / Ha / Tahun
-      yieldUnit: 'Ton Pucuk Basah',
-      rendemenPct: 23.0, // Rasio olah daun basah -> teh kering ~23% (~2,3 Ton Teh Kering/Ha/Thn)
-      processedLabel: 'Teh Kering (23%)',
-      processedUnit: 'Ton Teh Kering',
-      effectivePlantableRatio: 0.85,
-      standardSource: 'Standar PTPN Jabar (10 Ton Pucuk/Ha/Thn · 23% Kering)',
-    };
+  // PRIORITAS 2A: Isian Komoditas Spesifik pada Master Kebun
+  const fromKebunField = matchSingleCommodityFromText(ctx.komoditas);
+  if (fromKebunField) {
+    return fromKebunField;
   }
 
-  // 3. Kelapa Sawit
-  if (combined.includes('sawit') || combined.includes('tbs') || combined.includes('cpo')) {
-    return {
-      key: 'sawit',
-      label: 'Kelapa Sawit',
-      shortLabel: 'Kelapa Sawit',
-      yieldPerHa: 20.0,
-      yieldUnit: 'Ton TBS',
-      rendemenPct: 22.0,
-      processedLabel: 'Proyeksi CPO (22%)',
-      processedUnit: 'Ton CPO',
-      effectivePlantableRatio: 0.85,
-      standardSource: 'Standar PTPN (20 Ton TBS/Ha/Thn · OER 22%)',
-    };
+  // PRIORITAS 2B: Identitas Spesifik Nama Kebun & Nama Layer / File SHP
+  const kebunLayerSignal = [ctx.namaKebun, ctx.layerName].filter(Boolean).join(' ');
+  const fromKebunLayer = matchSingleCommodityFromText(kebunLayerSignal);
+  if (fromKebunLayer) {
+    return fromKebunLayer;
   }
 
-  // 4. Agribisnis Umum
-  return {
-    key: 'agribisnis',
-    label: ctx.komoditas?.trim() || 'Agribisnis Perkebunan',
-    shortLabel: 'Agribisnis',
-    yieldPerHa: 12.0,
-    yieldUnit: 'Ton Hasil',
-    rendemenPct: null,
-    processedLabel: null,
-    processedUnit: null,
-    effectivePlantableRatio: 0.85,
-    standardSource: 'Estimasi Standar Agribisnis (12 Ton/Ha/Thn)',
-  };
+  // PRIORITAS 3: Berdasarkan PT / Puslit yang Menaungi
+  const entity =
+    findRpnEntity(ctx.perusahaan) ||
+    findRpnEntity(ctx.namaKebun) ||
+    findRpnEntity(ctx.layerName);
+
+  if (entity) {
+    // Jika PT hanya memiliki 1 komoditas tunggal (P3GI = Tebu, PPKS = Kelapa Sawit, PPK = Karet)
+    if (entity.code === 'P3GI') return COMMODITY_PROFILES.tebu;
+    if (entity.code === 'PPKS') return COMMODITY_PROFILES.sawit;
+    if (entity.code === 'PPK') return COMMODITY_PROFILES.karet;
+
+    // Jika PT menaungi >1 komoditas (PPTK: Teh/Kina, PPKKI: Kopi/Kakao), ulik dari konteks wilayah & metadata
+    const deepContext = [
+      ctx.namaKebun,
+      ctx.layerName,
+      ctx.wilayah,
+      ctx.komoditas,
+      folderFeatureSignal,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    if (entity.code === 'PPTK') {
+      if (/\bkina\b|\bcinchona\b|\bbukit\s*tunggul\b/.test(deepContext)) {
+        return COMMODITY_PROFILES.kina;
+      }
+      if (
+        /\bteh\b|\bsarongge\b|\bcibeureum\b|\bcibereum\b|\bgambung\b|\bcianjur\b|\bbandung\b|\bpangalengan\b|\bmalabar\b/.test(
+          deepContext
+        )
+      ) {
+        return COMMODITY_PROFILES.teh;
+      }
+    }
+
+    if (entity.code === 'PPKKI') {
+      if (/\bkakao\b|\bcacao\b|\bcocoa\b|\bcoklat\b|\bkaliwining\b|\bkendenglembu\b|\bjatirono\b/.test(deepContext)) {
+        return COMMODITY_PROFILES.kakao;
+      }
+      if (/\bkopi\b|\bcoffee\b|\barabika\b|\brobusta\b|\bandungsari\b|\bbelawan\b|\bkalisat\b|\bjampit\b/.test(deepContext)) {
+        return COMMODITY_PROFILES.kopi;
+      }
+    }
+  }
+
+  // Cek satu kali lagi jika wilayah saja sudah sangat spesifik ke kebun yang dikenal
+  const fromWilayah = matchSingleCommodityFromText(ctx.wilayah);
+  if (fromWilayah) {
+    return fromWilayah;
+  }
+
+  // PRIORITAS 4: Fallback jujur tanpa mengarang dan tanpa memakai nama PT RPN
+  return COMMODITY_PROFILES.belum_ditentukan;
 }
 
 /**
@@ -282,12 +514,7 @@ export function detectAfdelingGroup(
   const clean = blokName.trim();
   const lower = clean.toLowerCase();
 
-  // 2. Kebun Rakyat (Sarongge)
-  if (lower.includes('kebun rakyat') || lower.includes('rakyat')) {
-    return { group: 'Kebun Rakyat', color: AFDELING_COLOR_MAP['Kebun Rakyat'] };
-  }
-
-  // 3. Pola kode blok klaster Sarongge & standar perkebunan: A1..A9, B1..B9, C1..C9, D1..D9
+  // 2. Pola kode blok klaster Sarongge & standar perkebunan: A1..A9, B1..B9, C1..C9, D1..D9
   const letterMatch = clean.match(/^(?:blok\s*)?([ABCD])\s*[-_.]?\s*\d+\b/i);
   if (letterMatch) {
     const letter = letterMatch[1].toUpperCase();
@@ -295,7 +522,7 @@ export function detectAfdelingGroup(
     return { group: label, color: AFDELING_COLOR_MAP[label] || '#00D2FF' };
   }
 
-  // 4. Pola Rayon Kebun Bakalan (Bakalan A / GPA 1-3 -> Afdeling A, Bakalan B / GPA 4-6 -> Afdeling B, Bakalan C / GPA 7-8 -> Afdeling C)
+  // 3. Pola Rayon Kebun Bakalan (Bakalan A / GPA 1-3 -> Afdeling A, Bakalan B / GPA 4-6 -> Afdeling B, Bakalan C / GPA 7-8 -> Afdeling C)
   if (/\bbakalan\s*a\b/i.test(lower) || /\bgpa\s*[1-3]\b/i.test(lower)) {
     return { group: 'Afdeling A (Rayon A)', color: AFDELING_COLOR_MAP['Afdeling A (Rayon A)'] };
   }
@@ -310,7 +537,7 @@ export function detectAfdelingGroup(
 }
 
 /**
- * Mesin Ekstraksi Utama: Memeras 100% informasi dari satu fitur poligon/atribut DBF + PostGIS
+ * Fungsi Utama: Ekstraksi Penuh Atribut & Agronomi 1 Fitur Spasial
  */
 export function extractFeatureIntel(
   props: Record<string, unknown>,
@@ -343,29 +570,37 @@ export function extractFeatureIntel(
       const fallbackKebun = pickAttr(props, popup, ['nama_kebun', 'Label']);
       blokName = fallbackKebun
         ? `Petak ${fallbackKebun} #${featId}`
-        : `Blok #${featId || 1}`;
+        : `Petak #${featId}`;
     }
   }
 
-  const shortName = blokName.split(' (')[0].slice(0, 14);
+  const shortName = blokName.replace(/\s*\([^)]*\)\s*/g, '').trim() || blokName;
 
-  // 2. Luas Ukur GIS vs Luas Baku Dokumen (Cerdas: deteksi pola Sarongge Luas1 vs Luas, Bakalan luas vs PopupInfo, Cibeureum Shape_Area)
-  const luas1Val = parseNumericHa(props.Luas1 ?? props.LUAS1 ?? props.luas1 ?? props.luas_ukur);
+  // 2. Ekstraksi Luas Ukur GIS vs Luas Baku Dokumen Legal
+  const luas1Val = parseNumericHa(props.Luas1 ?? props.luas1);
   const luasPrimaryVal = parseNumericHa(
-    props.luas ?? props.Luas ?? props.LUAS ?? props.luas_ha ?? props.LUAS_HA
+    props.luas_ha ?? props.LUAS_HA ?? props.luas ?? props.Luas ?? props.LUAS
   );
   const geomLuas =
     typeof ctx.geomLuasHa === 'number' && Number.isFinite(ctx.geomLuasHa) && ctx.geomLuasHa > 0
       ? ctx.geomLuasHa
-      : parseNumericHa(props._luas_geodesik_ha) || 0;
+      : parseNumericHa(props._luas_geodesik_ha) ?? 0;
 
-  // Shape_Area fallback (jika > 100 berarti satuan m² UTM -> konversi ke Ha)
-  const rawShapeArea = parseNumericHa(props.Shape_Area ?? props.shape_area);
+  const rawShapeArea = parseNumericHa(
+    props.Shape_Area ?? props.shape_area ?? props.area ?? props.AREA
+  );
+  // Konversi Shape_Area: jika > 500 maka satuan meter persegi (UTM/WebMercator -> bagi 10.000), jika < 0.01 maka derajat kuadrat
   const shapeAreaHa =
-    rawShapeArea && rawShapeArea > 100 ? rawShapeArea / 10000 : null;
+    rawShapeArea !== null
+      ? rawShapeArea > 500
+        ? rawShapeArea / 10000
+        : rawShapeArea < 0.01 && rawShapeArea > 0
+        ? rawShapeArea * 1232100
+        : null
+      : null;
 
   let luasUkurHa = 0;
-  let luasUkurSource = 'PostGIS Geodesik';
+  let luasUkurSource = 'Geodesik PostGIS';
 
   if (luas1Val !== null && luas1Val > 0) {
     luasUkurHa = luas1Val;
@@ -386,7 +621,7 @@ export function extractFeatureIntel(
   let luasBakuHa = parseNumericHa(explicitBakuStr);
   let luasBakuSource: string | null = luasBakuHa ? 'Dokumen / PopupInfo' : null;
 
-  // Pola Kebun Sarongge: jika ada Luas1 (desimal GIS) DAN Luas (angka baku legal > 0), maka Luas = Luas Baku!
+  // Pola Kebun Sarongge: jika ada Luas1 (desimal GIS) DAN Luas (angka baku legal > 0), maka Luas = Luas Baku
   if (
     luasBakuHa === null &&
     luas1Val !== null &&
@@ -415,7 +650,7 @@ export function extractFeatureIntel(
     }
   }
 
-  // 4. Keliling Batas (km) — PostGIS atau Shape_Leng (meter -> km)
+  // 4. Keliling Batas (km)
   let kelilingKm =
     typeof ctx.geomKelilingKm === 'number' && Number.isFinite(ctx.geomKelilingKm) && ctx.geomKelilingKm > 0
       ? ctx.geomKelilingKm
@@ -429,8 +664,9 @@ export function extractFeatureIntel(
 
   // 5. Atribut Agronomi & Budidaya
   const statusLahan = pickAttr(props, popup, ['Status Lahan', 'status_lahan', 'status']);
-  const tanaman = pickAttr(props, popup, ['Tanaman', 'tanaman', 'komoditas']);
+  const tanaman = pickAttr(props, popup, ['Tanaman', 'tanaman', 'komoditas', 'Komoditas']);
   const varietas = pickAttr(props, popup, ['Varietas', 'varietas']);
+  const ttAttr = pickAttr(props, popup, ['TT', 'tt', 'tahun_tanam']);
   const mt = pickAttr(props, popup, ['MT', 'mt', 'masa_tanam']);
   const mtFormatted = formatMasaTanam(mt);
   const luasTanamHa = parseNumericHa(pickAttr(props, popup, ['Luas Tanam', 'luas_tanam']));
@@ -445,12 +681,15 @@ export function extractFeatureIntel(
     blokName
   );
 
-  // 7. Deteksi Komoditas & Estimasi Produksi Otomatis
+  // 7. Deteksi Komoditas (3 Tingkat Prioritas) & Estimasi Produksi Otomatis
   const commodity = detectCommodityProfile({
     tanaman,
     varietas,
     statusLahan,
+    tt: ttAttr,
+    blokName,
     komoditas: ctx.komoditas,
+    perusahaan: ctx.perusahaan || pickAttr(props, popup, ['perusahaan', 'Perusahaan', 'PERUSAHAAN']),
     namaKebun: ctx.namaKebun || pickAttr(props, popup, ['nama_kebun']),
     wilayah: ctx.wilayah,
     layerName: ctx.layerName,
@@ -484,7 +723,7 @@ export function extractFeatureIntel(
     auditStatus,
     kelilingKm: Number(kelilingKm.toFixed(3)),
     statusLahan,
-    tanaman,
+    tanaman: tanaman || commodity.label,
     varietas,
     mt,
     mtFormatted,

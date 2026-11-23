@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth/guard';
+import { catatAktivitas, requireUser } from '@/lib/auth/guard';
 import { Afdeling, Kebun } from '@/types/perkebunan';
 
 interface PgError extends Error {
@@ -109,7 +109,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/afdeling
 export async function POST(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'edit_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -179,6 +179,12 @@ export async function POST(req: NextRequest) {
       [kebun_id, kode_afdeling, nama_afdeling, keterangan]
     );
 
+    await catatAktivitas(
+      auth.user.id,
+      'tambah_afdeling',
+      `Menambahkan afdeling "${nama_afdeling}" (${kode_afdeling}) pada kebun ID #${kebun_id}.`
+    );
+
     return NextResponse.json(
       {
         status: 'success',
@@ -210,7 +216,7 @@ export async function POST(req: NextRequest) {
 
 // PATCH /api/afdeling
 export async function PATCH(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'edit_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -323,11 +329,18 @@ export async function PATCH(req: NextRequest) {
     `;
 
     const updateRes = await query<Afdeling>(updateSql, values);
+    const updatedRow = updateRes.rows[0];
+
+    await catatAktivitas(
+      auth.user.id,
+      'ubah_afdeling',
+      `Memperbarui afdeling "${updatedRow.nama_afdeling}" (${updatedRow.kode_afdeling}).`
+    );
 
     return NextResponse.json({
       status: 'success',
       message: 'Data afdeling berhasil diperbarui.',
-      data: updateRes.rows[0],
+      data: updatedRow,
     });
   } catch (err: unknown) {
     const pgErr = err as PgError;
@@ -346,7 +359,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE /api/afdeling?id={id}
 export async function DELETE(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'hapus_data', requireJson: false });
   if (auth.response) return auth.response;
 
   try {
@@ -379,6 +392,12 @@ export async function DELETE(req: NextRequest) {
         { status: 404 }
       );
     }
+
+    await catatAktivitas(
+      auth.user.id,
+      'hapus_afdeling',
+      `Menghapus afdeling "${delRes.rows[0].nama_afdeling}" (${delRes.rows[0].kode_afdeling}).`
+    );
 
     return NextResponse.json({
       status: 'success',

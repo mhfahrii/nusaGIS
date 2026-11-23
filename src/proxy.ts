@@ -38,8 +38,8 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Semua path kecuali aset statis Next.js dan file berekstensi (favicon, gambar, dll).
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.[\\w]+$).*)',
+    // Exclude upload endpoints so large GIS streams are not cloned/buffered into memory; auth is checked in handlers via requireUser.
+    '/((?!_next/static|_next/image|favicon.ico|api/gis/inspect|api/gis/upload|.*\\.[\\w]+$).*)',
   ],
 };
 

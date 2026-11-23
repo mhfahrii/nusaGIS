@@ -14,12 +14,15 @@ import {
   MAX_ZIP_SIZE_BYTES,
 } from '@/lib/gis/shapefile';
 import { parseGeoTiffMetadata } from '@/lib/gis/geotiff';
-import { extractFeatureIntel } from '@/lib/gis/attributeExtractor';
+import { extractFeatureIntel, detectCommodityProfile } from '@/lib/gis/attributeExtractor';
+import { inferRpnEntityFromContext, normalizePerusahaanName } from '@/lib/gis/rpnEntities';
+import { parseWilayahHierarchy } from '@/lib/gis/wilayah';
 import type { DataUnggahan, LayerPeta, ExtentBox, LayerMappingInput } from '@/types/gis';
 
+export const maxDuration = 300;
+
 export async function POST(req: NextRequest) {
-  // 1. Otorisasi Pengguna (Admin atau Pengguna aktif diizinkan mengunggah data GIS)
-  const auth = await requireUser(req, { requireJson: false });
+  const auth = await requireUser(req, { requireJson: false, permission: 'upload_layer' });
   if (auth.response) return auth.response;
 
   const contentType = req.headers.get('content-type') || '';
@@ -41,7 +44,10 @@ export async function POST(req: NextRequest) {
       kebun_id?: number | null;
       new_kebun_nama?: string | null;
       new_kebun_wilayah?: string | null;
+      new_kebun_provinsi?: string | null;
+      new_kebun_kabupaten?: string | null;
       new_kebun_perusahaan?: string | null;
+      new_kebun_komoditas?: string | null;
     } | null = null;
 
     if (contentType.includes('application/json')) {
@@ -49,9 +55,9 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       const { tempId, nama_data, keterangan: ket, mappings: mapList, target_kebun } = body;
 
-      if (!tempId || typeof tempId !== 'string') {
+      if (!tempId || typeof tempId !== 'string' || !/^[a-f0-9]{32}$/i.test(tempId)) {
         return NextResponse.json(
-          { status: 'error', message: 'Token file sementara (tempId) wajib disertakan.' },
+          { status: 'error', message: 'Token file sementara (tempId) tidak valid.' },
           { status: 400 }
         );
       }
@@ -67,6 +73,7 @@ export async function POST(req: NextRequest) {
         fileName = meta.fileName || 'dataset.zip';
         isZip = meta.fileFormat === 'zip';
         isGeoTiff = meta.fileFormat === 'geotiff';
+        fallbackCrsSingle = typeof meta.fallbackCrs === 'string' ? meta.fallbackCrs : null;
       } catch {
         return NextResponse.json(
           {
@@ -433,53 +440,115 @@ export async function POST(req: NextRequest) {
         const effectiveIsNewKebun = mapping?.is_new_kebun ?? globalTargetKebun?.is_new_kebun ?? false;
         const effectiveNewKebunNama = mapping?.new_kebun_nama ?? globalTargetKebun?.new_kebun_nama;
         const effectiveNewKebunWilayah = mapping?.new_kebun_wilayah ?? globalTargetKebun?.new_kebun_wilayah;
+        const effectiveNewKebunProvinsi = mapping?.new_kebun_provinsi ?? globalTargetKebun?.new_kebun_provinsi;
+        const effectiveNewKebunKabupaten = mapping?.new_kebun_kabupaten ?? globalTargetKebun?.new_kebun_kabupaten;
         const effectiveNewKebunPerusahaan = mapping?.new_kebun_perusahaan ?? globalTargetKebun?.new_kebun_perusahaan;
+        const effectiveNewKebunKomoditas = mapping?.new_kebun_komoditas ?? globalTargetKebun?.new_kebun_komoditas;
         let targetKebunId = mapping?.kebun_id ? Number(mapping.kebun_id) : (globalTargetKebun?.kebun_id ? Number(globalTargetKebun.kebun_id) : defaultKebunId);
+
+        // Deteksi komoditas dari sampel fitur di dalam folder/shapefile + PT naungan
+        const sampleFeatProps = (ds.features[0]?.properties || {}) as Record<string, unknown>;
+        const sampleIntel = extractFeatureIntel(sampleFeatProps, {
+          layerName: ds.layerName,
+          perusahaan: effectiveNewKebunPerusahaan,
+          namaKebun: effectiveNewKebunNama,
+          wilayah: effectiveNewKebunWilayah,
+          komoditas: effectiveNewKebunKomoditas,
+        });
+        const detectedKebunKomoditas =
+          effectiveNewKebunKomoditas?.trim() ||
+          (sampleIntel.commodity.key !== 'belum_ditentukan' ? sampleIntel.commodity.label : null);
 
         if ((!targetKebunId || effectiveIsNewKebun) && effectiveNewKebunNama?.trim()) {
           const kNama = effectiveNewKebunNama.trim();
-          const kWil = effectiveNewKebunWilayah?.trim() || 'Wilayah Belum Ditentukan';
-          const kPer = effectiveNewKebunPerusahaan?.trim() || 'PT Perkebunan Nusantara I (Regional 4)';
+          let kProv = effectiveNewKebunProvinsi?.trim() || null;
+          let kKab = effectiveNewKebunKabupaten?.trim() || null;
+          let kWil = effectiveNewKebunWilayah?.trim() || '';
+
+          if (!kProv || !kKab) {
+            const parsed = parseWilayahHierarchy(kWil);
+            if (!kProv && parsed.provinsi) kProv = parsed.provinsi;
+            if (!kKab && parsed.kabupatenKota) kKab = parsed.kabupatenKota;
+          }
+          if (!kWil || kWil === 'Wilayah Belum Ditentukan') {
+            kWil = kKab && kProv ? `${kKab}, ${kProv}` : (kProv || kKab || 'Wilayah Belum Ditentukan');
+          }
+
+          const kPer = effectiveNewKebunPerusahaan?.trim()
+            ? normalizePerusahaanName(effectiveNewKebunPerusahaan)
+            : inferRpnEntityFromContext({
+                namaKebun: kNama,
+                wilayah: kWil,
+                layerName: ds.layerName,
+                komoditas: detectedKebunKomoditas,
+              });
+          const resolvedKom =
+            detectedKebunKomoditas ||
+            (() => {
+              const p = detectCommodityProfile({
+                perusahaan: kPer,
+                namaKebun: kNama,
+                wilayah: kWil,
+                layerName: ds.layerName,
+              });
+              return p.key !== 'belum_ditentukan' ? p.label : null;
+            })();
           const kKode = `KBN-${kNama.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'NEW'}-${Date.now().toString().slice(-4)}`;
 
-          const existingK = await client.query<{ id: number; wilayah: string | null; perusahaan: string | null }>(
-            'SELECT id, wilayah, perusahaan FROM public.kebun WHERE LOWER(nama_kebun) = LOWER($1);',
+          const existingK = await client.query<{
+            id: number;
+            wilayah: string | null;
+            provinsi: string | null;
+            kabupaten_kota: string | null;
+            perusahaan: string | null;
+            komoditas: string | null;
+          }>(
+            'SELECT id, wilayah, provinsi, kabupaten_kota, perusahaan, komoditas FROM public.kebun WHERE LOWER(nama_kebun) = LOWER($1);',
             [kNama]
           );
           if (existingK.rowCount && existingK.rowCount > 0) {
             targetKebunId = Number(existingK.rows[0].id);
             const curWil = (existingK.rows[0].wilayah || '').trim();
+            const curProv = (existingK.rows[0].provinsi || '').trim();
+            const curKab = (existingK.rows[0].kabupaten_kota || '').trim();
             const curPer = (existingK.rows[0].perusahaan || '').trim();
+            const curKom = (existingK.rows[0].komoditas || '').trim();
             const shouldUpdateWil =
               kWil &&
               kWil !== 'Wilayah Belum Ditentukan' &&
               (!curWil || curWil === 'Wilayah Belum Ditentukan');
+            const shouldUpdateProv = Boolean(kProv) && (!curProv || curProv !== kProv);
+            const shouldUpdateKab = Boolean(kKab) && (!curKab || curKab !== kKab);
             const shouldUpdatePer = Boolean(kPer) && curPer.toLowerCase() !== kPer.toLowerCase();
-            if (shouldUpdateWil || shouldUpdatePer) {
+            const shouldUpdateKom = Boolean(resolvedKom) && curKom.toLowerCase() !== resolvedKom!.toLowerCase();
+            if (shouldUpdateWil || shouldUpdateProv || shouldUpdateKab || shouldUpdatePer || shouldUpdateKom) {
               await client.query(
                 `UPDATE public.kebun
                  SET wilayah = COALESCE(NULLIF(NULLIF(TRIM(wilayah), ''), 'Wilayah Belum Ditentukan'), $1),
-                     perusahaan = $2
-                 WHERE id = $3;`,
-                [kWil, kPer, targetKebunId]
+                     provinsi = COALESCE($2, provinsi),
+                     kabupaten_kota = COALESCE($3, kabupaten_kota),
+                     perusahaan = $4,
+                     komoditas = COALESCE($5, komoditas)
+                 WHERE id = $6;`,
+                [kWil, kProv, kKab, kPer, resolvedKom, targetKebunId]
               );
             }
           } else {
             const insK = await client.query(
-              `INSERT INTO public.kebun (kode_kebun, nama_kebun, wilayah, perusahaan)
-               VALUES ($1, $2, $3, $4) RETURNING id;`,
-              [kKode, kNama, kWil, kPer]
+              `INSERT INTO public.kebun (kode_kebun, nama_kebun, wilayah, provinsi, kabupaten_kota, perusahaan, komoditas)
+               VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id;`,
+              [kKode, kNama, kWil, kProv, kKab, kPer, resolvedKom]
             );
             targetKebunId = Number(insK.rows[0].id);
           }
-        } else if (targetKebunId && effectiveNewKebunPerusahaan?.trim()) {
-          // Jika user memilih kebun yang sudah ada dan memilih/mengetik perusahaan baru, perbarui perusahaan kebun tersebut
-          const newPer = effectiveNewKebunPerusahaan.trim();
+        } else if (targetKebunId && (effectiveNewKebunPerusahaan?.trim() || detectedKebunKomoditas)) {
+          const newPer = effectiveNewKebunPerusahaan?.trim() || null;
           await client.query(
             `UPDATE public.kebun
-             SET perusahaan = $1
-             WHERE id = $2 AND COALESCE(LOWER(TRIM(perusahaan)), '') <> LOWER($1);`,
-            [newPer, targetKebunId]
+             SET perusahaan = COALESCE($1, perusahaan),
+                 komoditas = COALESCE($2, komoditas)
+             WHERE id = $3;`,
+            [newPer, detectedKebunKomoditas, targetKebunId]
           );
         }
 
@@ -568,33 +637,39 @@ export async function POST(req: NextRequest) {
         );
         const layer = insertLayerRes.rows[0];
 
-        // Standar ArcGIS Enterprise Ingest:
-        // Jika data dari proyeksi UTM/lainnya (SRID != 4326), transformasikan secara akurat menggunakan ST_Transform ke EPSG:4326.
-        // Jika SRID tidak diketahui, deteksi secara cerdas apakah koordinat sudah derajat atau meter.
-        for (const feat of ds.features) {
-          if (!feat.geometry) continue;
-          const geomGeoJson = JSON.stringify(feat.geometry);
-          const propertiesJson = JSON.stringify(feat.properties || {});
-
-          // Periksa koordinat spasial:
-          // Jika koordinat GeoJSON dari shpjs sudah berupa derajat WGS 84 (-180..180 dan -90..90), JANGAN lakukan ST_Transform ulang!
-          // Hanya lakukan ST_Transform jika koordinat masih murni berupa meter (di luar rentang derajat).
+        // Batch inserts prevent PostGIS transaction timeouts on dense contour/parcel layers; skip ST_Transform when already WGS 84
+        const BATCH_SIZE = 250;
+        const validRows = ds.features.filter((f) => Boolean(f.geometry));
+        for (let offset = 0; offset < validRows.length; offset += BATCH_SIZE) {
+          const batch = validRows.slice(offset, offset + BATCH_SIZE);
+          const geojsons = batch.map((f) => JSON.stringify(f.geometry));
+          const propsList = batch.map((f) => JSON.stringify(f.properties || {}));
           await client.query(
-            `INSERT INTO public.fitur_peta (layer_id, geom, atribut, dibuat_oleh_user_id)
-             VALUES (
-               $1,
-               ST_Force2D(
-                 CASE
-                   WHEN ST_XMin(ST_GeomFromGeoJSON($2)) < -180 OR ST_XMax(ST_GeomFromGeoJSON($2)) > 180
-                     OR ST_YMin(ST_GeomFromGeoJSON($2)) < -90 OR ST_YMax(ST_GeomFromGeoJSON($2)) > 90
-                   THEN ST_Transform(ST_SetSRID(ST_MakeValid(ST_GeomFromGeoJSON($2)), COALESCE($3, 32749)), 4326)
-                   ELSE ST_SetSRID(ST_MakeValid(ST_GeomFromGeoJSON($2)), 4326)
-                 END
-               ),
-               $4::jsonb,
-               $5
-             );`,
-            [layer.id, geomGeoJson, effectiveSourceSrid, propertiesJson, auth.user.id]
+            `WITH rows AS (
+               SELECT
+                 ST_GeomFromGeoJSON(g_txt) AS raw_geom,
+                 attr_json
+               FROM UNNEST($2::text[], $3::jsonb[]) AS t(g_txt, attr_json)
+             ),
+             transformed AS (
+               SELECT
+                 ST_Force2D(
+                   CASE
+                     WHEN ST_XMin(raw_geom) < -180 OR ST_XMax(raw_geom) > 180
+                       OR ST_YMin(raw_geom) < -90 OR ST_YMax(raw_geom) > 90
+                     THEN ST_Transform(ST_SetSRID(ST_MakeValid(raw_geom), COALESCE($4, 32749)), 4326)
+                     ELSE ST_SetSRID(ST_MakeValid(raw_geom), 4326)
+                   END
+                 ) AS final_geom,
+                 attr_json
+               FROM rows
+               WHERE raw_geom IS NOT NULL AND NOT ST_IsEmpty(raw_geom)
+             )
+             INSERT INTO public.fitur_peta (layer_id, geom, atribut, dibuat_oleh_user_id)
+             SELECT $1, final_geom, attr_json, $5
+             FROM transformed
+             WHERE final_geom IS NOT NULL AND NOT ST_IsEmpty(final_geom);`,
+            [layer.id, geojsons, propsList, effectiveSourceSrid, auth.user.id]
           );
         }
 
@@ -683,18 +758,24 @@ export async function POST(req: NextRequest) {
           north: ext.north,
         };
 
-        // Ambil info kebun (nama, wilayah, perusahaan) jika ada
+        // Ambil info kebun (nama, wilayah, perusahaan, komoditas) jika ada
         let namaKebun: string | null = null;
         let wilayahKebun: string | null = null;
         let perusahaanKebun: string | null = null;
+        let komoditasKebun: string | null = null;
         if (targetKebunId) {
-          const kNameRes = await client.query<{ nama_kebun: string; wilayah: string; perusahaan: string }>(
-            'SELECT nama_kebun, wilayah, perusahaan FROM public.kebun WHERE id = $1;',
-            [targetKebunId]
-          );
+          const kNameRes = await client.query<{
+            nama_kebun: string;
+            wilayah: string;
+            perusahaan: string;
+            komoditas: string | null;
+          }>('SELECT nama_kebun, wilayah, perusahaan, komoditas FROM public.kebun WHERE id = $1;', [
+            targetKebunId,
+          ]);
           namaKebun = kNameRes.rows[0]?.nama_kebun || null;
           wilayahKebun = kNameRes.rows[0]?.wilayah || null;
           perusahaanKebun = kNameRes.rows[0]?.perusahaan || null;
+          komoditasKebun = kNameRes.rows[0]?.komoditas || null;
         }
 
         createdLayers.push({
@@ -710,6 +791,7 @@ export async function POST(req: NextRequest) {
           nama_kebun: namaKebun,
           wilayah: wilayahKebun,
           perusahaan: perusahaanKebun,
+          komoditas: komoditasKebun,
           nama_dataset: namaData,
           bbox,
           extent: extentObj,

@@ -1,13 +1,19 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
+import { useAuth } from '@/components/AuthProvider';
+import { hasPermission } from '@/types/auth';
 import { MonitoringHeader } from './MonitoringHeader';
 import { MonitoringSidebar } from './MonitoringSidebar';
 import { MonitoringRightPanel } from './MonitoringRightPanel';
-import { MonitoringBottomPanel } from './MonitoringBottomPanel';
-import { MonitoringMap } from './MonitoringMap';
+import { MonitoringMap, type CompanyLocationPin } from './MonitoringMap';
 import { GisUploadModal } from './GisUploadModal';
 import SettingsModal from './SettingsModal';
+import { IconFilter } from '../GisIcons';
+import { IconMap, IconDashboard } from '@/components/icons';
+import { DEFAULT_PERUSAHAAN, matchPerusahaanFilter } from '@/lib/gis/rpnEntities';
+import { matchWilayahFilter } from '@/lib/gis/wilayah';
 import type { LayerPeta, LayerRaster, MonitoringStats } from '@/types/gis';
 
 interface KebunItem {
@@ -16,6 +22,8 @@ interface KebunItem {
   nama_kebun: string;
   perusahaan?: string | null;
   wilayah: string | null;
+  provinsi?: string | null;
+  kabupaten_kota?: string | null;
 }
 
 interface AfdelingItem {
@@ -31,8 +39,6 @@ interface BlokItem {
   kode_blok: string;
   nama_blok: string;
 }
-
-const DEFAULT_PERUSAHAAN = 'PT Perkebunan Nusantara I (Regional 4)';
 
 function normText(s?: string | null): string {
   return (s || '').trim().toLowerCase();
@@ -71,10 +77,16 @@ function computeUnionBbox(layerList: LayerPeta[]): [number, number, number, numb
 }
 
 export function MonitoringDashboard() {
-  // Panel toggles
+  const { user, loading: authLoading } = useAuth();
+  const canViewMap = hasPermission(user, 'lihat_peta');
+  const canUpload = hasPermission(user, 'upload_layer');
+  const canEdit = hasPermission(user, 'edit_data');
+  const canDelete = hasPermission(user, 'hapus_data');
+
+  // Panel toggles (desktop docked vs mobile overlay drawer)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
-  const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(true);
+  const [mobileDrawer, setMobileDrawer] = useState<'none' | 'filter' | 'kpi'>('none');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [deletedCount, setDeletedCount] = useState<number>(0);
@@ -86,7 +98,7 @@ export function MonitoringDashboard() {
   // Master lists
   const [kebunList, setKebunList] = useState<KebunItem[]>([]);
   const [afdelingList, setAfdelingList] = useState<AfdelingItem[]>([]);
-  const [blokList, setBlokList] = useState<BlokItem[]>([]);
+  const [, setBlokList] = useState<BlokItem[]>([]);
   const [rawLayers, setRawLayers] = useState<LayerPeta[]>([]);
   const [rasterLayers, setRasterLayers] = useState<LayerRaster[]>([]);
   const [stats, setStats] = useState<MonitoringStats | null>(null);
@@ -96,7 +108,6 @@ export function MonitoringDashboard() {
   const [selectedWilayah, setSelectedWilayah] = useState('');
   const [selectedKebunId, setSelectedKebunId] = useState<number | null>(null);
   const [selectedAfdelingId, setSelectedAfdelingId] = useState<number | null>(null);
-  const [selectedBlokId, setSelectedBlokId] = useState<number | null>(null);
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'ktg' | 'ks_gpa'>('all');
 
   // Active map and selection states
@@ -110,7 +121,10 @@ export function MonitoringDashboard() {
     try {
       const params: string[] = [];
       if (selectedKebunId) params.push(`kebun_id=${selectedKebunId}`);
-      else if (selectedWilayah) params.push(`wilayah=${encodeURIComponent(selectedWilayah)}`);
+      else {
+        if (selectedWilayah) params.push(`wilayah=${encodeURIComponent(selectedWilayah)}`);
+        if (selectedPerusahaan) params.push(`perusahaan=${encodeURIComponent(selectedPerusahaan)}`);
+      }
       if (selectedLayerId) params.push(`layer_id=${selectedLayerId}`);
       const statsQuery = params.length > 0 ? `?${params.join('&')}` : '';
 
@@ -156,16 +170,19 @@ export function MonitoringDashboard() {
     } catch (err) {
       console.error('Failed to refresh layers and stats:', err);
     }
-  }, [selectedWilayah, selectedKebunId, selectedLayerId]);
+  }, [selectedPerusahaan, selectedWilayah, selectedKebunId, selectedLayerId]);
 
-  // Reaktif perbarui statistik KPI saat filter Wilayah, Kebun, atau Layer berubah
+  // Reaktif perbarui statistik KPI saat filter Perusahaan, Wilayah, Kebun, atau Layer berubah
   useEffect(() => {
     let ignore = false;
     async function updateStats() {
       try {
         const params: string[] = [];
         if (selectedKebunId) params.push(`kebun_id=${selectedKebunId}`);
-        else if (selectedWilayah) params.push(`wilayah=${encodeURIComponent(selectedWilayah)}`);
+        else {
+          if (selectedWilayah) params.push(`wilayah=${encodeURIComponent(selectedWilayah)}`);
+          if (selectedPerusahaan) params.push(`perusahaan=${encodeURIComponent(selectedPerusahaan)}`);
+        }
         if (selectedLayerId) params.push(`layer_id=${selectedLayerId}`);
         const statsQuery = params.length > 0 ? `?${params.join('&')}` : '';
         const sRes = await fetch(`/api/stats${statsQuery}`);
@@ -181,20 +198,21 @@ export function MonitoringDashboard() {
     return () => {
       ignore = true;
     };
-  }, [selectedWilayah, selectedKebunId, selectedLayerId]);
+  }, [selectedPerusahaan, selectedWilayah, selectedKebunId, selectedLayerId]);
 
   useEffect(() => {
     let ignore = false;
     async function loadMasterData() {
       try {
         const statsQuery = selectedKebunId ? `?kebun_id=${selectedKebunId}` : '';
-        const [kRes, aRes, bRes, lRes, rRes, sRes] = await Promise.all([
+        const [kRes, aRes, bRes, lRes, rRes, sRes, hRes] = await Promise.all([
           fetch('/api/kebun'),
           fetch('/api/afdeling'),
           fetch('/api/blok'),
           fetch('/api/gis/layers'),
           fetch('/api/gis/rasters'),
           fetch(`/api/stats${statsQuery}`),
+          fetch('/api/gis/history'),
         ]);
 
         if (!ignore) {
@@ -247,6 +265,12 @@ export function MonitoringDashboard() {
             const sj = await sRes.json();
             setStats(sj.data || null);
           }
+          if (hRes.ok) {
+            const hj = await hRes.json();
+            if (hj.status === 'success' && hj.data?.counts) {
+              setDeletedCount(hj.data.counts.total_deleted || 0);
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to load master dashboard data:', err);
@@ -291,18 +315,20 @@ export function MonitoringDashboard() {
 
         // Filter Perusahaan
         if (targetPerusahaan) {
-          const layerPerusahaan = normText(
-            l.perusahaan || matchKebun?.perusahaan || DEFAULT_PERUSAHAAN
-          );
-          if (layerPerusahaan !== targetPerusahaan) {
+          const layerPerusahaan = l.perusahaan || matchKebun?.perusahaan || DEFAULT_PERUSAHAAN;
+          if (!matchPerusahaanFilter(layerPerusahaan, criteria.perusahaan || '')) {
             return false;
           }
         }
 
-        // Filter Wilayah
+        // Filter Wilayah (Provinsi)
         if (targetWilayah) {
-          const layerWilayah = normText(l.wilayah || matchKebun?.wilayah);
-          if (layerWilayah !== targetWilayah) {
+          const matchProv = matchWilayahFilter(
+            l.wilayah || matchKebun?.wilayah,
+            criteria.wilayah,
+            l.provinsi || matchKebun?.provinsi
+          );
+          if (!matchProv) {
             return false;
           }
         }
@@ -313,22 +339,8 @@ export function MonitoringDashboard() {
         }
 
         // Filter Afdeling:
-        // 1) Wajib cocok dengan kebun induk milik Afdeling terpilih (cegah Afdeling Bakalan mengarah ke Kebun Bandung!)
+        // Wajib cocok dengan kebun induk milik Afdeling terpilih (cegah Afdeling Bakalan mengarah ke Kebun Sarongge/Bandung)
         if (afdParentKebunId && Number(l.kebun_id) !== afdParentKebunId) {
-          return false;
-        }
-        // 2) Jika layer memang eksplisit milik afdeling DB lain, sembunyikan
-        if (
-          criteria.afdelingId &&
-          criteria.afdelingId > 0 &&
-          l.afdeling_id &&
-          Number(l.afdeling_id) !== Number(criteria.afdelingId)
-        ) {
-          return false;
-        }
-
-        // Filter Blok
-        if (criteria.blokId && l.blok_id && Number(l.blok_id) !== Number(criteria.blokId)) {
           return false;
         }
 
@@ -345,7 +357,6 @@ export function MonitoringDashboard() {
       wilayah: selectedWilayah,
       kebunId: selectedKebunId,
       afdelingId: selectedAfdelingId,
-      blokId: selectedBlokId,
     });
   }, [
     filterLayersByCriteria,
@@ -354,7 +365,6 @@ export function MonitoringDashboard() {
     selectedWilayah,
     selectedKebunId,
     selectedAfdelingId,
-    selectedBlokId,
   ]);
 
   // 2B. Gabungkan daftar Afdeling DB dengan klaster Afdeling otomatis hasil ekstraksi DBF (misal Afdeling A, B, C, Kebun Rakyat pada Kebun Sarongge)
@@ -388,20 +398,69 @@ export function MonitoringDashboard() {
     return merged;
   }, [afdelingList, stats?.afdeling_breakdown, selectedKebunId, displayedLayers, kebunList]);
 
-  // Handler Perusahaan (cascading reset + zoom ke cakupan perusahaan)
+  // Daftar lokasi/kebun yang dimiliki Perusahaan / Puslit terpilih untuk pin & kartu peta
+  const companyLocations = useMemo<CompanyLocationPin[]>(() => {
+    if (!selectedPerusahaan) return [];
+    const matchingKebun = kebunList.filter((k) =>
+      matchPerusahaanFilter(k.perusahaan, selectedPerusahaan)
+    );
+    const matchingLayers = filterLayersByCriteria(rawLayers, { perusahaan: selectedPerusahaan });
+
+    const byKebunId = new Map<number, CompanyLocationPin>();
+    for (const k of matchingKebun) {
+      const kLayers = matchingLayers.filter((l) => Number(l.kebun_id) === Number(k.id));
+      const unionBox = computeUnionBbox(kLayers);
+      const center: [number, number] | null = unionBox
+        ? [(unionBox[1] + unionBox[3]) / 2, (unionBox[0] + unionBox[2]) / 2]
+        : null;
+      byKebunId.set(Number(k.id), {
+        kebunId: Number(k.id),
+        namaKebun: k.nama_kebun,
+        wilayah: k.wilayah || kLayers[0]?.wilayah || 'Wilayah Operasional',
+        layerCount: kLayers.length,
+        totalFitur: kLayers.reduce((s, l) => s + Number(l.jumlah_fitur || 0), 0),
+        bbox: unionBox,
+        center,
+      });
+    }
+
+    // Sertakan juga layer yang belum terikat di kebunList jika ada
+    for (const l of matchingLayers) {
+      const kId = Number(l.kebun_id || -l.id);
+      if (!byKebunId.has(kId)) {
+        const unionBox = computeUnionBbox([l]);
+        const center: [number, number] | null = unionBox
+          ? [(unionBox[1] + unionBox[3]) / 2, (unionBox[0] + unionBox[2]) / 2]
+          : null;
+        byKebunId.set(kId, {
+          kebunId: kId,
+          namaKebun: l.nama_kebun || l.nama_layer,
+          wilayah: l.wilayah || 'Wilayah Operasional',
+          layerCount: 1,
+          totalFitur: Number(l.jumlah_fitur || 0),
+          bbox: unionBox,
+          center,
+        });
+      }
+    }
+
+    return Array.from(byKebunId.values());
+  }, [selectedPerusahaan, kebunList, rawLayers, filterLayersByCriteria]);
+
+  // Handler Perusahaan (cascading reset + zoom mencakup seluruh sebaran lokasi PT tersebut)
   const handleSelectPerusahaan = useCallback(
     (perusahaanVal: string) => {
       setSelectedPerusahaan(perusahaanVal);
       setSelectedWilayah('');
       setSelectedKebunId(null);
       setSelectedAfdelingId(null);
-      setSelectedBlokId(null);
       setSelectedFeatureId(null);
 
       const matching = filterLayersByCriteria(rawLayers, { perusahaan: perusahaanVal });
       const visible = matching.filter((l) => l.terlihat);
       const targetPool = visible.length > 0 ? visible : matching;
-      setSelectedLayerId(targetPool[0]?.id ?? null);
+      // Jika PT memiliki lebih dari 1 layer/kebun, biarkan selectedLayerId = null agar semua kebun dianalisis & ditampilkan bersama
+      setSelectedLayerId(targetPool.length === 1 ? targetPool[0].id : null);
       const bbox = computeUnionBbox(targetPool);
       if (bbox) {
         setFitBoundsTarget([...bbox]);
@@ -416,7 +475,6 @@ export function MonitoringDashboard() {
       setSelectedWilayah(wilayahVal);
       setSelectedKebunId(null);
       setSelectedAfdelingId(null);
-      setSelectedBlokId(null);
       setSelectedFeatureId(null);
 
       const matching = filterLayersByCriteria(rawLayers, {
@@ -446,7 +504,6 @@ export function MonitoringDashboard() {
     (id: number | null) => {
       setSelectedKebunId(id);
       setSelectedAfdelingId(null);
-      setSelectedBlokId(null);
       setSelectedFeatureId(null);
 
       const matching = filterLayersByCriteria(rawLayers, {
@@ -475,12 +532,14 @@ export function MonitoringDashboard() {
   const handleSelectAfdeling = useCallback(
     (id: number | null) => {
       setSelectedAfdelingId(id);
-      setSelectedBlokId(null);
       setSelectedFeatureId(null);
 
       if (id) {
         const afd = effectiveAfdelingList.find((a) => Number(a.id) === Number(id));
         const targetKebun = afd?.kebun_id ? Number(afd.kebun_id) : selectedKebunId;
+        if (targetKebun && targetKebun !== selectedKebunId) {
+          setSelectedKebunId(targetKebun);
+        }
         const matching = filterLayersByCriteria(rawLayers, {
           perusahaan: selectedPerusahaan,
           wilayah: selectedWilayah,
@@ -491,6 +550,13 @@ export function MonitoringDashboard() {
         const targetPool = visible.length > 0 ? visible : matching;
         if (targetPool.length > 0) {
           setSelectedLayerId(targetPool[0].id);
+          if (!targetPool[0].terlihat) {
+            setRawLayers((prev) =>
+              prev.map((l) => (l.id === targetPool[0].id ? { ...l, terlihat: true } : l))
+            );
+          }
+          const bbox = computeUnionBbox(targetPool);
+          if (bbox) setFitBoundsTarget([...bbox]);
         }
       } else {
         const matching = filterLayersByCriteria(rawLayers, {
@@ -523,7 +589,6 @@ export function MonitoringDashboard() {
     setSelectedWilayah('');
     setSelectedKebunId(null);
     setSelectedAfdelingId(null);
-    setSelectedBlokId(null);
     setSelectedFeatureId(null);
     const visible = rawLayers.filter((l) => l.terlihat);
     const pool = visible.length > 0 ? visible : rawLayers;
@@ -625,17 +690,16 @@ export function MonitoringDashboard() {
             setSelectedWilayah('');
             setSelectedKebunId(null);
             setSelectedAfdelingId(null);
-            setSelectedBlokId(null);
           }
         } else if (json.data?.kebunDeleted && json.data?.deletedKebunId) {
           setKebunList((prev) => prev.filter((k) => k.id !== json.data.deletedKebunId));
           if (selectedKebunId === json.data.deletedKebunId) {
             setSelectedKebunId(null);
             setSelectedAfdelingId(null);
-            setSelectedBlokId(null);
           }
         }
 
+        refreshStatsAndLayers();
         return true;
       } else {
         alert(json.detail || json.message || `Gagal menghapus layer "${layerName}".`);
@@ -664,14 +728,14 @@ export function MonitoringDashboard() {
           prev.filter(
             (l) =>
               !deletedLayerIds.includes(l.id) &&
-              (l.wilayah || '').trim().toLowerCase() !== wName
+              !matchWilayahFilter(l.wilayah, wilayahName, l.provinsi)
           )
         );
         setKebunList((prev) =>
           prev.filter(
             (k) =>
               !deletedKebunIds.includes(k.id) &&
-              (k.wilayah || '').trim().toLowerCase() !== wName
+              !matchWilayahFilter(k.wilayah, wilayahName, k.provinsi)
           )
         );
 
@@ -679,11 +743,11 @@ export function MonitoringDashboard() {
           setSelectedWilayah('');
           setSelectedKebunId(null);
           setSelectedAfdelingId(null);
-          setSelectedBlokId(null);
         }
         if (selectedLayerId && deletedLayerIds.includes(selectedLayerId)) {
           setSelectedLayerId(null);
         }
+        refreshStatsAndLayers();
         return true;
       } else {
         alert(json.detail || json.message || `Gagal menghapus data wilayah "${wilayahName}".`);
@@ -729,16 +793,72 @@ export function MonitoringDashboard() {
     refreshStatsAndLayers();
   };
 
+  const activeFilterCount =
+    (selectedPerusahaan ? 1 : 0) +
+    (selectedWilayah ? 1 : 0) +
+    (selectedKebunId ? 1 : 0) +
+    (selectedAfdelingId ? 1 : 0) +
+    (selectedStatusFilter !== 'all' ? 1 : 0);
+
+  const isFilteredByHierarchy = Boolean(
+    selectedPerusahaan || selectedWilayah || selectedKebunId || selectedAfdelingId
+  );
+  const headerCommodityLabel = isFilteredByHierarchy
+    ? stats?.komoditas || 'Semua Komoditas'
+    : 'Semua Komoditas';
+
+  if (!authLoading && user && !canViewMap) {
+    return (
+      <div className="h-dvh w-full overflow-hidden flex flex-col bg-[#0A0E1A] text-[#F0F6FC] font-sans antialiased select-none">
+        <MonitoringHeader
+          kebunList={kebunList}
+          selectedKebunId={selectedKebunId}
+          selectedStatusFilter={selectedStatusFilter}
+          onSelectStatusFilter={(val) => setSelectedStatusFilter(val as 'all' | 'ktg' | 'ks_gpa')}
+          activeCommodity={headerCommodityLabel}
+          onOpenUpload={() => {
+            if (canUpload) setIsUploadModalOpen(true);
+          }}
+        />
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-[#0D1322] border border-[#1E2942] rounded-2xl p-6 text-center shadow-2xl space-y-4">
+            <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <IconMap className="w-6 h-6" />
+            </div>
+            <div className="space-y-1.5">
+              <h2 className="text-base font-bold text-[#F0F6FC]">
+                Akses Lihat Peta Belum Diaktifkan
+              </h2>
+              <p className="text-xs text-[#8B9BB4] leading-relaxed">
+                Akun Anda ({user.nama}) saat ini tidak memiliki hak akses <strong className="text-[#00D2FF]">Lihat Peta &amp; Statistik Spasial</strong>. Hubungi Administrator untuk mengaktifkan izin akses peta pada akun Anda.
+              </p>
+            </div>
+            <div className="pt-2 flex items-center justify-center gap-3">
+              <Link
+                href="/dashboard"
+                className="px-4 py-2 rounded-lg bg-[#00D2FF] hover:bg-[#38BDF8] text-[#0A0E1A] font-bold text-xs transition-colors shadow-md shadow-[#00D2FF]/20"
+              >
+                Buka Halaman Profil &amp; Hak Akses
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#0A0E1A] text-[#F0F6FC] font-sans antialiased select-none">
+    <div className="h-dvh w-full overflow-hidden flex flex-col bg-[#0A0E1A] text-[#F0F6FC] font-sans antialiased select-none">
       {/* 1. TOP HEADER (RPN Monitoring Dashboard Style) */}
       <MonitoringHeader
         kebunList={kebunList}
         selectedKebunId={selectedKebunId}
         selectedStatusFilter={selectedStatusFilter}
         onSelectStatusFilter={(val) => setSelectedStatusFilter(val as 'all' | 'ktg' | 'ks_gpa')}
-        activeCommodity={stats?.komoditas}
-        onOpenUpload={() => setIsUploadModalOpen(true)}
+        activeCommodity={headerCommodityLabel}
+        onOpenUpload={() => {
+          if (canUpload) setIsUploadModalOpen(true);
+        }}
       />
 
       {/* 2. MAIN WORKSPACE BODY */}
@@ -747,9 +867,12 @@ export function MonitoringDashboard() {
         <MonitoringSidebar
           isOpen={isSidebarOpen}
           onToggle={() => setIsSidebarOpen((prev) => !prev)}
+          isMobileOpen={mobileDrawer === 'filter'}
+          onCloseMobile={() => setMobileDrawer('none')}
+          selectedStatusFilter={selectedStatusFilter}
+          onSelectStatusFilter={(val) => setSelectedStatusFilter(val as 'all' | 'ktg' | 'ks_gpa')}
           kebunList={kebunList}
           afdelingList={effectiveAfdelingList}
-          blokList={blokList}
           selectedPerusahaan={selectedPerusahaan}
           onSelectPerusahaan={handleSelectPerusahaan}
           selectedWilayah={selectedWilayah}
@@ -758,19 +881,23 @@ export function MonitoringDashboard() {
           onSelectKebun={handleSelectKebun}
           selectedAfdelingId={selectedAfdelingId}
           onSelectAfdeling={handleSelectAfdeling}
-          selectedBlokId={selectedBlokId}
-          onSelectBlok={setSelectedBlokId}
           onResetFilters={handleResetFilters}
           layers={displayedLayers}
           allLayers={rawLayers}
           selectedLayerId={selectedLayerId}
           onSelectLayer={(id) => setSelectedLayerId(id)}
           onToggleLayerVisibility={handleToggleLayerVisibility}
-          onZoomToLayer={(bbox) => setFitBoundsTarget([...bbox])}
-          onRenameLayer={handleRenameLayer}
-          onDeleteLayer={handleDeleteLayer}
-          onDeleteWilayah={handleDeleteWilayah}
-          onOpenSettings={() => setIsSettingsModalOpen(true)}
+          onZoomToLayer={(bbox) => {
+            setFitBoundsTarget([...bbox]);
+            setMobileDrawer('none');
+          }}
+          onRenameLayer={canEdit ? handleRenameLayer : undefined}
+          onDeleteLayer={canDelete ? handleDeleteLayer : undefined}
+          onDeleteWilayah={canDelete ? handleDeleteWilayah : undefined}
+          onOpenSettings={() => {
+            setMobileDrawer('none');
+            setIsSettingsModalOpen(true);
+          }}
           deletedCount={deletedCount}
         />
 
@@ -782,6 +909,12 @@ export function MonitoringDashboard() {
               layers={displayedLayers}
               rasterLayers={rasterLayers}
               stats={stats}
+              selectedPerusahaan={selectedPerusahaan}
+              companyLocations={companyLocations}
+              onSelectCompanyLocation={(kebunId) => {
+                if (kebunId > 0) handleSelectKebun(kebunId);
+              }}
+              onClearPerusahaan={() => handleSelectPerusahaan('')}
               selectedWilayah={selectedWilayah}
               selectedLayerId={selectedLayerId}
               statusFilter={selectedStatusFilter}
@@ -796,40 +929,21 @@ export function MonitoringDashboard() {
               onToggleLayerVisibility={handleToggleLayerVisibility}
               onToggleRasterVisibility={handleToggleRasterVisibility}
               onChangeRasterOpacity={handleChangeRasterOpacity}
-              onFeatureCreated={handleFeatureCreated}
-              onFeatureDeleted={handleFeatureDeleted}
+              onFeatureCreated={canEdit ? handleFeatureCreated : undefined}
+              onFeatureDeleted={canDelete ? handleFeatureDeleted : undefined}
+              canEdit={canEdit}
+              canDelete={canDelete}
               dataRevision={dataRevision}
             />
           </div>
-
-          {/* Bottom Information & Attribute Table Panel */}
-          <MonitoringBottomPanel
-            isOpen={isBottomPanelOpen}
-            onToggle={() => setIsBottomPanelOpen((prev) => !prev)}
-            layers={displayedLayers}
-            selectedLayerId={selectedLayerId}
-            onSelectLayer={(id) => setSelectedLayerId(id)}
-            selectedFeatureId={selectedFeatureId}
-            onSelectFeature={(id) => setSelectedFeatureId(id)}
-            onZoomToFeature={(bbox) => setFitBoundsTarget([...bbox])}
-            selectedKebunId={selectedKebunId}
-            selectedAfdelingId={selectedAfdelingId}
-            selectedBlokId={selectedBlokId}
-            kebunList={kebunList}
-            afdelingList={effectiveAfdelingList}
-            blokList={blokList}
-            stats={stats}
-            periodYear={selectedYear}
-            periodMonth={selectedMonth}
-            onFeatureDeleted={handleFeatureDeleted}
-            dataRevision={dataRevision}
-          />
         </div>
 
         {/* Right Information & KPI Panel */}
         <MonitoringRightPanel
           isOpen={isRightPanelOpen}
           onToggle={() => setIsRightPanelOpen((prev) => !prev)}
+          isMobileOpen={mobileDrawer === 'kpi'}
+          onCloseMobile={() => setMobileDrawer('none')}
           stats={stats}
           periodMonth={selectedMonth}
           periodYear={selectedYear}
@@ -837,6 +951,58 @@ export function MonitoringDashboard() {
           activeAfdelingName={effectiveAfdelingList.find((a) => a.id === selectedAfdelingId)?.nama_afdeling}
         />
       </div>
+
+      {/* Mobile & Tablet Bottom Navigation Bar (< lg) */}
+      <nav
+        aria-label="Navigasi Mobile GIS"
+        className="lg:hidden shrink-0 bg-[#0D1322] border-t border-[#1E2942] grid grid-cols-3 pb-[env(safe-area-inset-bottom)] z-[1160]"
+      >
+        <button
+          type="button"
+          onClick={() => setMobileDrawer('none')}
+          className={`min-h-[56px] flex flex-col items-center justify-center gap-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+            mobileDrawer === 'none'
+              ? 'text-[#00D2FF] bg-[#12192B]/80'
+              : 'text-[#8B9BB4] active:bg-[#12192B]'
+          }`}
+        >
+          <IconMap className="w-5 h-5" />
+          <span>Peta</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMobileDrawer((prev) => (prev === 'filter' ? 'none' : 'filter'))}
+          className={`min-h-[56px] relative flex flex-col items-center justify-center gap-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+            mobileDrawer === 'filter'
+              ? 'text-[#00D2FF] bg-[#12192B]/80'
+              : 'text-[#8B9BB4] active:bg-[#12192B]'
+          }`}
+        >
+          <div className="relative">
+            <IconFilter className="w-5 h-5" />
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1.5 -right-2 min-w-4 h-4 px-1 rounded-full bg-[#00D2FF] text-[#0A0E1A] text-[9px] font-extrabold flex items-center justify-center tabular-nums">
+                {activeFilterCount}
+              </span>
+            )}
+          </div>
+          <span>Filter</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMobileDrawer((prev) => (prev === 'kpi' ? 'none' : 'kpi'))}
+          className={`min-h-[56px] flex flex-col items-center justify-center gap-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+            mobileDrawer === 'kpi'
+              ? 'text-[#00D2FF] bg-[#12192B]/80'
+              : 'text-[#8B9BB4] active:bg-[#12192B]'
+          }`}
+        >
+          <IconDashboard className="w-5 h-5" />
+          <span>KPI</span>
+        </button>
+      </nav>
 
       {/* 3. UPLOAD & DATA MAPPING MODAL */}
       <GisUploadModal

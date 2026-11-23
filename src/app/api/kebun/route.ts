@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth/guard';
+import { catatAktivitas, requireUser } from '@/lib/auth/guard';
 import { Kebun } from '@/types/perkebunan';
+import { normalizePerusahaanName, inferRpnEntityFromContext } from '@/lib/gis/rpnEntities';
+import { parseWilayahHierarchy } from '@/lib/gis/wilayah';
 
 interface PgError extends Error {
   code?: string;
@@ -27,7 +29,7 @@ export async function GET(req: NextRequest) {
       }
 
       const res = await query<Kebun>(
-        'SELECT id, kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada FROM kebun WHERE id = $1;',
+        'SELECT id, kode_kebun, nama_kebun, perusahaan, wilayah, provinsi, kabupaten_kota, komoditas, keterangan, dibuat_pada FROM kebun WHERE id = $1;',
         [id]
       );
 
@@ -45,7 +47,16 @@ export async function GET(req: NextRequest) {
     }
 
     const res = await query<Kebun>(
-      'SELECT id, kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada FROM kebun ORDER BY nama_kebun ASC;'
+      `SELECT k.id, k.kode_kebun, k.nama_kebun, k.perusahaan, k.wilayah, k.provinsi, k.kabupaten_kota, k.komoditas, k.keterangan, k.dibuat_pada
+       FROM public.kebun k
+       WHERE EXISTS (
+         SELECT 1 FROM public.layer_peta lp
+         WHERE lp.kebun_id = k.id AND COALESCE(lp.is_deleted, FALSE) = FALSE
+       ) OR NOT EXISTS (
+         SELECT 1 FROM public.layer_peta lp
+         WHERE lp.kebun_id = k.id
+       )
+       ORDER BY k.nama_kebun ASC;`
     );
 
     return NextResponse.json({
@@ -64,7 +75,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/kebun
 export async function POST(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'edit_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -78,11 +89,23 @@ export async function POST(req: NextRequest) {
 
     const kode_kebun = typeof body.kode_kebun === 'string' ? body.kode_kebun.trim() : '';
     const nama_kebun = typeof body.nama_kebun === 'string' ? body.nama_kebun.trim() : '';
-    const perusahaan = typeof body.perusahaan === 'string' && body.perusahaan.trim()
-      ? body.perusahaan.trim()
-      : 'PT Perkebunan Nusantara I (Regional 4)';
-    const wilayah = typeof body.wilayah === 'string' ? body.wilayah.trim() : null;
+    let wilayah = typeof body.wilayah === 'string' ? body.wilayah.trim() : null;
+    let provinsi = typeof body.provinsi === 'string' ? body.provinsi.trim() : null;
+    let kabupaten_kota = typeof body.kabupaten_kota === 'string' ? body.kabupaten_kota.trim() : null;
+
+    if (!provinsi || !kabupaten_kota) {
+      const parsed = parseWilayahHierarchy(wilayah);
+      if (!provinsi && parsed.provinsi) provinsi = parsed.provinsi;
+      if (!kabupaten_kota && parsed.kabupatenKota) kabupaten_kota = parsed.kabupatenKota;
+    }
+    if (!wilayah && (provinsi || kabupaten_kota)) {
+      wilayah = kabupaten_kota && provinsi ? `${kabupaten_kota}, ${provinsi}` : (provinsi || kabupaten_kota);
+    }
+
     const komoditas = typeof body.komoditas === 'string' ? body.komoditas.trim() : null;
+    const perusahaan = typeof body.perusahaan === 'string' && body.perusahaan.trim()
+      ? normalizePerusahaanName(body.perusahaan)
+      : inferRpnEntityFromContext({ namaKebun: nama_kebun, wilayah, komoditas });
     const keterangan = typeof body.keterangan === 'string' ? body.keterangan.trim() : null;
 
     if (!kode_kebun) {
@@ -113,10 +136,16 @@ export async function POST(req: NextRequest) {
     }
 
     const insertRes = await query<Kebun>(
-      `INSERT INTO kebun (kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
-       RETURNING id, kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada;`,
-      [kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan]
+      `INSERT INTO kebun (kode_kebun, nama_kebun, perusahaan, wilayah, provinsi, kabupaten_kota, komoditas, keterangan, dibuat_pada)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       RETURNING id, kode_kebun, nama_kebun, perusahaan, wilayah, provinsi, kabupaten_kota, komoditas, keterangan, dibuat_pada;`,
+      [kode_kebun, nama_kebun, perusahaan, wilayah, provinsi, kabupaten_kota, komoditas, keterangan]
+    );
+
+    await catatAktivitas(
+      auth.user.id,
+      'tambah_kebun',
+      `Menambahkan unit kebun "${nama_kebun}" (${kode_kebun}) di wilayah ${wilayah || '-'}.`
     );
 
     return NextResponse.json(
@@ -144,7 +173,7 @@ export async function POST(req: NextRequest) {
 
 // PATCH /api/kebun
 export async function PATCH(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'edit_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -217,9 +246,24 @@ export async function PATCH(req: NextRequest) {
       values.push(typeof body.perusahaan === 'string' ? body.perusahaan.trim() : null);
     }
 
-    if (body.wilayah !== undefined) {
+    if (body.wilayah !== undefined || body.provinsi !== undefined || body.kabupaten_kota !== undefined) {
+      const rawWil = typeof body.wilayah === 'string' ? body.wilayah.trim() : null;
+      let prov = typeof body.provinsi === 'string' ? body.provinsi.trim() : null;
+      let kab = typeof body.kabupaten_kota === 'string' ? body.kabupaten_kota.trim() : null;
+
+      if (!prov || !kab) {
+        const parsed = parseWilayahHierarchy(rawWil);
+        if (!prov && parsed.provinsi) prov = parsed.provinsi;
+        if (!kab && parsed.kabupatenKota) kab = parsed.kabupatenKota;
+      }
+      const fullWil = rawWil || (kab && prov ? `${kab}, ${prov}` : (prov || kab));
+
       updates.push(`wilayah = $${paramIndex++}`);
-      values.push(typeof body.wilayah === 'string' ? body.wilayah.trim() : null);
+      values.push(fullWil);
+      updates.push(`provinsi = $${paramIndex++}`);
+      values.push(prov);
+      updates.push(`kabupaten_kota = $${paramIndex++}`);
+      values.push(kab);
     }
 
     if (body.komoditas !== undefined) {
@@ -244,15 +288,22 @@ export async function PATCH(req: NextRequest) {
       UPDATE kebun 
       SET ${updates.join(', ')} 
       WHERE id = $${paramIndex}
-      RETURNING id, kode_kebun, nama_kebun, perusahaan, wilayah, komoditas, keterangan, dibuat_pada;
+      RETURNING id, kode_kebun, nama_kebun, perusahaan, wilayah, provinsi, kabupaten_kota, komoditas, keterangan, dibuat_pada;
     `;
 
     const updateRes = await query<Kebun>(updateSql, values);
+    const updatedRow = updateRes.rows[0];
+
+    await catatAktivitas(
+      auth.user.id,
+      'ubah_kebun',
+      `Memperbarui data unit kebun "${updatedRow.nama_kebun}" (${updatedRow.kode_kebun}).`
+    );
 
     return NextResponse.json({
       status: 'success',
       message: 'Data kebun berhasil diperbarui.',
-      data: updateRes.rows[0],
+      data: updatedRow,
     });
   } catch (err: unknown) {
     const pgErr = err as PgError;
@@ -271,7 +322,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE /api/kebun?id={id}
 export async function DELETE(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'hapus_data', requireJson: false });
   if (auth.response) return auth.response;
 
   try {
@@ -304,6 +355,12 @@ export async function DELETE(req: NextRequest) {
         { status: 404 }
       );
     }
+
+    await catatAktivitas(
+      auth.user.id,
+      'hapus_kebun',
+      `Menghapus unit kebun "${delRes.rows[0].nama_kebun}" (${delRes.rows[0].kode_kebun}).`
+    );
 
     return NextResponse.json({
       status: 'success',

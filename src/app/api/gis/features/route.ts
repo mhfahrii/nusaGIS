@@ -136,7 +136,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const auth = await requireUser(req);
+  const auth = await requireUser(req, { requireJson: false, permission: 'hapus_data' });
   if (auth.response) return auth.response;
 
   try {

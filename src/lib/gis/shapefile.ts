@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import type { FeatureCollection, Geometry } from 'geojson';
 import type { ExtractedShapefile, ExtentBox } from '@/types/gis';
+import { inferRpnEntityFromContext } from './rpnEntities';
 
 // Polyfill self untuk shpjs di lingkungan Node.js server
 if (typeof globalThis.self === 'undefined') {
@@ -22,10 +23,12 @@ const DEFAULT_PALETTE = [
   '#f43f5e', // rose
 ];
 
-export const MAX_ZIP_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
-export const MAX_UNCOMPRESSED_BYTES = 150 * 1024 * 1024; // 150 MB
-export const MAX_ZIP_ENTRIES = 100;
+export const MAX_ZIP_SIZE_BYTES = 250 * 1024 * 1024; // 250 MB
+export const MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024; // 500 MB
+export const MAX_ZIP_ENTRIES = 2000;
 export const MAX_COMPRESSION_RATIO = 150;
+
+export const SHAPEFILE_COMPONENT_EXTENSIONS = new Set(['.shp', '.dbf', '.shx', '.prj', '.cpg']);
 
 const FORBIDDEN_EXTENSIONS = new Set([
   '.exe',
@@ -150,12 +153,14 @@ export function bundleLooseFilesToZip(files: UploadedFileItem[]): {
   primaryName: string;
   shpCount: number;
 } {
+  // Hanya kemas file komponen Shapefile inti (.shp, .dbf, .shx, .prj, .cpg)
+  // agar file non-SHP besar di dalam folder (citra .tif/.ecw, .pdf, .ovr, .mxd) tidak membengkakkan ZIP
   const validFiles = files.filter((f) => {
     const baseName = path.basename(f.name).toLowerCase();
     if (IGNORED_FILES.has(baseName)) return false;
     const ext = path.extname(f.name).toLowerCase();
-    if (IGNORED_EXTENSIONS.has(ext)) return false;
-    return !FORBIDDEN_EXTENSIONS.has(ext);
+    if (IGNORED_EXTENSIONS.has(ext) || FORBIDDEN_EXTENSIONS.has(ext)) return false;
+    return SHAPEFILE_COMPONENT_EXTENSIONS.has(ext);
   });
 
   const shpFiles = validFiles.filter((f) => f.name.toLowerCase().endsWith('.shp'));
@@ -234,9 +239,26 @@ async function extractAndValidateZipToTempDir(
     );
   }
 
-  const totalEntries = buffer.readUInt16LE(eocdOffset + 10);
-  const cdSize = buffer.readUInt32LE(eocdOffset + 12);
-  const cdOffset = buffer.readUInt32LE(eocdOffset + 16);
+  let totalEntries = buffer.readUInt16LE(eocdOffset + 10);
+  let cdSize = buffer.readUInt32LE(eocdOffset + 12);
+  let cdOffset = buffer.readUInt32LE(eocdOffset + 16);
+
+  // Resolve 64-bit directory metadata when ZIP64 sentinels are present (common for Windows/Drive exports)
+  if (totalEntries === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
+    const locOffset = eocdOffset - 20;
+    if (locOffset >= 0 && buffer.readUInt32LE(locOffset) === 0x07064b50) {
+      const zip64EocdOffset = Number(buffer.readBigUInt64LE(locOffset + 8));
+      if (
+        zip64EocdOffset >= 0 &&
+        zip64EocdOffset + 56 <= buffer.length &&
+        buffer.readUInt32LE(zip64EocdOffset) === 0x06064b50
+      ) {
+        totalEntries = Number(buffer.readBigUInt64LE(zip64EocdOffset + 32));
+        cdSize = Number(buffer.readBigUInt64LE(zip64EocdOffset + 40));
+        cdOffset = Number(buffer.readBigUInt64LE(zip64EocdOffset + 48));
+      }
+    }
+  }
 
   if (totalEntries === 0) {
     throw new ShapefileValidationError('Arsip ZIP kosong.', 'EMPTY_ZIP');
@@ -263,22 +285,53 @@ async function extractAndValidateZipToTempDir(
     }
 
     const compressionMethod = buffer.readUInt16LE(ptr + 10);
-    const compressedSize = buffer.readUInt32LE(ptr + 20);
-    const uncompressedSize = buffer.readUInt32LE(ptr + 24);
+    let compressedSize = buffer.readUInt32LE(ptr + 20);
+    let uncompressedSize = buffer.readUInt32LE(ptr + 24);
     const fileNameLen = buffer.readUInt16LE(ptr + 28);
     const extraLen = buffer.readUInt16LE(ptr + 30);
     const commentLen = buffer.readUInt16LE(ptr + 32);
-    const localHeaderOffset = buffer.readUInt32LE(ptr + 42);
+    let localHeaderOffset = buffer.readUInt32LE(ptr + 42);
 
     const rawName = buffer.toString('utf8', ptr + 46, ptr + 46 + fileNameLen);
-    ptr += 46 + fileNameLen + extraLen + commentLen;
+    const extraStart = ptr + 46 + fileNameLen;
+    const extraEnd = extraStart + extraLen;
 
-    // Abaikan direktori atau metadata macOS __MACOSX
+    if (
+      (uncompressedSize === 0xffffffff ||
+        compressedSize === 0xffffffff ||
+        localHeaderOffset === 0xffffffff) &&
+      extraEnd <= buffer.length
+    ) {
+      let exPtr = extraStart;
+      while (exPtr + 4 <= extraEnd) {
+        const headerId = buffer.readUInt16LE(exPtr);
+        const dataSize = buffer.readUInt16LE(exPtr + 2);
+        const dataPtr = exPtr + 4;
+        if (headerId === 0x0001 && dataPtr + dataSize <= extraEnd) {
+          let fieldPtr = dataPtr;
+          if (uncompressedSize === 0xffffffff && fieldPtr + 8 <= dataPtr + dataSize) {
+            uncompressedSize = Number(buffer.readBigUInt64LE(fieldPtr));
+            fieldPtr += 8;
+          }
+          if (compressedSize === 0xffffffff && fieldPtr + 8 <= dataPtr + dataSize) {
+            compressedSize = Number(buffer.readBigUInt64LE(fieldPtr));
+            fieldPtr += 8;
+          }
+          if (localHeaderOffset === 0xffffffff && fieldPtr + 8 <= dataPtr + dataSize) {
+            localHeaderOffset = Number(buffer.readBigUInt64LE(fieldPtr));
+          }
+          break;
+        }
+        exPtr = dataPtr + dataSize;
+      }
+    }
+
+    ptr = extraEnd + commentLen;
+
     if (rawName.endsWith('/') || rawName.endsWith('\\') || rawName.includes('__MACOSX')) {
       continue;
     }
 
-    // Pencegahan ZIP Slip (Path Traversal) dan sanitasi path Windows
     const sanitizedRaw = rawName.replace(/^[a-zA-Z]:[\\/]/, '').replace(/\\/g, '/').replace(/^\/+/, '');
     const normalizedRel = path.posix.normalize(sanitizedRaw);
     if (
@@ -294,7 +347,6 @@ async function extractAndValidateZipToTempDir(
       );
     }
 
-    // Tolak file executable / script berbahaya
     const ext = path.posix.extname(normalizedRel).toLowerCase();
     if (FORBIDDEN_EXTENSIONS.has(ext)) {
       throw new ShapefileValidationError(
@@ -303,7 +355,11 @@ async function extractAndValidateZipToTempDir(
       );
     }
 
-    // Pencegahan ZIP Bomb (rasio kompresi ekstrem & batas ukuran total ekstraksi)
+    // Skip non-Shapefile assets (orthophoto/PDF/cache) before inflating so Drive archives stay fast and under size caps
+    if (!SHAPEFILE_COMPONENT_EXTENSIONS.has(ext)) {
+      continue;
+    }
+
     if (compressedSize > 0 && uncompressedSize / compressedSize > MAX_COMPRESSION_RATIO) {
       if (uncompressedSize > 10 * 1024 * 1024) {
         throw new ShapefileValidationError(
@@ -316,7 +372,7 @@ async function extractAndValidateZipToTempDir(
     totalUncompressed += uncompressedSize;
     if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) {
       throw new ShapefileValidationError(
-        `Total ukuran ekstraksi ZIP melebihi batas aman (${MAX_UNCOMPRESSED_BYTES / (1024 * 1024)} MB).`,
+        `Total ukuran ekstraksi Shapefile ZIP melebihi batas aman (${MAX_UNCOMPRESSED_BYTES / (1024 * 1024)} MB).`,
         'UNCOMPRESSED_TOO_LARGE'
       );
     }
@@ -597,6 +653,8 @@ export function extractCleanKebunName(rawCandidate?: string | null): string {
     .join(' ');
 }
 
+import { parseWilayahHierarchy } from './wilayah';
+
 /**
  * Deteksi otomatis wilayah perkebunan dari koordinat spasial (Lat/Lng WGS 84)
  * atau petunjuk nama folder/file.
@@ -605,111 +663,92 @@ export function detectWilayahFromCoordsAndName(
   lng?: number,
   lat?: number,
   nameHint?: string
-): { wilayah: string; defaultPerusahaan: string } {
+): { wilayah: string; provinsi: string; kabupatenKota: string; defaultPerusahaan: string } {
   const hint = (nameHint || '').toLowerCase();
+  let wilayah = 'Wilayah Operasional Perkebunan';
 
   // 1. Text hint matching
   if (
     hint.includes('cibeureum') ||
     hint.includes('cibereum') ||
     hint.includes('pangalengan') ||
-    hint.includes('bandung')
+    hint.includes('bandung') ||
+    hint.includes('gambung')
   ) {
-    return {
-      wilayah: 'Kabupaten Bandung, Jawa Barat',
-      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-    };
-  }
-  if (
+    wilayah = 'Kabupaten Bandung, Jawa Barat';
+  } else if (
     hint.includes('sarongge') ||
     hint.includes('gedeh') ||
     hint.includes('cianjur') ||
     hint.includes('pacet')
   ) {
-    return {
-      wilayah: 'Kabupaten Cianjur, Jawa Barat',
-      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-    };
-  }
-  if (
+    wilayah = 'Kabupaten Cianjur, Jawa Barat';
+  } else if (
     hint.includes('bakalan') ||
     hint.includes('pasuruan') ||
     hint.includes('kraton') ||
-    hint.includes('purwosari')
+    hint.includes('purwosari') ||
+    hint.includes('pakuncen')
   ) {
-    return {
-      wilayah: 'Pasuruan, Jawa Timur',
-      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-    };
-  }
-  if (hint.includes('malang') || hint.includes('batu') || hint.includes('wonosari')) {
-    return {
-      wilayah: 'Kabupaten Malang, Jawa Timur',
-      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-    };
-  }
-  if (hint.includes('jember') || hint.includes('banyuwangi') || hint.includes('kediri')) {
-    return {
-      wilayah: 'Jawa Timur',
-      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-    };
-  }
-  if (hint.includes('subang') || hint.includes('garut') || hint.includes('ciwidey') || hint.includes('bogor')) {
-    return {
-      wilayah: 'Jawa Barat',
-      defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-    };
+    wilayah = 'Pasuruan, Jawa Timur';
+  } else if (hint.includes('sragi') || hint.includes('pekalongan')) {
+    wilayah = 'Kabupaten Pekalongan, Jawa Tengah';
+  } else if (hint.includes('asahan') || hint.includes('teluk dalam') || hint.includes('teluk_dlm') || hint.includes('teluk dalan')) {
+    wilayah = 'Kabupaten Asahan, Sumatera Utara';
+  } else if (hint.includes('deli serdang') || hint.includes('aek pancur') || hint.includes('sei aek pancur') || hint.includes('marihat')) {
+    wilayah = 'Kabupaten Deli Serdang, Sumatera Utara';
+  } else if (hint.includes('malang') || hint.includes('batu') || hint.includes('wonosari')) {
+    wilayah = 'Kabupaten Malang, Jawa Timur';
+  } else if (hint.includes('jember') || hint.includes('kaliwining')) {
+    wilayah = 'Kabupaten Jember, Jawa Timur';
+  } else if (hint.includes('banyuwangi') || hint.includes('kediri')) {
+    wilayah = 'Jawa Timur';
+  } else if (hint.includes('subang') || hint.includes('garut') || hint.includes('ciwidey') || hint.includes('bogor')) {
+    wilayah = 'Jawa Barat';
+  } else if (hint.includes('medan') || hint.includes('simalungun')) {
+    wilayah = 'Sumatera Utara';
+  } else if (hint.includes('sembawa') || hint.includes('palembang')) {
+    wilayah = 'Sumatera Selatan';
+  } else if (typeof lng === 'number' && typeof lat === 'number' && isFinite(lng) && isFinite(lat)) {
+    // 2. Spatial coordinates boundary matching (WGS 84)
+    if (lng >= 99.3 && lng <= 100.1 && lat >= 2.5 && lat <= 3.3) {
+      wilayah = 'Kabupaten Asahan, Sumatera Utara';
+    } else if (lng >= 98.4 && lng <= 99.2 && lat >= 3.1 && lat <= 3.8) {
+      wilayah = 'Kabupaten Deli Serdang, Sumatera Utara';
+    } else if (lng >= 107.3 && lng <= 107.9 && lat >= -7.4 && lat <= -6.8) {
+      wilayah = 'Kabupaten Bandung, Jawa Barat';
+    } else if (lng >= 106.8 && lng < 107.3 && lat >= -7.3 && lat <= -6.6) {
+      wilayah = 'Kabupaten Cianjur, Jawa Barat';
+    } else if (lng >= 112.5 && lng <= 113.3 && lat >= -8.0 && lat <= -7.4) {
+      wilayah = 'Pasuruan, Jawa Timur';
+    } else if (lng >= 109.4 && lng <= 109.9 && lat >= -7.2 && lat <= -6.8) {
+      wilayah = 'Kabupaten Pekalongan, Jawa Tengah';
+    } else if (lng >= 112.3 && lng <= 112.9 && lat >= -8.4 && lat < -7.9) {
+      wilayah = 'Kabupaten Malang, Jawa Timur';
+    } else if (lng >= 113.4 && lng <= 114.0 && lat >= -8.5 && lat <= -7.9) {
+      wilayah = 'Kabupaten Jember, Jawa Timur';
+    } else if (lng >= 106.3 && lng <= 108.8 && lat >= -7.8 && lat <= -5.9) {
+      wilayah = 'Jawa Barat';
+    } else if (lng >= 108.9 && lng <= 111.6 && lat >= -8.3 && lat <= -6.4) {
+      wilayah = 'Jawa Tengah';
+    } else if (lng >= 111.0 && lng <= 114.6 && lat >= -8.8 && lat <= -6.7) {
+      wilayah = 'Jawa Timur';
+    } else if (lng >= 97.0 && lng <= 100.7 && lat >= 0.2 && lat <= 4.4) {
+      wilayah = 'Sumatera Utara';
+    }
   }
 
-  // 2. Spatial coordinates boundary matching (jika lng dan lat terdefinisi dalam derajat WGS 84)
-  if (typeof lng === 'number' && typeof lat === 'number' && isFinite(lng) && isFinite(lat)) {
-    // Bandung & sekitarnya: 107.3 .. 107.9, -7.4 .. -6.8
-    if (lng >= 107.3 && lng <= 107.9 && lat >= -7.4 && lat <= -6.8) {
-      return {
-        wilayah: 'Kabupaten Bandung, Jawa Barat',
-        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-      };
-    }
-    // Cianjur & sekitarnya: 106.8 .. 107.3, -7.3 .. -6.6
-    if (lng >= 106.8 && lng < 107.3 && lat >= -7.3 && lat <= -6.6) {
-      return {
-        wilayah: 'Kabupaten Cianjur, Jawa Barat',
-        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-      };
-    }
-    // Pasuruan & Jawa Timur bagian timur: 112.5 .. 113.3, -8.0 .. -7.4
-    if (lng >= 112.5 && lng <= 113.3 && lat >= -8.0 && lat <= -7.4) {
-      return {
-        wilayah: 'Pasuruan, Jawa Timur',
-        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-      };
-    }
-    // Malang & sekitarnya: 112.3 .. 112.9, -8.4 .. -7.9
-    if (lng >= 112.3 && lng <= 112.9 && lat >= -8.4 && lat < -7.9) {
-      return {
-        wilayah: 'Kabupaten Malang, Jawa Timur',
-        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-      };
-    }
-    // Umum Jawa Barat: 106.3 .. 108.8, -7.8 .. -5.9
-    if (lng >= 106.3 && lng <= 108.8 && lat >= -7.8 && lat <= -5.9) {
-      return {
-        wilayah: 'Jawa Barat',
-        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-      };
-    }
-    // Umum Jawa Timur: 111.0 .. 114.6, -8.8 .. -6.7
-    if (lng >= 111.0 && lng <= 114.6 && lat >= -8.8 && lat <= -6.7) {
-      return {
-        wilayah: 'Jawa Timur',
-        defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
-      };
-    }
-  }
+  const parsed = parseWilayahHierarchy(wilayah);
+  const defaultPerusahaan = inferRpnEntityFromContext({
+    layerName: nameHint,
+    wilayah,
+  });
 
   return {
-    wilayah: 'Wilayah Operasional Perkebunan',
-    defaultPerusahaan: 'PT Perkebunan Nusantara I (Regional 4)',
+    wilayah: parsed.displayWilayah,
+    provinsi: parsed.provinsi,
+    kabupatenKota: parsed.kabupatenKota,
+    defaultPerusahaan,
   };
 }
 
@@ -754,13 +793,26 @@ export async function parseShapefileZip(
       );
     }
 
-    const shpModule = await import('shpjs');
+    const shpRaw = await import('shpjs');
+    const shpModule =
+      typeof shpRaw.parseShp === 'function'
+        ? shpRaw
+        : ((shpRaw as unknown as { default?: typeof shpRaw }).default ?? shpRaw);
     const parseShp = shpModule.parseShp;
     const parseDbf = shpModule.parseDbf;
     const combine = shpModule.combine;
 
     const results: ExtractedShapefile[] = [];
     const seenLayerNames = new Map<string, number>();
+    const layerErrors: string[] = [];
+
+    const safeParseDbf = (dbfBuf: Buffer, cpgBuf?: Buffer) => {
+      try {
+        return parseDbf(dbfBuf, cpgBuf || Buffer.from('UTF-8'));
+      } catch {
+        return parseDbf(dbfBuf, Buffer.from('UTF-8'));
+      }
+    };
 
     for (let i = 0; i < shpKeys.length; i++) {
       const shpRelKey = shpKeys[i];
@@ -769,6 +821,7 @@ export async function parseShapefileZip(
       const parentDir = path.posix.dirname(shpRelKey);
       const folderName = parentDir && parentDir !== '.' ? parentDir : undefined;
 
+      try {
       const shpDiskPath = extractedMap.get(shpRelKey);
       let dbfDiskPath = extractedMap.get(`${baseRelKey}.dbf`);
       const prjDiskPath = extractedMap.get(`${baseRelKey}.prj`);
@@ -842,13 +895,30 @@ export async function parseShapefileZip(
         }
       }
 
-      const geometries = parseShp(shpBuf, prjWkt);
+      // Parse geometri dengan fallback otomatis bila .prj ESRI tidak dikenali proj4
+      let geometries: Geometry[];
+      try {
+        geometries = parseShp(shpBuf, prjWkt) as Geometry[];
+      } catch {
+        const fallbackSmart = detectSmartCrsFromShpHeader(
+          shpBuf,
+          `${folderName || ''} ${baseFileName}`,
+          options?.fallbackCrs
+        );
+        try {
+          geometries = parseShp(shpBuf, fallbackSmart.wkt) as Geometry[];
+          crsAsal = `${fallbackSmart.crsName} (Fallback CRS)`;
+          sridAsal = fallbackSmart.srid;
+        } catch {
+          geometries = parseShp(shpBuf) as Geometry[];
+        }
+      }
 
       let collection: FeatureCollection<Geometry, Record<string, unknown>>;
       if (dbfDiskPath) {
         const dbfBuf = await fs.readFile(dbfDiskPath);
         const cpgBuf = cpgDiskPath ? await fs.readFile(cpgDiskPath) : undefined;
-        const dbfProperties = parseDbf(dbfBuf, cpgBuf || Buffer.from('UTF-8'));
+        const dbfProperties = safeParseDbf(dbfBuf, cpgBuf);
         collection = combine([geometries, dbfProperties]) as FeatureCollection<
           Geometry,
           Record<string, unknown>
@@ -856,7 +926,7 @@ export async function parseShapefileZip(
       } else {
         collection = {
           type: 'FeatureCollection',
-          features: (geometries as Geometry[]).map((geom, idx) => ({
+          features: geometries.map((geom, idx) => ({
             type: 'Feature',
             id: idx + 1,
             geometry: geom,
@@ -884,11 +954,11 @@ export async function parseShapefileZip(
           `${folderName || ''} ${baseFileName}`
         );
         try {
-          const reGeom = parseShp(shpBuf, smart.wkt);
+          const reGeom = parseShp(shpBuf, smart.wkt) as Geometry[];
           if (dbfDiskPath) {
             const dbfBuf = await fs.readFile(dbfDiskPath);
             const cpgBuf = cpgDiskPath ? await fs.readFile(cpgDiskPath) : undefined;
-            const dbfProperties = parseDbf(dbfBuf, cpgBuf || Buffer.from('UTF-8'));
+            const dbfProperties = safeParseDbf(dbfBuf, cpgBuf);
             collection = combine([reGeom, dbfProperties]) as FeatureCollection<
               Geometry,
               Record<string, unknown>
@@ -896,7 +966,7 @@ export async function parseShapefileZip(
           } else {
             collection = {
               type: 'FeatureCollection',
-              features: (reGeom as Geometry[]).map((geom, idx) => ({
+              features: reGeom.map((geom, idx) => ({
                 type: 'Feature',
                 id: idx + 1,
                 geometry: geom,
@@ -999,6 +1069,18 @@ export async function parseShapefileZip(
         bbox,
         extent,
       });
+      } catch (layerErr) {
+        const msg = layerErr instanceof Error ? layerErr.message : String(layerErr);
+        console.warn(`Lewati layer "${baseFileName}.shp" karena gagal diparse:`, msg);
+        layerErrors.push(`${baseFileName}.shp: ${msg}`);
+      }
+    }
+
+    if (results.length === 0 && layerErrors.length > 0) {
+      throw new ShapefileValidationError(
+        `Tidak ada layer Shapefile yang berhasil dibaca (${layerErrors.slice(0, 2).join('; ')}).`,
+        'PARSE_FAILED'
+      );
     }
 
     return results;

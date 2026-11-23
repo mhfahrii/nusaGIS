@@ -2,12 +2,18 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { query } from '@/lib/db';
 import { checkCsrf } from '@/lib/auth/csrf';
 import { getDummyHash, verifyPassword } from '@/lib/auth/password';
-import { createSessionToken, SESSION_COOKIE, sessionCookieOptions } from '@/lib/auth/session';
+import {
+  createSessionToken,
+  REMEMBER_ME_MAX_AGE_SECONDS,
+  SESSION_COOKIE,
+  SESSION_MAX_AGE_SECONDS,
+  sessionCookieOptions,
+} from '@/lib/auth/session';
 import { catatAktivitas, KOLOM_PENGGUNA_PUBLIK } from '@/lib/auth/guard';
 import { clearLoginFailures, isLoginBlocked, recordLoginFailure } from '@/lib/auth/rate-limit';
-import type { PenggunaPublik } from '@/types/auth';
+import { normalizeHakAkses, type PenggunaPublik } from '@/types/auth';
 
-const PESAN_KREDENSIAL_SALAH = 'Email atau password salah.';
+const PESAN_KREDENSIAL_SALAH = 'User Name / Email atau password salah.';
 
 function errorResponse(status: number, message: string, headers?: HeadersInit) {
   return NextResponse.json({ status: 'error', message }, { status, headers });
@@ -19,18 +25,27 @@ export async function POST(req: NextRequest) {
   if (csrfError) return errorResponse(403, csrfError);
 
   const body = await req.json().catch(() => null);
-  const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+  const rawIdentifier =
+    typeof body?.identifier === 'string'
+      ? body.identifier
+      : typeof body?.username === 'string'
+      ? body.username
+      : typeof body?.email === 'string'
+      ? body.email
+      : '';
+  const identifier = rawIdentifier.trim().toLowerCase();
   const password = typeof body?.password === 'string' ? body.password : '';
+  const rememberMe = Boolean(body?.rememberMe);
 
-  if (!email || !password) {
-    return errorResponse(400, 'Email dan password wajib diisi.');
+  if (!identifier || !password) {
+    return errorResponse(400, 'User Name dan password wajib diisi.');
   }
-  if (email.length > 254 || password.length > 1024) {
+  if (identifier.length > 254 || password.length > 1024) {
     return errorResponse(400, 'Input terlalu panjang.');
   }
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'lokal';
-  const limiterKey = `${ip}|${email}`;
+  const limiterKey = `${ip}|${identifier}`;
   const retryAfter = isLoginBlocked(limiterKey);
   if (retryAfter > 0) {
     return errorResponse(
@@ -42,12 +57,16 @@ export async function POST(req: NextRequest) {
 
   try {
     const res = await query<PenggunaPublik & { kata_sandi_hash: string }>(
-      `SELECT ${KOLOM_PENGGUNA_PUBLIK}, kata_sandi_hash FROM pengguna WHERE LOWER(email) = $1 LIMIT 1;`,
-      [email]
+      `SELECT ${KOLOM_PENGGUNA_PUBLIK}, kata_sandi_hash
+       FROM pengguna
+       WHERE LOWER(email) = $1 OR LOWER(nama) = $1
+       ORDER BY CASE WHEN LOWER(email) = $1 THEN 0 ELSE 1 END
+       LIMIT 1;`,
+      [identifier]
     );
     const row = res.rows[0];
 
-    // Tetap jalankan bcrypt meski email tidak ada agar waktu respons seragam.
+    // Tetap jalankan bcrypt meski user tidak ada agar waktu respons seragam.
     const passwordValid = await verifyPassword(password, row?.kata_sandi_hash ?? (await getDummyHash()));
 
     if (!row || !passwordValid) {
@@ -69,14 +88,17 @@ export async function POST(req: NextRequest) {
       email: row.email,
       peran: row.peran,
       aktif: row.aktif,
+      hak_akses: normalizeHakAkses(row.hak_akses, row.peran),
+      foto_profil: row.foto_profil ?? null,
       dibuat_pada: row.dibuat_pada,
     };
 
-    const token = await createSessionToken(user.id, user.peran);
+    const maxAge = rememberMe ? REMEMBER_ME_MAX_AGE_SECONDS : SESSION_MAX_AGE_SECONDS;
+    const token = await createSessionToken(user.id, user.peran, maxAge);
     await catatAktivitas(user.id, 'login', null);
 
     const response = NextResponse.json({ status: 'success', message: 'Login berhasil.', data: user });
-    response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+    response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(maxAge));
     return response;
   } catch (err) {
     console.error('Login error:', (err as Error).message);

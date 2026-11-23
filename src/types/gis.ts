@@ -42,7 +42,10 @@ export interface LayerPeta {
   nama_kebun?: string | null;
   kode_kebun?: string | null;
   wilayah?: string | null;
+  provinsi?: string | null;
+  kabupaten_kota?: string | null;
   perusahaan?: string | null;
+  komoditas?: string | null;
   nama_dataset?: string | null;
   dibuat_pada: string;
   bbox?: [number, number, number, number] | null; // [west, south, east, north]
@@ -104,6 +107,8 @@ export interface DetectedDataset {
   folderName?: string;
   suggestedKebunName?: string;
   suggestedWilayah?: string;
+  suggestedProvinsi?: string;
+  suggestedKabupatenKota?: string;
   suggestedAfdelingName?: string;
   format: 'shapefile' | 'geojson' | 'geotiff';
   geometryType: string;
@@ -136,7 +141,10 @@ export interface LayerMappingInput {
   is_new_kebun?: boolean;
   new_kebun_nama?: string | null;
   new_kebun_wilayah?: string | null;
+  new_kebun_provinsi?: string | null;
+  new_kebun_kabupaten?: string | null;
   new_kebun_perusahaan?: string | null;
+  new_kebun_komoditas?: string | null;
   afdeling_id?: number | null;
   new_afdeling_nama?: string | null;
   blok_id?: number | null;
@@ -197,7 +205,7 @@ export interface MonitoringStats {
   estimasi_panen_ton?: number;
   estimasi_olahan_ton?: number | null;
   commodity_profile?: {
-    key: 'tebu' | 'teh' | 'sawit' | 'agribisnis';
+    key: 'tebu' | 'teh' | 'kina' | 'sawit' | 'kopi' | 'kakao' | 'karet' | 'belum_ditentukan';
     label: string;
     shortLabel: string;
     yieldPerHa: number;
@@ -243,7 +251,10 @@ export interface LayerRaster {
   nama_kebun?: string | null;
   kode_kebun?: string | null;
   wilayah?: string | null;
+  provinsi?: string | null;
+  kabupaten_kota?: string | null;
   perusahaan?: string | null;
+  komoditas?: string | null;
   nama_dataset?: string | null;
   bbox?: [number, number, number, number] | null; // [west, south, east, north]
   extent?: ExtentBox | null;

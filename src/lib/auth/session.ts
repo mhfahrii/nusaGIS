@@ -9,6 +9,7 @@ import { DAFTAR_PERAN, type Peran, type SessionClaims } from '@/types/auth';
 
 export const SESSION_COOKIE = 'nusagis_session';
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8; // 8 jam (satu shift kerja)
+export const REMEMBER_ME_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 hari
 
 const ISSUER = 'nusagis';
 const AUDIENCE = 'nusagis-web';
@@ -27,14 +28,18 @@ function getSecretKey(): Uint8Array {
   return cachedKey;
 }
 
-export async function createSessionToken(userId: number, peran: Peran): Promise<string> {
+export async function createSessionToken(
+  userId: number,
+  peran: Peran,
+  maxAgeSeconds: number = SESSION_MAX_AGE_SECONDS
+): Promise<string> {
   return new SignJWT({ peran })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(String(userId))
     .setIssuer(ISSUER)
     .setAudience(AUDIENCE)
     .setIssuedAt()
-    .setExpirationTime(`${SESSION_MAX_AGE_SECONDS}s`)
+    .setExpirationTime(`${maxAgeSeconds}s`)
     .sign(getSecretKey());
 }
 

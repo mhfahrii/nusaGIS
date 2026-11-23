@@ -168,8 +168,10 @@ export function ShapefileInsightPanel({
               featId,
               geomKelilingKm: approxPerim,
               layerName: layer.nama_layer,
+              perusahaan: layer.perusahaan,
               namaKebun: layer.nama_kebun,
               wilayah: layer.wilayah,
+              komoditas: layer.komoditas,
               isSingleBoundaryLayer: isSingle,
             });
 
@@ -351,28 +353,28 @@ export function ShapefileInsightPanel({
           <div className="grid grid-cols-3 gap-2 pt-2.5 mt-2 border-t border-[#00B4D8]/30">
             <div>
               <div className="text-[9.5px] text-[#7DD3FC]">Luas Konsesi</div>
-              <div className="text-base font-black text-white font-mono tabular-nums">
+              <div className="text-sm sm:text-base font-black text-white font-mono tabular-nums">
                 {fmt(r.luasUkur)} Ha
               </div>
-              <div className="text-[9px] text-[#94A3B8] font-mono">
+              <div className="text-[9px] text-[#94A3B8] font-mono truncate">
                 {luasM2.toLocaleString('id-ID')} m²
               </div>
             </div>
             <div>
               <div className="text-[9.5px] text-[#7DD3FC]">Keliling Batas</div>
-              <div className="text-base font-black text-[#00D2FF] font-mono tabular-nums">
+              <div className="text-sm sm:text-base font-black text-[#00D2FF] font-mono tabular-nums">
                 {fmt(r.kelilingKm)} km
               </div>
-              <div className="text-[9px] text-[#94A3B8] font-mono">
+              <div className="text-[9px] text-[#94A3B8] font-mono truncate">
                 {kelilingM.toLocaleString('id-ID')} m
               </div>
             </div>
             <div>
               <div className="text-[9.5px] text-[#7DD3FC]">Areal Efektif</div>
-              <div className="text-base font-black text-[#10B981] font-mono tabular-nums">
+              <div className="text-sm sm:text-base font-black text-[#10B981] font-mono tabular-nums">
                 {fmt(efektifHa)} Ha
               </div>
-              <div className="text-[9px] text-[#6EE7B7]">~85% Potensi Tanam</div>
+              <div className="text-[9px] text-[#6EE7B7] truncate">~85% Potensi</div>
             </div>
           </div>
         </div>
@@ -450,9 +452,9 @@ export function ShapefileInsightPanel({
       const denseMode = records.length > 14;
 
       return (
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-hidden">
-          <div className="md:col-span-8 bg-[#12192B] border border-[#1E2942] rounded-xl p-2.5 flex flex-col min-h-0">
-            <div className="flex items-center justify-between text-[11px] px-1 mb-1">
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-y-auto md:overflow-hidden">
+          <div className="md:col-span-8 bg-[#12192B] border border-[#1E2942] rounded-xl p-2.5 flex flex-col min-h-[190px] md:min-h-0">
+            <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] px-1 mb-1">
               <span className="font-bold text-[#F0F6FC]">
                 Luas per Blok ({records.length} poligon)
               </span>
@@ -604,7 +606,7 @@ export function ShapefileInsightPanel({
             </div>
           </div>
 
-          <div className="md:col-span-4 grid grid-cols-2 gap-2 content-start overflow-y-auto">
+          <div className="md:col-span-4 grid grid-cols-2 gap-2 content-start md:overflow-y-auto">
             <StatCard label="Total Luas Ukur" value={`${fmt(summary.totalUkur)} Ha`} accent />
             {summary.hasBaku ? (
               <StatCard
@@ -652,8 +654,8 @@ export function ShapefileInsightPanel({
     if (tab === 'afdeling') {
       const maxAfdLuas = Math.max(...summary.afdelingGroups.map((g) => g.luasUkur), 1);
       return (
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-hidden">
-          <div className="md:col-span-5 bg-[#12192B] border border-[#1E2942] rounded-xl p-3 flex flex-col gap-2.5 overflow-y-auto">
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-y-auto md:overflow-hidden">
+          <div className="md:col-span-5 bg-[#12192B] border border-[#1E2942] rounded-xl p-3 flex flex-col gap-2.5 md:overflow-y-auto">
             <div className="flex items-center justify-between text-[11px]">
               <span className="font-bold text-[#F0F6FC]">
                 Rekap Luas &amp; Produksi per Afdeling
@@ -698,10 +700,9 @@ export function ShapefileInsightPanel({
           </div>
 
           <div
-            className="md:col-span-7 grid gap-2 overflow-y-auto content-start"
-            style={{
-              gridTemplateColumns: `repeat(${Math.min(summary.afdelingGroups.length, 2)}, minmax(0, 1fr))`,
-            }}
+            className={`md:col-span-7 grid grid-cols-1 ${
+              summary.afdelingGroups.length > 1 ? 'sm:grid-cols-2' : ''
+            } gap-2 md:overflow-y-auto content-start`}
           >
             {summary.afdelingGroups.map((g) => (
               <div
@@ -741,8 +742,8 @@ export function ShapefileInsightPanel({
 
     if (tab === 'status') {
       return (
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-hidden">
-          <div className="md:col-span-5 bg-[#12192B] border border-[#1E2942] rounded-xl p-3 flex flex-col gap-3 overflow-y-auto">
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-y-auto md:overflow-hidden">
+          <div className="md:col-span-5 bg-[#12192B] border border-[#1E2942] rounded-xl p-3 flex flex-col gap-3 md:overflow-y-auto">
             <span className="text-[11px] font-bold text-[#F0F6FC]">
               Komposisi Luas per Status Areal
             </span>
@@ -781,10 +782,9 @@ export function ShapefileInsightPanel({
           </div>
 
           <div
-            className="md:col-span-7 grid gap-2 overflow-y-auto content-start"
-            style={{
-              gridTemplateColumns: `repeat(${Math.min(summary.statusGroups.length, 2)}, minmax(0, 1fr))`,
-            }}
+            className={`md:col-span-7 grid grid-cols-1 ${
+              summary.statusGroups.length > 1 ? 'sm:grid-cols-2' : ''
+            } gap-2 md:overflow-y-auto content-start`}
           >
             {summary.statusGroups.map((g) => (
               <div
@@ -824,8 +824,8 @@ export function ShapefileInsightPanel({
 
     // tab === 'varietas' (Varietas, MT, Audit & Estimasi Panen)
     return (
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-hidden">
-        <div className="md:col-span-4 flex flex-col gap-2 overflow-y-auto">
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 min-h-0 overflow-y-auto md:overflow-hidden">
+        <div className="md:col-span-4 flex flex-col gap-2 md:overflow-y-auto">
           <div className="bg-gradient-to-br from-[#0F241F] to-[#0E3A5D]/70 border border-[#10B981]/50 rounded-xl p-2.5">
             <div className="text-[10px] text-[#6EE7B7] font-semibold">
               Proyeksi Total Produksi ({summary.primaryCommodity?.shortLabel || 'Kebun'})
@@ -882,7 +882,7 @@ export function ShapefileInsightPanel({
           </div>
         </div>
 
-        <div className="md:col-span-8 bg-[#12192B] border border-[#1E2942] rounded-xl overflow-auto min-h-0">
+        <div className="md:col-span-8 bg-[#12192B] border border-[#1E2942] rounded-xl overflow-x-auto md:overflow-auto min-h-[160px] md:min-h-0">
           <table className="w-full text-[10.5px]">
             <thead className="sticky top-0 bg-[#0D1322] text-[#8B9BB4]">
               <tr>
@@ -979,14 +979,14 @@ export function ShapefileInsightPanel({
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {renderBody()}
       {!isSingleBoundary && (
-        <div className="h-9 px-4 bg-[#0D1322] border-t border-[#1E2942] flex items-center justify-between shrink-0 overflow-x-auto">
+        <div className="min-h-10 lg:h-9 px-3 sm:px-4 py-1 lg:py-0 bg-[#0D1322] border-t border-[#1E2942] flex items-center justify-between shrink-0 overflow-x-auto">
           <div className="flex items-center gap-1.5">
             {tabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => setTab(t.id)}
-                className={`px-3 py-1 rounded text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer ${
+                className={`min-h-8 lg:min-h-0 px-3 py-1 rounded text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer ${
                   tab === t.id
                     ? 'bg-[#132238] border border-[#00D2FF] text-[#00D2FF] font-bold'
                     : 'text-[#8B9BB4] hover:text-[#F0F6FC] hover:bg-[#12192B]'
@@ -996,7 +996,7 @@ export function ShapefileInsightPanel({
               </button>
             ))}
           </div>
-          <div className="text-[10px] text-[#566680] font-mono hidden lg:block">
+          <div className="text-[10px] text-[#8B9BB4] font-mono hidden lg:block">
             Ekstraksi Multi-Kolom · {records.length} poligon · {fmt(summary.totalUkur)} Ha · Est.{' '}
             {fmt(summary.totalPanen, 0)} Ton
           </div>

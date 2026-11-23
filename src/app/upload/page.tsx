@@ -343,7 +343,7 @@ function UploadGisContent() {
                       <span className="text-emerald-600 font-bold">kumpulan file .shp, .dbf, .prj</span>
                     </p>
                     <p className="text-[11px] text-slate-500 mt-1">
-                      Mendukung pemilihan langsung seluruh komponen Shapefile sekaligus (Maks. 50 MB)
+                      Mendukung pemilihan langsung seluruh komponen Shapefile sekaligus (Maks. 250 MB)
                     </p>
                   </div>
                 )}

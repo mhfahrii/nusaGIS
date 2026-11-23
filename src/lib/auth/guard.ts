@@ -2,24 +2,23 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { query } from '@/lib/db';
 import { checkCsrf } from '@/lib/auth/csrf';
 import { SESSION_COOKIE, sessionCookieOptions, verifySessionToken } from '@/lib/auth/session';
-import type { Peran, PenggunaPublik } from '@/types/auth';
+import {
+  hasPermission,
+  normalizeHakAkses,
+  type HakAksesFitur,
+  type Peran,
+  type PenggunaPublik,
+} from '@/types/auth';
 
-/**
- * Data Access Layer untuk autentikasi.
- *
- * Setiap Route Handler wajib memanggil `requireUser` karena proxy hanya
- * melakukan pemeriksaan optimistik. Fungsi ini memverifikasi token,
- * lalu membaca ulang data pengguna dari database sehingga akun yang
- * dinonaktifkan atau diubah perannya langsung kehilangan akses.
- */
-
-export const KOLOM_PENGGUNA_PUBLIK = 'id, nama, email, peran, aktif, dibuat_pada';
+export const KOLOM_PENGGUNA_PUBLIK = 'id, nama, email, peran, aktif, hak_akses, foto_profil, dibuat_pada';
 
 type AuthResult = { user: PenggunaPublik; response?: never } | { user?: never; response: NextResponse };
 
 interface RequireUserOptions {
   /** Peran yang diizinkan. Kosong berarti semua pengguna yang login. */
   roles?: Peran[];
+  /** Izin spesifik fitur GIS yang wajib dimiliki pengguna. */
+  permission?: keyof HakAksesFitur;
   /** Teruskan ke pemeriksaan CSRF. */
   requireJson?: boolean;
 }
@@ -41,7 +40,29 @@ export async function findActiveUserById(id: number): Promise<PenggunaPublik | n
   );
   const user = res.rows[0];
   if (!user || !user.aktif) return null;
-  return { ...user, id: Number(user.id) };
+
+  const baseHakAkses = normalizeHakAkses(user.hak_akses, user.peran);
+
+  // Gabungkan dengan hak sementara yang sedang aktif disetujui admin
+  try {
+    const tempRes = await query<{ jenis_hak: string }>(
+      `SELECT jenis_hak FROM public.permintaan_hak_sementara
+       WHERE pengguna_id = $1 AND status = 'disetujui';`,
+      [id]
+    );
+    for (const row of tempRes.rows) {
+      if (row.jenis_hak === 'upload_layer') baseHakAkses.upload_layer = true;
+      if (row.jenis_hak === 'edit_data') baseHakAkses.edit_data = true;
+    }
+  } catch {
+    // Abaikan jika tabel belum dimigrasi
+  }
+
+  return {
+    ...user,
+    id: Number(user.id),
+    hak_akses: baseHakAkses,
+  };
 }
 
 export async function requireUser(
@@ -74,6 +95,15 @@ export async function requireUser(
 
   if (options.roles && options.roles.length > 0 && !options.roles.includes(user.peran)) {
     return { response: errorResponse(403, 'Anda tidak memiliki hak akses untuk tindakan ini.') };
+  }
+
+  if (options.permission && !hasPermission(user, options.permission)) {
+    return {
+      response: errorResponse(
+        403,
+        'Akses ditolak: Akun Anda tidak memiliki izin untuk fitur ini. Silakan ajukan Hak Sementara kepada Administrator.'
+      ),
+    };
   }
 
   return { user };

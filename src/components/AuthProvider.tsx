@@ -8,6 +8,7 @@ interface AuthContextValue {
   loading: boolean;
   isAdmin: boolean;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -21,6 +22,20 @@ function redirectToLogin() {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<PenggunaPublik | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/me', { cache: 'no-store' });
+      if (res.status === 401) {
+        redirectToLogin();
+        return;
+      }
+      const json = await res.json();
+      if (res.ok) setUser(json.data as PenggunaPublik);
+    } catch {
+      // Jaringan gagal: biarkan halaman menampilkan error API masing-masing.
+    }
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -55,7 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext value={{ user, loading, isAdmin: user?.peran === 'admin', logout }}>
+    <AuthContext value={{ user, loading, isAdmin: user?.peran === 'admin', logout, refreshUser }}>
       {children}
     </AuthContext>
   );
