@@ -33,13 +33,6 @@ interface AfdelingItem {
   nama_afdeling: string;
 }
 
-interface BlokItem {
-  id: number;
-  afdeling_id: number;
-  kode_blok: string;
-  nama_blok: string;
-}
-
 function normText(s?: string | null): string {
   return (s || '').trim().toLowerCase();
 }
@@ -98,7 +91,6 @@ export function MonitoringDashboard() {
   // Master lists
   const [kebunList, setKebunList] = useState<KebunItem[]>([]);
   const [afdelingList, setAfdelingList] = useState<AfdelingItem[]>([]);
-  const [, setBlokList] = useState<BlokItem[]>([]);
   const [rawLayers, setRawLayers] = useState<LayerPeta[]>([]);
   const [rasterLayers, setRasterLayers] = useState<LayerRaster[]>([]);
   const [stats, setStats] = useState<MonitoringStats | null>(null);
@@ -116,7 +108,7 @@ export function MonitoringDashboard() {
   const [fitBoundsTarget, setFitBoundsTarget] = useState<[number, number, number, number] | null>(null);
   const [dataRevision, setDataRevision] = useState(0);
 
-  // 1. Refresh seluruh master data (kebun, afdeling, blok, layers, rasters, stats, history)
+  // 1. Refresh seluruh master data (kebun, afdeling, layers, rasters, stats, history) setelah mutasi data
   const refreshStatsAndLayers = useCallback(async () => {
     try {
       const params: string[] = [];
@@ -128,10 +120,9 @@ export function MonitoringDashboard() {
       if (selectedLayerId) params.push(`layer_id=${selectedLayerId}`);
       const statsQuery = params.length > 0 ? `?${params.join('&')}` : '';
 
-      const [kRes, aRes, bRes, lRes, rRes, sRes, hRes] = await Promise.all([
+      const [kRes, aRes, lRes, rRes, sRes, hRes] = await Promise.all([
         fetch('/api/kebun'),
         fetch('/api/afdeling'),
-        fetch('/api/blok'),
         fetch('/api/gis/layers'),
         fetch('/api/gis/rasters'),
         fetch(`/api/stats${statsQuery}`),
@@ -144,10 +135,6 @@ export function MonitoringDashboard() {
       if (aRes.ok) {
         const aj = await aRes.json();
         setAfdelingList(aj.data || []);
-      }
-      if (bRes.ok) {
-        const bj = await bRes.json();
-        setBlokList(bj.data || []);
       }
       if (lRes.ok) {
         const lj = await lRes.json();
@@ -172,9 +159,9 @@ export function MonitoringDashboard() {
     }
   }, [selectedPerusahaan, selectedWilayah, selectedKebunId, selectedLayerId]);
 
-  // Reaktif perbarui statistik KPI saat filter Perusahaan, Wilayah, Kebun, atau Layer berubah
+  // Reaktif perbarui statistik KPI saat filter Perusahaan, Wilayah, Kebun, atau Layer berubah (dengan AbortController standar ArcGIS Web SDK)
   useEffect(() => {
-    let ignore = false;
+    const controller = new AbortController();
     async function updateStats() {
       try {
         const params: string[] = [];
@@ -185,37 +172,40 @@ export function MonitoringDashboard() {
         }
         if (selectedLayerId) params.push(`layer_id=${selectedLayerId}`);
         const statsQuery = params.length > 0 ? `?${params.join('&')}` : '';
-        const sRes = await fetch(`/api/stats${statsQuery}`);
-        if (sRes.ok && !ignore) {
+        const sRes = await fetch(`/api/stats${statsQuery}`, {
+          signal: controller.signal,
+        });
+        if (sRes.ok && !controller.signal.aborted) {
           const sj = await sRes.json();
-          setStats(sj.data || null);
+          if (!controller.signal.aborted) {
+            setStats(sj.data || null);
+          }
         }
       } catch (err) {
+        if ((err as Error)?.name === 'AbortError') return;
         console.error('Failed to update stats:', err);
       }
     }
     updateStats();
     return () => {
-      ignore = true;
+      controller.abort();
     };
   }, [selectedPerusahaan, selectedWilayah, selectedKebunId, selectedLayerId]);
 
+  // Inisialisasi master data 1x saat mount (tanpa duplikasi /api/stats dan tanpa reload saat filter kebun berganti)
   useEffect(() => {
-    let ignore = false;
+    const controller = new AbortController();
     async function loadMasterData() {
       try {
-        const statsQuery = selectedKebunId ? `?kebun_id=${selectedKebunId}` : '';
-        const [kRes, aRes, bRes, lRes, rRes, sRes, hRes] = await Promise.all([
-          fetch('/api/kebun'),
-          fetch('/api/afdeling'),
-          fetch('/api/blok'),
-          fetch('/api/gis/layers'),
-          fetch('/api/gis/rasters'),
-          fetch(`/api/stats${statsQuery}`),
-          fetch('/api/gis/history'),
+        const [kRes, aRes, lRes, rRes, hRes] = await Promise.all([
+          fetch('/api/kebun', { signal: controller.signal }),
+          fetch('/api/afdeling', { signal: controller.signal }),
+          fetch('/api/gis/layers', { signal: controller.signal }),
+          fetch('/api/gis/rasters', { signal: controller.signal }),
+          fetch('/api/gis/history', { signal: controller.signal }),
         ]);
 
-        if (!ignore) {
+        if (!controller.signal.aborted) {
           if (kRes.ok) {
             const kj = await kRes.json();
             setKebunList(kj.data || []);
@@ -223,10 +213,6 @@ export function MonitoringDashboard() {
           if (aRes.ok) {
             const aj = await aRes.json();
             setAfdelingList(aj.data || []);
-          }
-          if (bRes.ok) {
-            const bj = await bRes.json();
-            setBlokList(bj.data || []);
           }
           if (lRes.ok) {
             const lj = await lRes.json();
@@ -245,25 +231,28 @@ export function MonitoringDashboard() {
                 ? Number(urlParams.get('kebun_id'))
                 : null;
 
-              const defaultL =
+              const explicitLayer =
                 (paramLayerId && data.find((l) => l.id === paramLayerId)) ||
-                (paramKebunId && data.find((l) => l.kebun_id === paramKebunId)) ||
-                data.find((l) => l.terlihat && l.bbox) ||
-                data[0];
+                (paramKebunId && data.find((l) => l.kebun_id === paramKebunId));
 
-              if (defaultL?.bbox) {
-                setFitBoundsTarget(defaultL.bbox);
+              if (explicitLayer) {
+                if (explicitLayer.bbox) {
+                  setFitBoundsTarget([...explicitLayer.bbox]);
+                }
+                return explicitLayer.id;
               }
-              return defaultL ? defaultL.id : null;
+
+              const visiblePool = data.filter((l) => l.terlihat);
+              const unionBbox = computeUnionBbox(visiblePool.length > 0 ? visiblePool : data);
+              if (unionBbox) {
+                setFitBoundsTarget([...unionBbox]);
+              }
+              return null;
             });
           }
           if (rRes.ok) {
             const rj = await rRes.json();
             setRasterLayers(rj.data || []);
-          }
-          if (sRes.ok) {
-            const sj = await sRes.json();
-            setStats(sj.data || null);
           }
           if (hRes.ok) {
             const hj = await hRes.json();
@@ -273,15 +262,16 @@ export function MonitoringDashboard() {
           }
         }
       } catch (err) {
+        if ((err as Error)?.name === 'AbortError') return;
         console.error('Failed to load master dashboard data:', err);
       }
     }
 
     loadMasterData();
     return () => {
-      ignore = true;
+      controller.abort();
     };
-  }, [selectedKebunId]);
+  }, []);
 
   // Helper: cocokkan layer terhadap filter hirarki (cek langsung kolom layer & master kebunList agar tidak pernah terlewat meski kebunList baru dibuat)
   const filterLayersByCriteria = useCallback(
@@ -590,11 +580,9 @@ export function MonitoringDashboard() {
     setSelectedKebunId(null);
     setSelectedAfdelingId(null);
     setSelectedFeatureId(null);
+    setSelectedLayerId(null);
     const visible = rawLayers.filter((l) => l.terlihat);
     const pool = visible.length > 0 ? visible : rawLayers;
-    if (pool.length > 0) {
-      setSelectedLayerId(pool[0].id);
-    }
     const bbox = computeUnionBbox(pool);
     if (bbox) {
       setFitBoundsTarget([...bbox]);
@@ -606,6 +594,7 @@ export function MonitoringDashboard() {
     setRawLayers((prev) =>
       prev.map((l) => (l.id === layerId ? { ...l, terlihat: visible } : l))
     );
+    if (!canEdit) return;
     try {
       await fetch('/api/gis/layers', {
         method: 'PATCH',
@@ -622,6 +611,7 @@ export function MonitoringDashboard() {
     setRasterLayers((prev) =>
       prev.map((r) => (r.id === rasterId ? { ...r, terlihat: visible } : r))
     );
+    if (!canEdit) return;
     try {
       await fetch('/api/gis/rasters', {
         method: 'PATCH',
@@ -638,6 +628,7 @@ export function MonitoringDashboard() {
     setRasterLayers((prev) =>
       prev.map((r) => (r.id === rasterId ? { ...r, transparansi: opacity } : r))
     );
+    if (!canEdit) return;
     try {
       await fetch('/api/gis/rasters', {
         method: 'PATCH',

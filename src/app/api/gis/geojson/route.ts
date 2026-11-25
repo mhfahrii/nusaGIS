@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth/guard';
+import { requireUser, safeErrorDetail } from '@/lib/auth/guard';
 
 interface FeatureRowGeoJson {
   id: number;
@@ -208,10 +208,9 @@ export async function GET(req: NextRequest) {
       data: geojson,
     });
   } catch (err: unknown) {
-    const error = err as Error;
-    console.error('Get GeoJSON Error:', error);
+    console.error('Get GeoJSON Error:', err);
     return NextResponse.json(
-      { status: 'error', message: 'Gagal mengambil data spasial GeoJSON.', detail: error.message },
+      { status: 'error', message: 'Gagal mengambil data spasial GeoJSON.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser, catatAktivitas } from '@/lib/auth/guard';
+import { requireUser, catatAktivitas, safeErrorDetail } from '@/lib/auth/guard';
 import type { LayerPeta } from '@/types/gis';
 
 interface LayerDbRow {
@@ -155,10 +155,9 @@ export async function GET(req: NextRequest) {
       data: layers,
     });
   } catch (err: unknown) {
-    const error = err as Error;
-    console.error('Get Layers Error:', error);
+    console.error('Get Layers Error:', err);
     return NextResponse.json(
-      { status: 'error', message: 'Gagal mengambil data layer.', detail: error.message },
+      { status: 'error', message: 'Gagal mengambil data layer.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }
@@ -230,9 +229,8 @@ export async function PATCH(req: NextRequest) {
       data: res.rows[0],
     });
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal memperbarui layer.', detail: error.message },
+      { status: 'error', message: 'Gagal memperbarui layer.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }
@@ -487,9 +485,8 @@ export async function DELETE(req: NextRequest) {
       { status: 400 }
     );
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal memproses penghapusan data.', detail: error.message },
+      { status: 'error', message: 'Gagal memproses penghapusan data.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

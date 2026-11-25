@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { catatAktivitas, requireUser } from '@/lib/auth/guard';
+import { checkRateLimit } from '@/lib/auth/rate-limit';
 import { hasPermission } from '@/types/auth';
 
 export type JenisHakSementara = 'upload_layer' | 'edit_data';
@@ -29,6 +30,13 @@ export async function GET(req: NextRequest) {
   if (auth.response) return auth.response;
 
   try {
+    // Otomatis cabut hak sementara yang sudah melewati batas 24 jam sejak disetujui
+    await query(
+      `UPDATE public.permintaan_hak_sementara
+       SET status = 'dicabut', diperbarui_pada = NOW()
+       WHERE status = 'disetujui' AND diperbarui_pada < NOW() - INTERVAL '24 hours';`
+    );
+
     const canManage = hasPermission(auth.user, 'kelola_karyawan');
     const params: unknown[] = [];
     const whereClause = canManage ? '' : 'WHERE p.pengguna_id = $1';
@@ -111,7 +119,27 @@ export async function POST(req: NextRequest) {
   const auth = await requireUser(req, { requireJson: true });
   if (auth.response) return auth.response;
 
+  const retryAfter = checkRateLimit(`hak-sementara:${auth.user.id}`, 10, 60 * 60 * 1000);
+  if (retryAfter > 0) {
+    return NextResponse.json(
+      {
+        status: 'error',
+        sukses: false,
+        message: `Terlalu banyak pengajuan hak sementara. Silakan tunggu ${Math.ceil(retryAfter / 60)} menit lagi.`,
+      },
+      { status: 429, headers: { 'Retry-After': String(retryAfter) } }
+    );
+  }
+
   try {
+    await query(
+      `UPDATE public.permintaan_hak_sementara
+       SET status = 'dicabut', diperbarui_pada = NOW()
+       WHERE pengguna_id = $1 AND status = 'disetujui'
+         AND diperbarui_pada < NOW() - INTERVAL '24 hours';`,
+      [auth.user.id]
+    );
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return NextResponse.json(

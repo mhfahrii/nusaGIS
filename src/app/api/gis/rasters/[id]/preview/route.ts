@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { requireUser } from '@/lib/auth/guard';
 import { renderGeoTiffToPng } from '@/lib/gis/geotiff';
 import path from 'node:path';
 
@@ -7,6 +8,9 @@ export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(req);
+  if (auth.response) return auth.response;
+
   try {
     const { id } = await context.params;
     const rasterId = parseInt(id, 10);
@@ -31,7 +35,7 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': 'image/png',
-        'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400',
+        'Cache-Control': 'private, max-age=3600, stale-while-revalidate=86400',
       },
     });
   } catch (err: unknown) {

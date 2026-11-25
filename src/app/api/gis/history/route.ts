@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { query } from '@/lib/db';
 import { requireUser } from '@/lib/auth/guard';
+import { hasPermission } from '@/types/auth';
 
 interface DeletedFeatureRow {
   id: number;
@@ -166,6 +167,27 @@ async function ensureLayerSoftDeleteColumns() {
 export async function GET(req: NextRequest) {
   const auth = await requireUser(req);
   if (auth.response) return auth.response;
+
+  // Jika pengguna tidak memiliki izin hapus_data maupun kelola_karyawan, kembalikan data kosong tanpa membocorkan isi Tempat Sampah atau Log Audit
+  if (!hasPermission(auth.user, 'hapus_data') && !hasPermission(auth.user, 'kelola_karyawan')) {
+    return NextResponse.json({
+      status: 'success',
+      data: {
+        deleted_layers: [],
+        deleted_features: [],
+        activity_logs: [],
+        counts: {
+          total_deleted: 0,
+          total_deleted_layers: 0,
+          total_deleted_features: 0,
+          total_active: 0,
+          total_logs: 0,
+          cache_bytes: 0,
+          temp_cache_files: 0,
+        },
+      },
+    });
+  }
 
   try {
     await ensureLayerSoftDeleteColumns();

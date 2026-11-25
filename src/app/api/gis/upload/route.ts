@@ -3,7 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { getPool } from '@/lib/db';
-import { requireUser, catatAktivitas } from '@/lib/auth/guard';
+import { requireUser, catatAktivitas, safeErrorDetail } from '@/lib/auth/guard';
+import { checkRateLimit } from '@/lib/auth/rate-limit';
 import {
   parseShapefileZip,
   parseGeoJsonBuffer,
@@ -24,6 +25,17 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   const auth = await requireUser(req, { requireJson: false, permission: 'upload_layer' });
   if (auth.response) return auth.response;
+
+  const retryAfter = checkRateLimit(`gis-upload:${auth.user.id}`, 25, 10 * 60 * 1000);
+  if (retryAfter > 0) {
+    return NextResponse.json(
+      {
+        status: 'error',
+        message: `Terlalu banyak aktivitas upload file GIS. Silakan tunggu ${Math.ceil(retryAfter / 60)} menit lagi.`,
+      },
+      { status: 429, headers: { 'Retry-After': String(retryAfter) } }
+    );
+  }
 
   const contentType = req.headers.get('content-type') || '';
 
@@ -860,13 +872,12 @@ export async function POST(req: NextRequest) {
       client.release();
     }
   } catch (err: unknown) {
-    const error = err as Error;
-    console.error('Upload GIS Error:', error);
+    console.error('Upload GIS Error:', err);
     return NextResponse.json(
       {
         status: 'error',
-        message: error.message || 'Terjadi kesalahan saat memproses dan menyimpan data GIS.',
-        detail: error.message,
+        message: 'Terjadi kesalahan saat memproses dan menyimpan data GIS.',
+        detail: safeErrorDetail(err),
       },
       { status: 500 }
     );

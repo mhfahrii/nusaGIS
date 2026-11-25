@@ -43,11 +43,19 @@ export async function findActiveUserById(id: number): Promise<PenggunaPublik | n
 
   const baseHakAkses = normalizeHakAkses(user.hak_akses, user.peran);
 
-  // Gabungkan dengan hak sementara yang sedang aktif disetujui admin
+  // Gabungkan dengan hak sementara yang sedang aktif disetujui admin (otomatis berakhir setelah 24 jam)
   try {
+    await query(
+      `UPDATE public.permintaan_hak_sementara
+       SET status = 'dicabut', diperbarui_pada = NOW()
+       WHERE pengguna_id = $1 AND status = 'disetujui'
+         AND diperbarui_pada < NOW() - INTERVAL '24 hours';`,
+      [id]
+    );
     const tempRes = await query<{ jenis_hak: string }>(
       `SELECT jenis_hak FROM public.permintaan_hak_sementara
-       WHERE pengguna_id = $1 AND status = 'disetujui';`,
+       WHERE pengguna_id = $1 AND status = 'disetujui'
+         AND diperbarui_pada >= NOW() - INTERVAL '24 hours';`,
       [id]
     );
     for (const row of tempRes.rows) {
@@ -124,4 +132,11 @@ export async function catatAktivitas(
     console.error('Gagal mencatat aktivitas:', (err as Error).message);
   }
 }
+
+/** Menyembunyikan pesan error internal SQL/server pada mode production untuk mencegah Sensitive Data Exposure. */
+export function safeErrorDetail(err: unknown): string | undefined {
+  if (process.env.NODE_ENV === 'production') return undefined;
+  return err instanceof Error ? err.message : String(err);
+}
+
 

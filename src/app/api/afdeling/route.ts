@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { catatAktivitas, requireUser } from '@/lib/auth/guard';
+import { catatAktivitas, requireUser, safeErrorDetail } from '@/lib/auth/guard';
 import { Afdeling, Kebun } from '@/types/perkebunan';
 
 interface PgError extends Error {
@@ -99,9 +99,8 @@ export async function GET(req: NextRequest) {
       data: res.rows,
     });
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal mengambil data afdeling.', detail: error.message },
+      { status: 'error', message: 'Gagal mengambil data afdeling.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }
@@ -208,7 +207,7 @@ export async function POST(req: NextRequest) {
       );
     }
     return NextResponse.json(
-      { status: 'error', message: 'Gagal menambahkan data afdeling.', detail: pgErr.message },
+      { status: 'error', message: 'Gagal menambahkan data afdeling.', detail: safeErrorDetail(pgErr) },
       { status: 500 }
     );
   }
@@ -351,7 +350,7 @@ export async function PATCH(req: NextRequest) {
       );
     }
     return NextResponse.json(
-      { status: 'error', message: 'Gagal memperbarui data afdeling.', detail: pgErr.message },
+      { status: 'error', message: 'Gagal memperbarui data afdeling.', detail: safeErrorDetail(pgErr) },
       { status: 500 }
     );
   }
@@ -405,9 +404,8 @@ export async function DELETE(req: NextRequest) {
       data: delRes.rows[0],
     });
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal menghapus data afdeling.', detail: error.message },
+      { status: 'error', message: 'Gagal menghapus data afdeling.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

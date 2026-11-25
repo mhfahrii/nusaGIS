@@ -69,9 +69,17 @@ export async function verifySessionToken(
 }
 
 export function sessionCookieOptions(maxAge: number = SESSION_MAX_AGE_SECONDS) {
+  const explicitSecure = process.env.COOKIE_SECURE?.trim().toLowerCase();
+  const isSecure =
+    explicitSecure === 'true'
+      ? true
+      : explicitSecure === 'false'
+        ? false
+        : process.env.NODE_ENV === 'production';
+
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isSecure,
     sameSite: 'lax' as const,
     path: '/',
     maxAge,

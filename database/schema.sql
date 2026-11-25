@@ -1,301 +1,182 @@
--- ==============================================================================
--- SKEMA DATABASE POSTGRESQL & POSTGIS UNTUK WEBGIS PERKEBUNAN (NUSAGIS)
--- Standard ArcGIS Pro & Enterprise PostGIS Integration
--- ==============================================================================
+-- =============================================================================
+-- SKEMA DATABASE WEB GIS PERKEBUNAN PT RISET PERKEBUNAN NUSANTARA (PT RPN)
+-- PostgreSQL + PostGIS Spatial Geodatabase Schema
+-- Idempoten: Aman dijalankan berulang kali (CREATE IF NOT EXISTS)
+-- =============================================================================
 
--- 1. AKTIFKAN EKSTENSI POSTGIS & UUID
 CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- ==============================================================================
--- 2. TABEL PENGGUNA & RIWAYAT AKTIVITAS (AUTENTIKASI & AUDIT)
--- ==============================================================================
-
+-- 1. Tabel Pengguna (Admin & Karyawan beserta RBAC Hak Akses Granular)
 CREATE TABLE IF NOT EXISTS public.pengguna (
     id BIGSERIAL PRIMARY KEY,
     nama VARCHAR(150) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    kata_sandi_hash VARCHAR(255) NOT NULL,
-    peran VARCHAR(50) NOT NULL DEFAULT 'pengguna' CHECK (peran IN ('admin', 'pengguna')),
+    email VARCHAR(254) NOT NULL UNIQUE,
+    kata_sandi_hash TEXT NOT NULL,
+    peran VARCHAR(30) NOT NULL DEFAULT 'pengguna' CHECK (peran IN ('admin', 'pengguna')),
     aktif BOOLEAN NOT NULL DEFAULT TRUE,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    hak_akses JSONB,
+    foto_profil TEXT,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS public.riwayat_aktivitas (
+-- 2. Tabel Permintaan Hak Akses Sementara (Workflow Pengajuan Karyawan -> Persetujuan Admin)
+CREATE TABLE IF NOT EXISTS public.permintaan_hak_sementara (
     id BIGSERIAL PRIMARY KEY,
-    pengguna_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
-    aktivitas VARCHAR(100) NOT NULL,
-    keterangan TEXT,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    pengguna_id BIGINT NOT NULL REFERENCES public.pengguna(id) ON DELETE CASCADE,
+    jenis_hak VARCHAR(50) NOT NULL CHECK (jenis_hak IN ('upload_layer', 'edit_data')),
+    alasan TEXT,
+    status VARCHAR(30) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'disetujui', 'ditolak', 'dicabut')),
+    dikonfirmasi_oleh BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    diperbarui_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
--- ==============================================================================
--- 3. TABEL HIERARKI PERKEBUNAN (MASTER KEBUN -> AFDELING -> BLOK)
--- ==============================================================================
+CREATE INDEX IF NOT EXISTS idx_hak_sementara_pengguna ON public.permintaan_hak_sementara (pengguna_id, status);
 
+-- 3. Tabel Master Unit Kebun
 CREATE TABLE IF NOT EXISTS public.kebun (
     id BIGSERIAL PRIMARY KEY,
-    kode_kebun VARCHAR(50) NOT NULL UNIQUE,
+    kode_kebun VARCHAR(60) NOT NULL UNIQUE,
     nama_kebun VARCHAR(150) NOT NULL,
-    perusahaan VARCHAR(150) DEFAULT 'PT Perkebunan Nusantara I (Regional 4)',
+    perusahaan VARCHAR(150),
     wilayah VARCHAR(150),
+    provinsi VARCHAR(100),
+    kabupaten_kota VARCHAR(120),
     komoditas VARCHAR(100),
     keterangan TEXT,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+-- 4. Tabel Master Afdeling
 CREATE TABLE IF NOT EXISTS public.afdeling (
     id BIGSERIAL PRIMARY KEY,
     kebun_id BIGINT NOT NULL REFERENCES public.kebun(id) ON DELETE CASCADE,
-    kode_afdeling VARCHAR(50) NOT NULL,
+    kode_afdeling VARCHAR(60) NOT NULL,
     nama_afdeling VARCHAR(150) NOT NULL,
     keterangan TEXT,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_afdeling_kebun_kode UNIQUE (kebun_id, kode_afdeling)
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (kebun_id, kode_afdeling)
 );
 
+CREATE INDEX IF NOT EXISTS idx_afdeling_kebun_id ON public.afdeling (kebun_id);
+
+-- 5. Tabel Master Blok
 CREATE TABLE IF NOT EXISTS public.blok (
     id BIGSERIAL PRIMARY KEY,
     afdeling_id BIGINT NOT NULL REFERENCES public.afdeling(id) ON DELETE CASCADE,
-    kode_blok VARCHAR(50) NOT NULL,
+    kode_blok VARCHAR(60) NOT NULL,
     nama_blok VARCHAR(150) NOT NULL,
     komoditas VARCHAR(100),
     tahun_tanam INTEGER,
     keterangan TEXT,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_blok_afdeling_kode UNIQUE (afdeling_id, kode_blok)
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (afdeling_id, kode_blok)
 );
 
--- ==============================================================================
--- 4. TABEL DATA UNGGAHAN (LOG DATASET SHP / ZIP / GEOTIFF)
--- ==============================================================================
+CREATE INDEX IF NOT EXISTS idx_blok_afdeling_id ON public.blok (afdeling_id);
 
+-- 6. Tabel Data Unggahan Arsip GIS (Shapefile ZIP / GeoJSON / GeoTIFF)
 CREATE TABLE IF NOT EXISTS public.data_unggahan (
     id BIGSERIAL PRIMARY KEY,
     pengguna_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
     kebun_id BIGINT REFERENCES public.kebun(id) ON DELETE SET NULL,
-    nama_data VARCHAR(150) NOT NULL,
+    nama_data VARCHAR(200) NOT NULL,
     nama_file VARCHAR(255) NOT NULL,
-    format_file VARCHAR(50) NOT NULL, -- 'ZIP', 'Shapefile', 'GeoJSON', 'GeoTIFF'
-    lokasi_file TEXT NOT NULL,
-    crs_asal VARCHAR(100),
-    srid_asal INTEGER,
-    status VARCHAR(50) DEFAULT 'berhasil', -- 'proses', 'berhasil', 'gagal'
+    lokasi_file TEXT,
+    ukuran_file BIGINT DEFAULT 0,
+    crs_asal VARCHAR(120),
+    srid_asal INTEGER DEFAULT 4326,
     jumlah_layer INTEGER DEFAULT 1,
-    pesan_error TEXT,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    status_validasi VARCHAR(50) DEFAULT 'valid',
+    keterangan TEXT,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
--- ==============================================================================
--- 5. TABEL LAYER VEKTOR & FITUR GEOMETRI SPASIAL (POSTGIS)
--- ==============================================================================
-
+-- 7. Tabel Layer Peta Vektor
 CREATE TABLE IF NOT EXISTS public.layer_peta (
     id BIGSERIAL PRIMARY KEY,
     unggahan_id BIGINT REFERENCES public.data_unggahan(id) ON DELETE CASCADE,
     kebun_id BIGINT REFERENCES public.kebun(id) ON DELETE SET NULL,
     afdeling_id BIGINT REFERENCES public.afdeling(id) ON DELETE SET NULL,
     blok_id BIGINT REFERENCES public.blok(id) ON DELETE SET NULL,
-    nama_layer VARCHAR(150) NOT NULL,
+    nama_layer VARCHAR(200) NOT NULL,
     nama_file_shp VARCHAR(255),
-    tipe_geometri VARCHAR(50) NOT NULL, -- 'Polygon', 'MultiPolygon', 'Point', 'LineString'
-    warna VARCHAR(20) DEFAULT '#00D2FF',
-    transparansi NUMERIC DEFAULT 0.35,
-    terlihat BOOLEAN DEFAULT TRUE,
-    urutan INTEGER DEFAULT 1,
-    jumlah_fitur INTEGER DEFAULT 0,
-    crs_asal VARCHAR(100),
-    srid_asal INTEGER,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    tipe_geometri VARCHAR(60) NOT NULL DEFAULT 'Polygon',
+    warna VARCHAR(30) NOT NULL DEFAULT '#00D2FF',
+    transparansi NUMERIC(4,2) NOT NULL DEFAULT 0.65,
+    terlihat BOOLEAN NOT NULL DEFAULT TRUE,
+    urutan INTEGER NOT NULL DEFAULT 1,
+    jumlah_fitur INTEGER NOT NULL DEFAULT 0,
+    crs_asal VARCHAR(120),
+    srid_asal INTEGER DEFAULT 4326,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    dihapus_pada TIMESTAMP WITHOUT TIME ZONE,
+    dihapus_oleh_user_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_layer_peta_kebun ON public.layer_peta (kebun_id);
+CREATE INDEX IF NOT EXISTS idx_layer_peta_unggahan ON public.layer_peta (unggahan_id);
+CREATE INDEX IF NOT EXISTS idx_layer_peta_is_deleted ON public.layer_peta (is_deleted);
+
+-- 8. Tabel Fitur Peta Spasial (Poligon Blok / Titik / Garis dalam WGS84 EPSG:4326)
 CREATE TABLE IF NOT EXISTS public.fitur_peta (
     id BIGSERIAL PRIMARY KEY,
     layer_id BIGINT NOT NULL REFERENCES public.layer_peta(id) ON DELETE CASCADE,
-    geom GEOMETRY(Geometry, 4326) NOT NULL,
+    geom geometry(Geometry, 4326) NOT NULL,
     atribut JSONB NOT NULL DEFAULT '{}'::jsonb,
-    is_deleted BOOLEAN DEFAULT FALSE,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     dihapus_pada TIMESTAMP WITHOUT TIME ZONE,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
     dibuat_oleh_user_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
     diubah_pada TIMESTAMP WITHOUT TIME ZONE,
     diubah_oleh_user_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
     dihapus_oleh_user_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL
 );
 
--- ==============================================================================
--- 6. TABEL LAYER RASTER (NDVI, ORTHOPHOTO, CITRA SATELIT)
--- ==============================================================================
+CREATE INDEX IF NOT EXISTS idx_fitur_peta_geom ON public.fitur_peta USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_fitur_peta_layer_id ON public.fitur_peta (layer_id);
+CREATE INDEX IF NOT EXISTS idx_fitur_peta_atribut ON public.fitur_peta USING GIN (atribut);
+CREATE INDEX IF NOT EXISTS idx_fitur_peta_is_deleted ON public.fitur_peta (is_deleted);
+CREATE INDEX IF NOT EXISTS idx_fitur_expr_nama_blok ON public.fitur_peta (((atribut->>'nama_blok')));
+CREATE INDEX IF NOT EXISTS idx_fitur_expr_status_lahan ON public.fitur_peta (((atribut->>'status_lahan')));
+CREATE INDEX IF NOT EXISTS idx_fitur_expr_varietas ON public.fitur_peta (((atribut->>'varietas')));
 
+-- 9. Tabel Layer Raster (Citra Drone GeoTIFF / NDVI / Orthomosaic)
 CREATE TABLE IF NOT EXISTS public.layer_raster (
     id BIGSERIAL PRIMARY KEY,
     unggahan_id BIGINT REFERENCES public.data_unggahan(id) ON DELETE CASCADE,
     kebun_id BIGINT REFERENCES public.kebun(id) ON DELETE SET NULL,
     afdeling_id BIGINT REFERENCES public.afdeling(id) ON DELETE SET NULL,
     blok_id BIGINT REFERENCES public.blok(id) ON DELETE SET NULL,
-    nama_layer VARCHAR(255) NOT NULL,
+    nama_layer VARCHAR(200) NOT NULL,
     nama_file VARCHAR(255) NOT NULL,
     lokasi_file TEXT NOT NULL,
-    tipe_raster VARCHAR(50) DEFAULT 'thematic', -- 'NDVI', 'RGB', 'ELEVATION', 'THEMATIC'
-    min_val NUMERIC,
-    max_val NUMERIC,
-    nodata NUMERIC,
-    bands_count INTEGER DEFAULT 1,
-    width INTEGER,
-    height INTEGER,
-    crs_asal VARCHAR(100),
-    srid_asal INTEGER,
-    bbox_wgs84 GEOMETRY(Polygon, 4326),
-    transparansi NUMERIC DEFAULT 0.85,
-    terlihat BOOLEAN DEFAULT TRUE,
-    urutan INTEGER DEFAULT 0,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    tipe_raster VARCHAR(40) NOT NULL DEFAULT 'RGB',
+    min_val DOUBLE PRECISION,
+    max_val DOUBLE PRECISION,
+    nodata DOUBLE PRECISION,
+    bands_count INTEGER NOT NULL DEFAULT 3,
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    crs_asal VARCHAR(120),
+    srid_asal INTEGER DEFAULT 4326,
+    bbox_wgs84 geometry(Polygon, 4326),
+    transparansi NUMERIC(4,2) NOT NULL DEFAULT 0.85,
+    terlihat BOOLEAN NOT NULL DEFAULT TRUE,
+    urutan INTEGER NOT NULL DEFAULT 1,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
--- ==============================================================================
--- 7. INDEKS SPASIAL & PERFORMA TINGGI (ENTERPRISE POSTGIS R-TREE)
--- ==============================================================================
-
--- Indeks Spasial GiST untuk pencarian geometri poligon cepat
-CREATE INDEX IF NOT EXISTS idx_fitur_peta_geom ON public.fitur_peta USING GIST (geom);
-CREATE INDEX IF NOT EXISTS idx_layer_raster_bbox ON public.layer_raster USING GIST (bbox_wgs84);
-
--- Indeks Relasional Foreign Key
-CREATE INDEX IF NOT EXISTS idx_fitur_peta_layer_id ON public.fitur_peta (layer_id);
-CREATE INDEX IF NOT EXISTS idx_fitur_peta_is_deleted ON public.fitur_peta (is_deleted);
-CREATE INDEX IF NOT EXISTS idx_layer_peta_kebun ON public.layer_peta (kebun_id);
-CREATE INDEX IF NOT EXISTS idx_layer_peta_unggahan ON public.layer_peta (unggahan_id);
 CREATE INDEX IF NOT EXISTS idx_layer_raster_kebun ON public.layer_raster (kebun_id);
-CREATE INDEX IF NOT EXISTS idx_afdeling_kebun ON public.afdeling (kebun_id);
-CREATE INDEX IF NOT EXISTS idx_blok_afdeling ON public.blok (afdeling_id);
 
--- Indeks GIN Inverted untuk filter cepat atribut JSONB (Kode Blok, Nama Blok, Varietas)
-CREATE INDEX IF NOT EXISTS idx_fitur_peta_atribut ON public.fitur_peta USING GIN (atribut);
+-- 10. Tabel Riwayat Aktivitas (Log Audit Sistem)
+CREATE TABLE IF NOT EXISTS public.riwayat_aktivitas (
+    id BIGSERIAL PRIMARY KEY,
+    pengguna_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    aktivitas VARCHAR(120) NOT NULL,
+    keterangan TEXT,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+);
 
--- Indeks Jejak Audit Pengguna (Accountability & Governance)
-CREATE INDEX IF NOT EXISTS idx_fitur_peta_dibuat_oleh ON public.fitur_peta (dibuat_oleh_user_id);
-CREATE INDEX IF NOT EXISTS idx_fitur_peta_diubah_oleh ON public.fitur_peta (diubah_oleh_user_id);
-CREATE INDEX IF NOT EXISTS idx_fitur_peta_dihapus_oleh ON public.fitur_peta (dihapus_oleh_user_id);
-
--- Indeks Ekspresi B-Tree Kunci Agronomi untuk Agregasi Cepat
-CREATE INDEX IF NOT EXISTS idx_fitur_expr_nama_blok ON public.fitur_peta (((atribut->>'nama_blok')));
-CREATE INDEX IF NOT EXISTS idx_fitur_expr_status_lahan ON public.fitur_peta (((atribut->>'status_lahan')));
-CREATE INDEX IF NOT EXISTS idx_fitur_expr_varietas ON public.fitur_peta (((atribut->>'varietas')));
-
--- ==============================================================================
--- 8. VIEW RELASIONAL AGRONOMI (ENTERPRISE GEODATABASE ARCGIS PRO STANDARD)
--- ==============================================================================
-
-CREATE OR REPLACE VIEW public.v_fitur_lahan_agronomi AS
-SELECT 
-    fp.id,
-    fp.layer_id,
-    lp.nama_layer,
-    lp.kebun_id,
-    COALESCE(k.perusahaan, 'PT Perkebunan Nusantara I (Regional 4)') AS perusahaan,
-    k.wilayah,
-    k.nama_kebun,
-    k.kode_kebun,
-    lp.afdeling_id,
-    a.nama_afdeling,
-    a.kode_afdeling,
-    -- Ekstraksi field kunci agronomi dari JSONB atribut
-    COALESCE(
-        fp.atribut->>'nama_blok',
-        fp.atribut->>'Name',
-        fp.atribut->>'KODE_BLOK',
-        fp.atribut->>'BLOK',
-        CONCAT('Blok #', fp.id)
-    ) AS nama_blok,
-    COALESCE(
-        fp.atribut->>'kode_blok',
-        fp.atribut->>'KODE_BLOK',
-        fp.atribut->>'kode',
-        fp.atribut->>'Name'
-    ) AS kode_blok,
-    COALESCE(
-        fp.atribut->>'status_lahan',
-        fp.atribut->>'STATUS',
-        fp.atribut->>'Status',
-        fp.atribut->>'DESKRIPSI',
-        'Belum Ditentukan'
-    ) AS status_lahan,
-    COALESCE(
-        fp.atribut->>'varietas',
-        fp.atribut->>'VARIETAS',
-        fp.atribut->>'komoditas',
-        fp.atribut->>'KOMODITAS',
-        'Tebu'
-    ) AS varietas,
-    COALESCE(
-        fp.atribut->>'masa_tanam',
-        fp.atribut->>'MT',
-        fp.atribut->>'TAHUN_TANAM',
-        '2023/2024'
-    ) AS masa_tanam,
-    -- Luas baku dari dokumen legal/DBF
-    CASE 
-        WHEN (fp.atribut->>'luas_baku') ~ '^[0-9]+(\.[0-9]+)?$' THEN (fp.atribut->>'luas_baku')::numeric
-        WHEN (fp.atribut->>'LUAS_HA') ~ '^[0-9]+(\.[0-9]+)?$' THEN (fp.atribut->>'LUAS_HA')::numeric
-        WHEN (fp.atribut->>'luas') ~ '^[0-9]+(\.[0-9]+)?$' THEN (fp.atribut->>'luas')::numeric
-        ELSE NULL
-    END AS luas_baku_ha,
-    -- Luas ukur geodesik akurat dari geometri PostGIS
-    ROUND((ST_Area(fp.geom::geography) / 10000.0)::numeric, 4)::float8 AS luas_ukur_ha,
-    -- Selisih ukur vs baku
-    ROUND((
-        (ST_Area(fp.geom::geography) / 10000.0) - 
-        COALESCE(
-            CASE 
-                WHEN (fp.atribut->>'luas_baku') ~ '^[0-9]+(\.[0-9]+)?$' THEN (fp.atribut->>'luas_baku')::numeric
-                WHEN (fp.atribut->>'LUAS_HA') ~ '^[0-9]+(\.[0-9]+)?$' THEN (fp.atribut->>'LUAS_HA')::numeric
-                WHEN (fp.atribut->>'luas') ~ '^[0-9]+(\.[0-9]+)?$' THEN (fp.atribut->>'luas')::numeric
-                ELSE NULL
-            END, 0
-        )
-    )::numeric, 4)::float8 AS selisih_luas_ha,
-    -- Keliling poligon dalam meter
-    ROUND(ST_Perimeter(fp.geom::geography)::numeric, 2)::float8 AS keliling_m,
-    -- Geometri dan audit metadata
-    fp.geom,
-    fp.atribut,
-    fp.is_deleted,
-    fp.dihapus_pada,
-    fp.dibuat_pada,
-    fp.dibuat_oleh_user_id,
-    fp.diubah_pada,
-    fp.diubah_oleh_user_id,
-    fp.dihapus_oleh_user_id
-FROM public.fitur_peta fp
-JOIN public.layer_peta lp ON lp.id = fp.layer_id
-LEFT JOIN public.kebun k ON k.id = lp.kebun_id
-LEFT JOIN public.afdeling a ON a.id = lp.afdeling_id;
-
--- ==============================================================================
--- 9. DATA AWAL (SEED DATA / DEFAULT ADMIN & SAMPLE KEBUN)
--- ==============================================================================
-
--- Buat Akun Admin Default (Password: admin123456)
--- Hash bcrypt $2a$12$e6xI41w3zMv1Qf2Fw5vW4uY1XwBv9U5xR5tL8z7pQ6aX4c3v2b1a (standar bcrypt)
--- Catatan: Teman Anda juga bisa menjalankan 'npm run admin:create' dari terminal
-INSERT INTO public.pengguna (nama, email, kata_sandi_hash, peran, aktif)
-VALUES (
-    'Administrator GIS',
-    'admin@nusagis.com',
-    '$2a$12$KkQ15a7p5T4CjB3vM0Z1m.O4qfCwqBvO9a2/Q7C8n/oF2S2kC6e4y', -- hash password admin123456
-    'admin',
-    TRUE
-)
-ON CONFLICT (email) DO NOTHING;
-
--- Master Kebun Contoh (Kebun Bakalan Tebu)
-INSERT INTO public.kebun (kode_kebun, nama_kebun, wilayah, komoditas, keterangan)
-VALUES (
-    'KBN-BKL',
-    'Kebun Bakalan',
-    'Wilayah Bakalan',
-    'Tebu',
-    'Kebun Tebu Garapan & KTG'
-)
-ON CONFLICT (kode_kebun) DO NOTHING;
-
+CREATE INDEX IF NOT EXISTS idx_riwayat_aktivitas_waktu ON public.riwayat_aktivitas (dibuat_pada DESC);

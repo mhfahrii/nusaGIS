@@ -19,9 +19,15 @@ import bcrypt from 'bcryptjs';
 import pg from 'pg';
 
 const BCRYPT_COST = 12;
-const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MIN_LENGTH = 4;
 const PASSWORD_MAX_BYTES = 72;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DEFAULT_ADMIN_HAK_AKSES = {
+  lihat_peta: true,
+  upload_layer: true,
+  edit_data: true,
+  hapus_data: true,
+  kelola_karyawan: true,
+};
 
 if (existsSync('.env.local')) {
   // Tidak menimpa variabel yang sudah di-set di shell.
@@ -72,18 +78,18 @@ async function readCredentials() {
   let password = process.env.ADMIN_PASSWORD ?? '';
   const interactive = Boolean(process.stdin.isTTY);
 
-  if (!nama && interactive) nama = await ask('Nama admin      : ');
-  if (!email && interactive) email = (await ask('Email admin     : ')).toLowerCase();
+  if (!nama && interactive) nama = await ask('Nama admin            : ');
+  if (!email && interactive) email = (await ask('ID / Username admin   : ')).toLowerCase();
   if (!password && interactive) {
-    password = await askHidden('Password admin  : ');
-    const confirm = await askHidden('Ulangi password : ');
+    password = await askHidden('Password admin        : ');
+    const confirm = await askHidden('Ulangi password       : ');
     if (password !== confirm) fail('Konfirmasi password tidak cocok.');
   }
 
   if (!nama || !email || !password) {
-    fail('ADMIN_NAMA, ADMIN_EMAIL, dan ADMIN_PASSWORD wajib diisi (lewat environment variable atau input interaktif).');
+    fail('ADMIN_NAMA, ADMIN_EMAIL (ID/Username), dan ADMIN_PASSWORD wajib diisi.');
   }
-  if (!EMAIL_REGEX.test(email)) fail('Format email tidak valid.');
+  if (email.length < 3 || email.length > 150) fail('ID / Username minimal 3 karakter.');
   if (password.length < PASSWORD_MIN_LENGTH) fail(`Password minimal ${PASSWORD_MIN_LENGTH} karakter.`);
   if (Buffer.byteLength(password, 'utf8') > PASSWORD_MAX_BYTES) fail(`Password maksimal ${PASSWORD_MAX_BYTES} byte.`);
   return { nama, email, password };
@@ -109,9 +115,9 @@ async function main() {
 
     const hash = await bcrypt.hash(password, BCRYPT_COST);
     const res = await pool.query(
-      `INSERT INTO pengguna (nama, email, kata_sandi_hash, peran, aktif)
-       VALUES ($1, $2, $3, 'admin', TRUE) RETURNING id`,
-      [nama, email, hash]
+      `INSERT INTO pengguna (nama, email, kata_sandi_hash, peran, aktif, hak_akses)
+       VALUES ($1, $2, $3, 'admin', TRUE, $4::jsonb) RETURNING id`,
+      [nama, email, hash, JSON.stringify(DEFAULT_ADMIN_HAK_AKSES)]
     );
     const id = Number(res.rows[0].id);
     await pool.query(

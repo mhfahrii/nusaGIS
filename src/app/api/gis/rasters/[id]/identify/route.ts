@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth/guard';
+import { requireUser, safeErrorDetail } from '@/lib/auth/guard';
 import { inspectPixelAtCoordinate } from '@/lib/gis/geotiff';
 import path from 'node:path';
 
@@ -74,10 +74,9 @@ export async function GET(
       data: pixelResult,
     });
   } catch (err: unknown) {
-    const error = err as Error;
-    console.error('Inspect Pixel Error:', error);
+    console.error('Inspect Pixel Error:', err);
     return NextResponse.json(
-      { status: 'error', message: 'Gagal melakukan inspeksi pixel raster.', detail: error.message },
+      { status: 'error', message: 'Gagal melakukan inspeksi pixel raster.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

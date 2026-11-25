@@ -219,32 +219,32 @@ export function MonitoringRightPanel({
 
           <div className="grid grid-cols-2 gap-3 pt-1">
             <div>
-              <div className="text-[10px] text-[#7DD3FC] font-medium">Luas Ukur GIS</div>
-              <div className="text-2xl font-extrabold text-[#FFFFFF] font-mono leading-none mt-1 tabular-nums">
+              <div className="text-xs text-[#7DD3FC] font-semibold">Luas Ukur GIS</div>
+              <div className="text-2xl font-extrabold text-[#FFFFFF] font-stat leading-none mt-1">
                 {fmt(luasUkurHa)}
               </div>
-              <div className="text-[9.5px] text-[#7DD3FC]/80 mt-0.5">
+              <div className="text-[11px] text-[#7DD3FC]/90 mt-0.5">
                 {isSingleBoundary && stats?.luas_m2
                   ? `${stats.luas_m2.toLocaleString('id-ID')} m²`
                   : 'Geodesik / DBF'}
               </div>
             </div>
             <div>
-              <div className="text-[10px] text-[#7DD3FC] font-medium">
+              <div className="text-xs text-[#7DD3FC] font-semibold">
                 {luasBakuHa
                   ? 'Luas Baku'
                   : isSingleBoundary
                   ? 'Areal Efektif'
                   : 'Jumlah Blok'}
               </div>
-              <div className="text-2xl font-extrabold text-[#00D2FF] font-mono leading-none mt-1 tabular-nums">
+              <div className="text-2xl font-extrabold text-[#00D2FF] font-stat leading-none mt-1">
                 {luasBakuHa
                   ? fmt(luasBakuHa)
                   : isSingleBoundary
                   ? fmt(stats?.potensi_tanam_efektif_ha)
                   : totalBlok}
               </div>
-              <div className="text-[9.5px] text-[#7DD3FC]/80 mt-0.5">
+              <div className="text-[11px] text-[#7DD3FC]/90 mt-0.5">
                 {luasBakuHa
                   ? 'Dokumen Legal'
                   : isSingleBoundary
@@ -257,24 +257,24 @@ export function MonitoringRightPanel({
           {/* Audit Selisih Ukur vs Baku */}
           {selisihHa !== undefined && selisihPct !== undefined && (
             <div
-              className="p-2 rounded-lg border flex items-center justify-between text-[10px]"
+              className="p-2.5 rounded-lg border flex items-center justify-between text-xs"
               style={{
                 background: `${auditColor}14`,
                 borderColor: `${auditColor}50`,
               }}
             >
               <div>
-                <div className="text-[#CBD5E1] font-semibold">Audit Selisih Lahan</div>
-                <div className="text-[9px]" style={{ color: auditColor }}>
+                <div className="text-[#CBD5E1] font-semibold text-[11.5px]">Audit Selisih Lahan</div>
+                <div className="text-[10.5px] font-medium" style={{ color: auditColor }}>
                   {auditLabel}
                 </div>
               </div>
-              <div className="text-right font-mono font-extrabold tabular-nums" style={{ color: auditColor }}>
+              <div className="text-right font-stat font-extrabold text-[13px]" style={{ color: auditColor }}>
                 <div>
                   {selisihHa >= 0 ? '+' : ''}
                   {fmt(selisihHa)} Ha
                 </div>
-                <div className="text-[9.5px]">
+                <div className="text-[11px] font-medium">
                   ({selisihPct >= 0 ? '+' : ''}
                   {fmt(selisihPct, 1)}%)
                 </div>
@@ -282,11 +282,11 @@ export function MonitoringRightPanel({
             </div>
           )}
 
-          <div className="pt-1.5 border-t border-[#00B4D8]/40 flex items-center justify-between text-[10px]">
-            <span className="text-[#7DD3FC]">
+          <div className="pt-2 border-t border-[#00B4D8]/40 flex items-center justify-between text-xs">
+            <span className="text-[#7DD3FC] font-medium">
               {isSingleBoundary ? 'Tipe Layer:' : 'Total Poligon Blok:'}
             </span>
-            <span className="font-mono font-bold text-[#10B981] tabular-nums">
+            <span className="font-stat font-bold text-[#10B981] text-xs">
               {isSingleBoundary ? 'Batas Luar (Perimeter)' : `${totalBlok} Blok`}
             </span>
           </div>
@@ -307,21 +307,21 @@ export function MonitoringRightPanel({
 
             <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#10B981]/20">
               <div>
-                <div className="text-[9.5px] text-[#94A3B8]">Est. Hasil Panen</div>
-                <div className="text-base font-black text-[#10B981] font-mono leading-tight mt-0.5 tabular-nums">
+                <div className="text-[11px] text-[#94A3B8] font-medium">Est. Hasil Panen</div>
+                <div className="text-lg font-black text-[#10B981] font-stat leading-tight mt-0.5">
                   {fmt(estPanenTon, 1)}
                 </div>
-                <div className="text-[9px] text-[#6EE7B7]">{cp.yieldUnit}</div>
+                <div className="text-[10px] text-[#6EE7B7]">{cp.yieldUnit}</div>
               </div>
               {estOlahanTon !== null && estOlahanTon !== undefined && cp.processedUnit && (
                 <div>
-                  <div className="text-[9.5px] text-[#94A3B8]">
+                  <div className="text-[11px] text-[#94A3B8] font-medium">
                     {cp.processedLabel || 'Hasil Olahan'}
                   </div>
-                  <div className="text-base font-black text-[#00D2FF] font-mono leading-tight mt-0.5 tabular-nums">
+                  <div className="text-lg font-black text-[#00D2FF] font-stat leading-tight mt-0.5">
                     {fmt(estOlahanTon, 2)}
                   </div>
-                  <div className="text-[9px] text-[#7DD3FC]">{cp.processedUnit}</div>
+                  <div className="text-[10px] text-[#7DD3FC]">{cp.processedUnit}</div>
                 </div>
               )}
             </div>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser, catatAktivitas } from '@/lib/auth/guard';
+import { requireUser, catatAktivitas, safeErrorDetail } from '@/lib/auth/guard';
 import type { LayerRaster } from '@/types/gis';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -144,10 +144,9 @@ export async function GET(req: NextRequest) {
       data: rasters,
     });
   } catch (err: unknown) {
-    const error = err as Error;
-    console.error('Get Rasters Error:', error);
+    console.error('Get Rasters Error:', err);
     return NextResponse.json(
-      { status: 'error', message: 'Gagal mengambil data layer raster.', detail: error.message },
+      { status: 'error', message: 'Gagal mengambil data layer raster.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }
@@ -155,7 +154,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/gis/rasters - Mengubah visibilitas & transparansi raster
 export async function PATCH(req: NextRequest) {
-  const auth = await requireUser(req);
+  const auth = await requireUser(req, { permission: 'edit_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -211,9 +210,8 @@ export async function PATCH(req: NextRequest) {
       data: res.rows[0],
     });
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal memperbarui layer raster.', detail: error.message },
+      { status: 'error', message: 'Gagal memperbarui layer raster.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }
@@ -221,7 +219,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE /api/gis/rasters?id={id} - Menghapus layer raster dan file fisiknya
 export async function DELETE(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'hapus_data', requireJson: false });
   if (auth.response) return auth.response;
 
   try {
@@ -265,9 +263,8 @@ export async function DELETE(req: NextRequest) {
       message: 'Layer raster berhasil dihapus.',
     });
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal menghapus layer raster.', detail: error.message },
+      { status: 'error', message: 'Gagal menghapus layer raster.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

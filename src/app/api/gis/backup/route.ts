@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { requireUser } from '@/lib/auth/guard';
+import { hasPermission } from '@/types/auth';
 
 interface LayerBackupRow {
   id: number;
@@ -31,6 +32,16 @@ export async function GET(req: NextRequest) {
   const auth = await requireUser(req);
   if (auth.response) return auth.response;
 
+  if (!hasPermission(auth.user, 'hapus_data') && !hasPermission(auth.user, 'kelola_karyawan')) {
+    return NextResponse.json(
+      {
+        status: 'error',
+        message: 'Akses ditolak: Anda tidak memiliki izin untuk mengunduh cadangan database GIS.',
+      },
+      { status: 403 }
+    );
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const download = searchParams.get('download') === '1' || searchParams.get('download') === 'true';
@@ -53,6 +64,7 @@ export async function GET(req: NextRequest) {
        FROM public.layer_peta lp
        LEFT JOIN public.kebun k ON k.id = lp.kebun_id
        LEFT JOIN public.afdeling a ON a.id = lp.afdeling_id
+       WHERE COALESCE(lp.is_deleted, FALSE) = FALSE
        ORDER BY lp.id ASC`
     );
 
@@ -69,6 +81,7 @@ export async function GET(req: NextRequest) {
        FROM public.fitur_peta fp
        JOIN public.layer_peta lp ON lp.id = fp.layer_id
        WHERE COALESCE(fp.is_deleted, FALSE) = FALSE
+         AND COALESCE(lp.is_deleted, FALSE) = FALSE
        ORDER BY fp.layer_id ASC, fp.id ASC`
     );
 

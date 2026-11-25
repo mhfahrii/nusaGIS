@@ -460,9 +460,9 @@ export function MonitoringSidebar({
                       className="flex items-center justify-between px-1.5 py-1 rounded hover:bg-[#12192B] group cursor-pointer transition-colors"
                       title={`Klik untuk ${isCollapsed ? 'membuka' : 'menutup'} daftar kebun di ${wilayahName}`}
                     >
-                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#00D2FF] uppercase tracking-wider min-w-0">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-[#00D2FF] uppercase tracking-wider min-w-0">
                         <IconChevronRight
-                          className={`w-3 h-3 text-[#00D2FF] shrink-0 transition-transform ${
+                          className={`w-3.5 h-3.5 text-[#00D2FF] shrink-0 transition-transform ${
                             isCollapsed ? '' : 'rotate-90'
                           }`}
                         />
@@ -510,15 +510,15 @@ export function MonitoringSidebar({
                               const kBox = getBbox(layerItems);
                               if (kBox && onZoomToLayer) onZoomToLayer(kBox);
                             }}
-                            className="text-[10px] font-semibold text-[#8B9BB4] hover:text-[#F0F6FC] flex items-center justify-between gap-1 py-0.5 px-1 rounded hover:bg-[#12192B]/60 cursor-pointer transition-colors"
+                            className="text-xs font-semibold text-[#CBD5E1] hover:text-[#00D2FF] flex items-center justify-between gap-1 py-1 px-1 rounded hover:bg-[#12192B]/80 cursor-pointer transition-colors"
                             title={`Klik untuk fokus ke ${kebunName}`}
                           >
-                            <div className="flex items-center gap-1 truncate min-w-0">
-                              <span className="text-[#10B981] shrink-0">🌱</span>
+                            <div className="flex items-center gap-1.5 truncate min-w-0">
+                              <span className="text-[#10B981] text-xs shrink-0">🌱</span>
                               <span className="truncate">{kebunName}</span>
                             </div>
                             {onZoomToLayer && (
-                              <IconZoomTo className="w-2.5 h-2.5 text-[#566680] hover:text-[#00D2FF] shrink-0" />
+                              <IconZoomTo className="w-3 h-3 text-[#8B9BB4] hover:text-[#00D2FF] shrink-0" />
                             )}
                           </div>
 
@@ -545,7 +545,7 @@ export function MonitoringSidebar({
                                       style={{ backgroundColor: layer.warna || '#00D2FF' }}
                                     />
                                     {!isRenaming ? (
-                                      <span className="font-semibold truncate text-[11px] leading-tight">
+                                      <span className="font-semibold truncate text-[13px] leading-snug">
                                         {layer.nama_layer}
                                       </span>
                                     ) : (
@@ -675,11 +675,11 @@ export function MonitoringSidebar({
                                 </div>
 
                                 {/* Badge Tipe Geometri & Jumlah Fitur */}
-                                <div className="flex items-center justify-between text-[9px] text-[#8B9BB4] font-mono px-0.5">
-                                  <span className="bg-[#0D1322] px-1 py-0.5 rounded border border-[#1E2942]">
+                                <div className="flex items-center justify-between text-[11px] text-[#94A3B8] font-stat px-0.5">
+                                  <span className="bg-[#0D1322] px-1.5 py-0.5 rounded border border-[#1E2942] text-[10.5px]">
                                     {layer.tipe_geometri || 'Polygon'}
                                   </span>
-                                  <span>{layer.jumlah_fitur || 0} fitur</span>
+                                  <span className="font-medium text-[#CBD5E1]">{layer.jumlah_fitur || 0} fitur</span>
                                 </div>
                               </div>
                             );

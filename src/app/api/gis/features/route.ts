@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth/guard';
+import { requireUser, safeErrorDetail } from '@/lib/auth/guard';
 
 interface FeatureDbRow {
   id: number;
@@ -127,9 +127,8 @@ export async function GET(req: NextRequest) {
       }),
     });
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal mengambil data atribut fitur.', detail: error.message },
+      { status: 'error', message: 'Gagal mengambil data atribut fitur.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }
@@ -210,10 +209,9 @@ export async function DELETE(req: NextRequest) {
       data: { id, layer_id: layerId },
     });
   } catch (err: unknown) {
-    const error = err as Error;
-    console.error('Delete feature error:', error);
+    console.error('Delete feature error:', err);
     return NextResponse.json(
-      { status: 'error', message: 'Gagal menghapus lahan.', detail: error.message },
+      { status: 'error', message: 'Gagal menghapus lahan.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

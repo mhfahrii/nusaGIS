@@ -6,7 +6,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
-import { requireUser } from '@/lib/auth/guard';
+import { requireUser, safeErrorDetail } from '@/lib/auth/guard';
+import { checkRateLimit } from '@/lib/auth/rate-limit';
 import {
   parseShapefileZip,
   parseGeoJsonBuffer,
@@ -36,6 +37,17 @@ export async function POST(req: NextRequest) {
   const auth = await requireUser(req, { requireJson: false, permission: 'upload_layer' });
   if (auth.response) return auth.response;
 
+  const retryAfter = checkRateLimit(`gis-upload:${auth.user.id}`, 25, 10 * 60 * 1000);
+  if (retryAfter > 0) {
+    return NextResponse.json(
+      {
+        status: 'error',
+        message: `Terlalu banyak aktivitas inspeksi/upload file GIS. Silakan tunggu ${Math.ceil(retryAfter / 60)} menit lagi.`,
+      },
+      { status: 429, headers: { 'Retry-After': String(retryAfter) } }
+    );
+  }
+
   const tempId = crypto.randomBytes(16).toString('hex');
   const tempDir = path.join(os.tmpdir(), 'nusagis-upload-cache');
   const tempFilePath = path.join(tempDir, `${tempId}.bin`);
@@ -48,6 +60,25 @@ export async function POST(req: NextRequest) {
 
   try {
     await fs.mkdir(tempDir, { recursive: true });
+
+    // Auto-cleanup file cache sementara yang berumur lebih dari 2 jam agar disk server tetap bersih
+    fs.readdir(tempDir)
+      .then(async (entries) => {
+        const expireBefore = Date.now() - 2 * 60 * 60 * 1000;
+        for (const name of entries) {
+          const full = path.join(tempDir, name);
+          try {
+            const st = await fs.stat(full);
+            if (st.isFile() && st.mtimeMs < expireBefore) {
+              await fs.unlink(full).catch(() => {});
+            }
+          } catch {
+            // abaikan
+          }
+        }
+      })
+      .catch(() => {});
+
     const contentType = req.headers.get('content-type') || '';
 
     let fileBuffer: Buffer;
@@ -468,13 +499,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     await cleanupTempFile();
-    const error = err as Error;
-    console.error('Inspect GIS Error:', error);
+    console.error('Inspect GIS Error:', err);
     return NextResponse.json(
       {
         status: 'error',
         message: 'Gagal memeriksa file GIS yang diunggah.',
-        detail: error.message,
+        detail: safeErrorDetail(err),
       },
       { status: 500 }
     );

@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth/guard';
+import { requireUser, safeErrorDetail } from '@/lib/auth/guard';
+
+function escapeHtml(raw: unknown): string {
+  return String(raw ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/\]\]>/g, ']]&gt;');
+}
 
 interface ExportDbRow {
   id: number;
@@ -88,10 +98,10 @@ export async function GET(req: NextRequest) {
     const params: unknown[] = [];
 
     if (featureIdParam) {
-      whereClause = 'WHERE fp.id = $1';
+      whereClause = 'WHERE fp.id = $1 AND COALESCE(fp.is_deleted, FALSE) = FALSE AND COALESCE(lp.is_deleted, FALSE) = FALSE';
       params.push(parseInt(featureIdParam, 10));
     } else if (layerIdParam) {
-      whereClause = 'WHERE fp.layer_id = $1';
+      whereClause = 'WHERE fp.layer_id = $1 AND COALESCE(fp.is_deleted, FALSE) = FALSE AND COALESCE(lp.is_deleted, FALSE) = FALSE';
       params.push(parseInt(layerIdParam, 10));
     }
 
@@ -129,18 +139,18 @@ export async function GET(req: NextRequest) {
       : String(rows[0].nama_layer).replace(/[^a-zA-Z0-9_-]/g, '_');
 
     if (format === 'kml') {
-      // Export KML (Google Earth)
+      // Export KML (Google Earth) dengan sanitasi karakter HTML/XML
       const placemarks = rows
         .map((r) => {
-          const name = r.atribut.Name || r.atribut.KODE_BLOK || `Fitur #${r.id}`;
+          const name = escapeHtml(r.atribut.Name || r.atribut.KODE_BLOK || `Fitur #${r.id}`);
           const kmlGeom = coordinatesToKmlString(r.geom_json);
           const descRows = Object.entries(r.atribut)
             .filter(([k]) => !k.startsWith('_'))
-            .map(([k, v]) => `<tr><td><b>${k}</b></td><td>${v}</td></tr>`)
+            .map(([k, v]) => `<tr><td><b>${escapeHtml(k)}</b></td><td>${escapeHtml(v)}</td></tr>`)
             .join('');
 
           const luasRow = r.luas_geodesik_ha
-            ? `<tr><td><b>Luas Geodesik</b></td><td>${r.luas_geodesik_ha} Ha</td></tr>`
+            ? `<tr><td><b>Luas Geodesik</b></td><td>${escapeHtml(r.luas_geodesik_ha)} Ha</td></tr>`
             : '';
 
           return `
@@ -161,7 +171,7 @@ export async function GET(req: NextRequest) {
       const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>${baseName}</name>
+    <name>${escapeHtml(baseName)}</name>
     <Style id="plantationStyle">
       <LineStyle>
         <color>ff1818be</color>
@@ -217,10 +227,9 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err: unknown) {
-    const error = err as Error;
-    console.error('Export GIS Error:', error);
+    console.error('Export GIS Error:', err);
     return NextResponse.json(
-      { status: 'error', message: 'Gagal mengekspor data spasial.', detail: error.message },
+      { status: 'error', message: 'Gagal mengekspor data spasial.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

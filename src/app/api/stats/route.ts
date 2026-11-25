@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth/guard';
+import { requireUser, safeErrorDetail } from '@/lib/auth/guard';
 import {
   extractFeatureIntel,
   detectCommodityProfile,
@@ -414,9 +414,8 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal mengambil data statistik.', detail: error.message },
+      { status: 'error', message: 'Gagal mengambil data statistik.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

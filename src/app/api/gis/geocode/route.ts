@@ -125,7 +125,9 @@ export async function GET(req: NextRequest) {
        LEFT JOIN public.kebun k ON k.id = lp.kebun_id
        LEFT JOIN public.afdeling a ON a.id = lp.afdeling_id
        LEFT JOIN public.blok b ON b.id = lp.blok_id
-       WHERE ${conds.join(' AND ')}
+       WHERE COALESCE(lp.is_deleted, FALSE) = FALSE
+         AND COALESCE(fp.is_deleted, FALSE) = FALSE
+         AND ${conds.join(' AND ')}
        ORDER BY fp.id DESC
        LIMIT 10`,
       tokenParams
@@ -191,8 +193,9 @@ export async function GET(req: NextRequest) {
        FROM public.layer_peta lp
        LEFT JOIN public.data_unggahan du ON du.id = lp.unggahan_id
        LEFT JOIN public.kebun k ON k.id = lp.kebun_id
-       LEFT JOIN public.fitur_peta fp ON fp.layer_id = lp.id
-       WHERE ${conds.join(' AND ')}
+       LEFT JOIN public.fitur_peta fp ON fp.layer_id = lp.id AND COALESCE(fp.is_deleted, FALSE) = FALSE
+       WHERE COALESCE(lp.is_deleted, FALSE) = FALSE
+         AND ${conds.join(' AND ')}
        GROUP BY lp.id, k.nama_kebun
        LIMIT 4`,
       tokenParams

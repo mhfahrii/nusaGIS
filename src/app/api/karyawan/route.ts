@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { query } from '@/lib/db';
-import { catatAktivitas, requireUser } from '@/lib/auth/guard';
+import { catatAktivitas, requireUser, safeErrorDetail } from '@/lib/auth/guard';
 import { hashPassword, PASSWORD_MAX_BYTES } from '@/lib/auth/password';
 import {
   DAFTAR_PERAN,
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
       {
         status: 'error',
         message: 'Gagal memuat daftar karyawan dari database.',
-        detail: (err as Error).message,
+        detail: safeErrorDetail(err),
       },
       { status: 500 }
     );
@@ -217,7 +217,7 @@ export async function POST(req: NextRequest) {
       {
         status: 'error',
         message: 'Gagal menyimpan akun karyawan baru ke database.',
-        detail: (err as Error).message,
+        detail: safeErrorDetail(err),
       },
       { status: 500 }
     );
@@ -404,7 +404,7 @@ export async function PATCH(req: NextRequest) {
       {
         status: 'error',
         message: 'Gagal memperbarui akun karyawan.',
-        detail: (err as Error).message,
+        detail: safeErrorDetail(err),
       },
       { status: 500 }
     );
@@ -479,7 +479,7 @@ export async function DELETE(req: NextRequest) {
       {
         status: 'error',
         message: 'Gagal menghapus akun karyawan.',
-        detail: (err as Error).message,
+        detail: safeErrorDetail(err),
       },
       { status: 500 }
     );

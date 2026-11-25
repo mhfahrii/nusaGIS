@@ -18,6 +18,12 @@ import type { LayerPeta, LayerRaster, MonitoringStats } from '@/types/gis';
 import { extractFeatureIntel } from '@/lib/gis/attributeExtractor';
 import { findRpnEntity, formatPerusahaanForPopup } from '@/lib/gis/rpnEntities';
 import {
+  fetchBmkgAgroWeather,
+  fetchLatestRainRadarTileUrl,
+  formatCompassDirection,
+  type LocationWeatherReport,
+} from '@/lib/gis/bmkgWeather';
+import {
   searchLocalData,
   searchPlaces,
   searchBigAdmin,
@@ -66,234 +72,24 @@ interface MonitoringMapProps {
   afdelingList?: { id: number; kebun_id?: number; nama_afdeling: string; kode_afdeling: string }[];
 }
 
-export type LeafletBasemapKey = 'google_sat' | 'google_hybrid' | 'satellite' | 'topo' | 'osm';
+import {
+  BASEMAP_STYLES,
+  calculatePolygonAreaHa,
+  getFeatureRkapClassification,
+  isFeatureMatchingAfdeling,
+  type BasemapConfig,
+  type LeafletBasemapKey,
+  type RkapClassification,
+} from './mapSymbology';
 
-export interface BasemapConfig {
-  name: string;
-  url: string;
-  attribution: string;
-  description: string;
-  maxNativeZoom: number;
-  maxZoom: number;
-  subdomains?: string[] | string;
-}
-
-export const BASEMAP_STYLES: Record<LeafletBasemapKey, BasemapConfig> = {
-  google_sat: {
-    name: 'Citra Satelit HD (Google 2x)',
-    url: 'https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}&scale=2',
-    attribution: 'Tiles &copy; Google Maps High-Res Satellite',
-    description: 'Citra satelit Retina 512px tajam hingga level pohon',
-    maxNativeZoom: 20,
-    maxZoom: 21,
-    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-  },
-  google_hybrid: {
-    name: 'Satelit Hybrid HD + Label',
-    url: 'https://{s}.google.com/vt/lyrs=y&hl=id&x={x}&y={y}&z={z}&scale=2',
-    attribution: 'Tiles &copy; Google Maps Hybrid HD',
-    description: 'Satelit HD dilengkapi nama desa, jalan & batas',
-    maxNativeZoom: 20,
-    maxZoom: 21,
-    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-  },
-  satellite: {
-    name: 'Citra Satelit (Esri + Auto-HD)',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri &mdash; Maxar, Earthstar Geographics, and GIS Community',
-    description: 'Citra Esri + otomatis beralih ke HD saat zoom dekat',
-    maxNativeZoom: 18,
-    maxZoom: 21,
-  },
-  topo: {
-    name: 'Topografi',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri &mdash; Esri, TomTom, USGS, FAO, NPS, OpenStreetMap',
-    description: 'Peta kontur dan relief medan perkebunan',
-    maxNativeZoom: 18,
-    maxZoom: 21,
-  },
-  osm: {
-    name: 'OpenStreetMap',
-    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    description: 'Peta jalan dan batas administratif standar',
-    maxNativeZoom: 19,
-    maxZoom: 21,
-  },
+export {
+  BASEMAP_STYLES,
+  getFeatureRkapClassification,
+  isFeatureMatchingAfdeling,
+  type BasemapConfig,
+  type LeafletBasemapKey,
+  type RkapClassification,
 };
-
-export interface RkapClassification {
-  luasHa: number;
-  category: 'optimal' | 'warning' | 'critical';
-  color: string;
-  label: string;
-  statusText: string;
-  badgeText: string;
-}
-
-/**
- * Filter cerdas keterkaitan fitur blok terhadap Afdeling (Standar Hierarki Perkebunan + Klaster Otomatis A/B/C/Kebun Rakyat)
- */
-export function isFeatureMatchingAfdeling(
-  feature: GeoJSON.Feature | Record<string, unknown>,
-  afdelingId: number | null | undefined,
-  afdelingList: { id: number; kebun_id?: number; nama_afdeling: string; kode_afdeling: string }[] = [],
-  layerKebunId?: number | null
-): boolean {
-  if (!afdelingId) return true;
-  const props = ((feature as GeoJSON.Feature).properties || feature || {}) as Record<string, unknown>;
-
-  const afd = afdelingList.find((a) => Number(a.id) === Number(afdelingId));
-
-  // 0. Guard Kebun Induk: jika Afdeling punya kebun_id dan layer berasal dari kebun lain (misal Bandung), LANGSUNG tolak!
-  if (afd?.kebun_id && layerKebunId && Number(afd.kebun_id) !== Number(layerKebunId)) {
-    return false;
-  }
-
-  // 1. Cek langsung jika id afdeling tersimpan di atribut fitur
-  if (props.afdeling_id && Number(props.afdeling_id) === Number(afdelingId)) {
-    return true;
-  }
-
-  if (!afd) return true;
-
-  const afdNameLower = (afd.nama_afdeling || '').trim().toLowerCase();
-  const afdCodeLower = (afd.kode_afdeling || '').trim().toLowerCase();
-
-  // 2. Cek menggunakan Mesin Ekstraksi Multi-Kolom (A1-A4 -> Afdeling A, B1-B4 -> Afdeling B, C1-C4 -> Afdeling C, Kebun Rakyat, Bakalan Rayon A/B/C)
-  const intel = extractFeatureIntel(props);
-  if (intel.afdelingGroup) {
-    const groupLower = intel.afdelingGroup.toLowerCase();
-    if (
-      groupLower === afdNameLower ||
-      groupLower.includes(afdNameLower) ||
-      afdNameLower.includes(groupLower)
-    ) {
-      return true;
-    }
-  }
-
-  // 3. Cek jika nama atau kode afdeling terdapat langsung di atribut DBF
-  const featAfd = String(
-    props.afdeling || props.nama_afdeling || props.NAMA_AFDELING || props.kode_afdeling || ''
-  )
-    .trim()
-    .toLowerCase();
-  if (featAfd) {
-    if (featAfd === afdNameLower || featAfd.includes(afdNameLower) || afdNameLower.includes(featAfd)) {
-      return true;
-    }
-    if (afdCodeLower && (featAfd === afdCodeLower || featAfd.includes(afdCodeLower))) {
-      return true;
-    }
-  }
-
-  // 4. Heuristik Partisi Blok Kebun Bakalan (cek Afdeling II / 2 DULU agar 'ii' tidak terdeteksi sebagai 'i'!)
-  const featName = intel.blokName.toLowerCase();
-  const isAfd2 =
-    /\b(ii|2)\b/i.test(afdNameLower) ||
-    /(?:^|[-_\s])(?:ii|2)$|afd[^0-9]*2\b/i.test(afdCodeLower);
-  const isAfd1 =
-    !isAfd2 &&
-    (/\b(i|1)\b/i.test(afdNameLower) ||
-      /(?:^|[-_\s])(?:i|1)$|afd[^0-9]*1\b/i.test(afdCodeLower));
-
-  if (isAfd1) {
-    return /gpa\s*[1-3]\b|bakalan\s*a\b/i.test(featName);
-  }
-  if (isAfd2) {
-    return /gpa\s*[4-8]\b|bakalan\s*[bc]\b/i.test(featName);
-  }
-
-  // 5. Jika filter adalah klaster eksplisit (Afdeling A/B/C/D) namun fitur tidak cocok di langkah 2, tolak
-  if (/afdeling\s+[a-d]\b/i.test(afdNameLower)) {
-    return false;
-  }
-
-  return false;
-}
-
-/**
- * Klasifikasi Simbologi Tematik ArcGIS Pro Murni dari Atribut Shapefile (.dbf / PopupInfo)
- * - Mendukung Status Pengelolaan (KTG vs KS GPA), Varietas, serta Pewarnaan Klaster Afdeling (A, B, C, Kebun Rakyat)
- */
-export function getFeatureRkapClassification(
-  featId: number,
-  props: Record<string, unknown>
-): RkapClassification {
-  const intel = extractFeatureIntel(props, { featId });
-  const luasHa = intel.luasUkurHa;
-  const statusLahan = intel.statusLahan;
-  const varietas = intel.varietas;
-
-  // Kelas 1: Kebun Tebu Giling (KTG) / Blok Sudah Tanam Varietas
-  if (/ktg|tebu giling/i.test(statusLahan) || varietas !== '') {
-    return {
-      luasHa,
-      category: 'optimal',
-      color: '#10b981', // Emerald 500
-      label: 'KTG · Tebu Giling',
-      statusText: statusLahan || 'Kebun Tebu Giling (KTG)',
-      badgeText: varietas ? `${statusLahan || 'KTG'} · ${varietas}` : statusLahan || 'KTG',
-    };
-  }
-
-  // Kelas Khusus Klaster Afdeling (misal Kebun Sarongge A/B/C/Kebun Rakyat tanpa status KS GPA)
-  if (!statusLahan && intel.afdelingGroup) {
-    const isB = /afdeling b/i.test(intel.afdelingGroup);
-    const isC = /afdeling c|kebun rakyat/i.test(intel.afdelingGroup);
-    return {
-      luasHa,
-      category: isB ? 'optimal' : isC ? 'critical' : 'warning',
-      color: intel.afdelingColor,
-      label: intel.afdelingGroup,
-      statusText: intel.afdelingGroup,
-      badgeText: `${luasHa} Ha`,
-    };
-  }
-
-  // Kelas 2: KS GPA 2023 — Blok Luas Besar (>= 1.50 Ha)
-  if (luasHa >= 1.5) {
-    return {
-      luasHa,
-      category: 'warning',
-      color: '#00d2ff', // Electric Cyan
-      label: 'KS GPA (≥ 1,50 Ha)',
-      statusText: `${statusLahan || 'KS GPA 2023'} · Blok Besar`,
-      badgeText: `${luasHa} Ha`,
-    };
-  }
-
-  // Kelas 3: KS GPA 2023 — Blok Luas Kecil (< 1.50 Ha)
-  return {
-    luasHa,
-    category: 'critical',
-    color: '#f59e0b', // Amber 500
-    label: 'KS GPA (< 1,50 Ha)',
-    statusText: `${statusLahan || 'KS GPA 2023'} · Blok Kecil`,
-    badgeText: `${luasHa} Ha`,
-  };
-}
-
-/**
- * Menghitung luas poligon geodesik bola bumi dalam satuan Hektar (Ha)
- */
-function calculatePolygonAreaHa(latlngs: [number, number][]): number {
-  if (latlngs.length < 3) return 0;
-  const radius = 6378137; // radius bumi dalam meter
-  let total = 0;
-  for (let i = 0; i < latlngs.length; i++) {
-    const j = (i + 1) % latlngs.length;
-    const lat1 = (latlngs[i][0] * Math.PI) / 180;
-    const lat2 = (latlngs[j][0] * Math.PI) / 180;
-    const lng1 = (latlngs[i][1] * Math.PI) / 180;
-    const lng2 = (latlngs[j][1] * Math.PI) / 180;
-    total += (lng2 - lng1) * (2 + Math.sin(lat1) + Math.sin(lat2));
-  }
-  const areaM2 = (Math.abs(total * radius * radius) / 2.0);
-  return Number((areaM2 / 10000.0).toFixed(2));
-}
 
 function SearchResultRow({
   loc,
@@ -367,8 +163,15 @@ export function MonitoringMap({
   const searchGroupRef = useRef<LType.LayerGroup | null>(null);
   const wilayahGroupRef = useRef<LType.LayerGroup | null>(null);
   const companyPinsGroupRef = useRef<LType.LayerGroup | null>(null);
+  const weatherPinsGroupRef = useRef<LType.LayerGroup | null>(null);
+  const weatherRadarTileRef = useRef<LType.TileLayer | null>(null);
   const wilayahAbortRef = useRef<AbortController | null>(null);
   const [isCompanyCardCollapsed, setIsCompanyCardCollapsed] = useState(false);
+  const [isWeatherRadarOn, setIsWeatherRadarOn] = useState(true);
+  const [radarFrameTime, setRadarFrameTime] = useState<string | null>(null);
+  const [loadingWeather, setLoadingWeather] = useState(false);
+  const [inspectingWeatherPoint, setInspectingWeatherPoint] = useState(false);
+  const [kebunWeatherCount, setKebunWeatherCount] = useState(0);
   const geojsonCacheRef = useRef<Map<number, GeoJSON.FeatureCollection>>(new Map());
   const initialAutoFitDoneRef = useRef<boolean>(false);
   const layersRef = useRef<LayerPeta[]>(layers);
@@ -387,6 +190,10 @@ export function MonitoringMap({
 
   // UI states — Default ke Citra Satelit HD (Google 2x Retina) agar tidak pecah saat zoom dekat
   const [currentBasemap, setCurrentBasemap] = useState<LeafletBasemapKey>('google_sat');
+  const currentBasemapRef = useRef<LeafletBasemapKey>('google_sat');
+  useEffect(() => {
+    currentBasemapRef.current = currentBasemap;
+  }, [currentBasemap]);
   const [isBasemapMenuOpen, setIsBasemapMenuOpen] = useState(false);
   const [isLayersPanelOpen, setIsLayersPanelOpen] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
@@ -810,6 +617,114 @@ export function MonitoringMap({
     []
   );
 
+  // Helper: Membangun kartu popup Cuaca & Suhu Agro-Meteorologi BMKG
+  const buildWeatherPopupElement = useCallback(
+    (
+      titleName: string,
+      subtitleWilayah: string,
+      report: LocationWeatherReport
+    ): HTMLElement => {
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText =
+        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; width: min(340px, calc(100vw - 36px)); max-width: calc(100vw - 36px); display: flex; flex-direction: column; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.85);';
+
+      const safeTitle = titleName.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeSub = subtitleWilayah.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const compass = formatCompassDirection(report.windDirectionDeg);
+
+      const forecastRowsHtml = report.dailyForecast
+        .map(
+          (day) => `
+          <div style="background: #12192b; border: 1px solid #1e2942; border-radius: 7px; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; gap: 3px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 9.5px; font-weight: 800; color: #f0f6fc;">${day.dayName}</span>
+              <span style="font-size: 13px;">${day.conditionEmoji}</span>
+            </div>
+            <div style="font-size: 9px; color: #8b9bb4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${day.conditionLabel}</div>
+            <div style="display: flex; align-items: baseline; justify-content: space-between; margin-top: 2px;">
+              <span style="font-size: 11px; font-weight: 900; color: #00d2ff; font-family: ui-monospace, monospace;">${day.tempMaxC}°</span>
+              <span style="font-size: 9.5px; color: #8b9bb4; font-family: ui-monospace, monospace;">${day.tempMinC}°C</span>
+            </div>
+            <div style="font-size: 8.5px; color: #38bdf8; font-family: ui-monospace, monospace;">
+              💧 ${day.precipitationProbPct}% · ${day.precipitationMm} mm
+            </div>
+          </div>`
+        )
+        .join('');
+
+      wrapper.innerHTML = `
+        <div style="background: linear-gradient(180deg, #12192b 0%, #0d1322 100%); padding: 10px 12px; border-bottom: 1px solid #1e2942; border-top: 2.5px solid ${report.accentColor};">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <div style="min-width: 0; flex: 1;">
+              <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 2px;">
+                <span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: ${report.accentColor};"></span>
+                <span style="font-size: 9px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: #00d2ff;">MONITORING CUACA &amp; SUHU BMKG</span>
+              </div>
+              <h4 style="margin: 0; font-size: 13px; font-weight: 800; color: #ffffff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${safeTitle}</h4>
+              <div style="font-size: 10px; color: #8b9bb4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${safeSub}</div>
+            </div>
+            <span style="background: ${report.accentColor}20; border: 1px solid ${report.accentColor}60; color: ${report.accentColor}; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; white-space: nowrap;">
+              ${report.conditionEmoji} ${report.conditionLabel}
+            </span>
+          </div>
+        </div>
+
+        <div style="padding: 10px 12px; background: #0a0e1a; border-bottom: 1px solid #1e2942;">
+          <div style="display: flex; align-items: center; justify-content: space-between; background: #0d1322; border: 1px solid #1e2942; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;">
+            <div>
+              <div style="font-size: 9px; font-weight: 700; color: #8b9bb4; text-transform: uppercase;">Suhu Udara Aktual</div>
+              <div style="font-size: 22px; font-weight: 900; color: #ffffff; font-family: ui-monospace, monospace; line-height: 1.15; margin-top: 2px;">
+                ${report.temperatureC}°C
+              </div>
+              <div style="font-size: 9.5px; color: #8b9bb4; margin-top: 1px;">Terasa seperti ${report.apparentTempC}°C</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 28px; line-height: 1;">${report.conditionEmoji}</div>
+              <div style="font-size: 9px; color: #566680; font-family: ui-monospace, monospace; margin-top: 4px;">
+                ${report.lat.toFixed(4)}, ${report.lng.toFixed(4)}
+              </div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
+            <div style="background: #0d1322; border: 1px solid #1e2942; border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 8.5px; font-weight: 700; color: #8b9bb4; text-transform: uppercase;">Kelembapan</div>
+              <div style="font-size: 13px; font-weight: 900; color: #00d2ff; font-family: ui-monospace, monospace; margin-top: 2px;">${report.humidityPct}%</div>
+              <div style="font-size: 8px; color: #566680;">RH Udara</div>
+            </div>
+            <div style="background: #0d1322; border: 1px solid #1e2942; border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 8.5px; font-weight: 700; color: #8b9bb4; text-transform: uppercase;">Curah Hujan</div>
+              <div style="font-size: 13px; font-weight: 900; color: #38bdf8; font-family: ui-monospace, monospace; margin-top: 2px;">${report.precipitationMm} mm</div>
+              <div style="font-size: 8px; color: #566680;">Presipitasi</div>
+            </div>
+            <div style="background: #0d1322; border: 1px solid #1e2942; border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 8.5px; font-weight: 700; color: #8b9bb4; text-transform: uppercase;">Angin</div>
+              <div style="font-size: 12.5px; font-weight: 900; color: #10b981; font-family: ui-monospace, monospace; margin-top: 2px;">${report.windSpeedKmh} km/j</div>
+              <div style="font-size: 8px; color: #566680;">Arah ${compass}</div>
+            </div>
+          </div>
+
+          <div style="margin-top: 8px; padding: 6px 8px; background: #0f241f; border: 1px solid #10b98140; border-radius: 6px; font-size: 10px; color: #a7f3d0; line-height: 1.35;">
+            <strong style="color: #10b981;">Rekomendasi Kebun:</strong> ${report.agroAdvisory}
+          </div>
+        </div>
+
+        <div style="padding: 9px 12px; background: #0d1322;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <span style="font-size: 9.5px; font-weight: 800; color: #8b9bb4; text-transform: uppercase; letter-spacing: 0.04em;">Prakiraan Cuaca 3 Hari</span>
+            <span style="font-size: 9px; color: #566680; font-family: ui-monospace, monospace;">Update ${report.updatedAt} WIB</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
+            ${forecastRowsHtml}
+          </div>
+        </div>
+      `;
+
+      return wrapper;
+    },
+    []
+  );
+
   // Helper: Membangun kartu popup inspeksi piksel RASTER
   const buildRasterPopupElement = useCallback(
     (
@@ -893,17 +808,38 @@ export function MonitoringMap({
 
       leafletRef.current = L;
 
-      // Cari initial center dari layer yang aktif jika ada
+      // Cari initial center gabungan dari seluruh layer yang aktif (Semua Perusahaan PT RPN)
       const initLayers = layersRef.current;
-      const initialLayerWithBbox =
-        initLayers.find((l) => l.terlihat && l.bbox) || initLayers.find((l) => l.bbox);
-      let initCenter: [number, number] = [-7.6668, 112.9125]; // Default ke Kebun Bakalan
-      const initZoom = 15;
-      if (initialLayerWithBbox?.bbox) {
-        initCenter = [
-          (initialLayerWithBbox.bbox[1] + initialLayerWithBbox.bbox[3]) / 2,
-          (initialLayerWithBbox.bbox[0] + initialLayerWithBbox.bbox[2]) / 2,
-        ];
+      let initCenter: [number, number] = [-2.5, 117.0];
+      let initZoom = 5;
+      let minX = Infinity,
+        minY = Infinity,
+        maxX = -Infinity,
+        maxY = -Infinity,
+        foundBbox = false;
+      for (const l of initLayers) {
+        if (!l.bbox || l.bbox.length !== 4) continue;
+        const [w, s, e, n] = l.bbox;
+        if (
+          Number.isFinite(w) &&
+          Number.isFinite(s) &&
+          Number.isFinite(e) &&
+          Number.isFinite(n) &&
+          Math.abs(w) <= 180 &&
+          Math.abs(e) <= 180 &&
+          Math.abs(s) <= 90 &&
+          Math.abs(n) <= 90
+        ) {
+          minX = Math.min(minX, w);
+          minY = Math.min(minY, s);
+          maxX = Math.max(maxX, e);
+          maxY = Math.max(maxY, n);
+          foundBbox = true;
+        }
+      }
+      if (foundBbox) {
+        initCenter = [(minY + maxY) / 2, (minX + maxX) / 2];
+        initZoom = 6;
       }
 
       const map = L.map(mapContainerRef.current, {
@@ -964,6 +900,10 @@ export function MonitoringMap({
       const companyPinsGrp = L.layerGroup().addTo(map);
       companyPinsGroupRef.current = companyPinsGrp;
 
+      // Group untuk pin cuaca & suhu BMKG di setiap unit kebun
+      const weatherPinsGrp = L.layerGroup().addTo(map);
+      weatherPinsGroupRef.current = weatherPinsGrp;
+
       mapRef.current = map;
       setMapReady(true);
 
@@ -1022,7 +962,40 @@ export function MonitoringMap({
         );
       });
 
-      if (!clickedRaster) return;
+      if (!clickedRaster) {
+        if (currentBasemapRef.current === 'bmkg_weather') {
+          const L = leafletRef.current;
+          if (!L) return;
+          try {
+            setInspectingWeatherPoint(true);
+            const report = await fetchBmkgAgroWeather(e.latlng.lat, e.latlng.lng);
+            const popupEl = buildWeatherPopupElement(
+              'Inspeksi Cuaca Titik Koordinat',
+              `Lat ${e.latlng.lat.toFixed(4)}, Lng ${e.latlng.lng.toFixed(4)}`,
+              report
+            );
+            L.popup({
+              className: 'monitoring-leaflet-popup',
+              maxWidth: 370,
+              minWidth: 315,
+              closeButton: true,
+              autoPan: true,
+              autoPanPaddingTopLeft: L.point(24, 72),
+              autoPanPaddingBottomRight: L.point(24, 28),
+              keepInView: true,
+              offset: [0, -10],
+            })
+              .setLatLng(e.latlng)
+              .setContent(popupEl)
+              .openOn(map);
+          } catch (wErr) {
+            console.warn('Weather point inspection error:', wErr);
+          } finally {
+            setInspectingWeatherPoint(false);
+          }
+        }
+        return;
+      }
 
       try {
         setInspectingPixel(true);
@@ -1084,7 +1057,7 @@ export function MonitoringMap({
       map.off('mousemove', handleMouseMove);
       map.off('dblclick', handleDblClick);
     };
-  }, [isDrawingMode, drawingPoints, rasterLayers, mapReady, buildRasterPopupElement]);
+  }, [isDrawingMode, drawingPoints, rasterLayers, mapReady, buildRasterPopupElement, buildWeatherPopupElement]);
 
   // 3. Render Visualisasi Interaktif Mode Gambar (Pencil Digitize Preview)
   useEffect(() => {
@@ -1209,6 +1182,200 @@ export function MonitoringMap({
       marker.addTo(group);
     });
   }, [selectedPerusahaan, companyLocations, mapReady, zoomToBounds]);
+
+  // 4C. Render Overlay Radar Awan Hujan & Pin Badge Suhu (°C) + Cuaca saat mode "Peta Cuaca & Suhu BMKG" dipilih
+  useEffect(() => {
+    const mapInstance = mapRef.current;
+    const LInstance = leafletRef.current;
+    if (!mapInstance || !LInstance || !mapReady) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function syncRadarOverlay(map: LType.Map, L: typeof LType) {
+      if (weatherRadarTileRef.current) {
+        map.removeLayer(weatherRadarTileRef.current);
+        weatherRadarTileRef.current = null;
+      }
+
+      if (currentBasemap !== 'bmkg_weather' || !isWeatherRadarOn) {
+        return;
+      }
+
+      const { tileUrl, frameTime } = await fetchLatestRainRadarTileUrl(controller.signal);
+      if (cancelled || !tileUrl || !mapRef.current) return;
+
+      setRadarFrameTime(frameTime);
+      const radarTile = L.tileLayer(tileUrl, {
+        opacity: 0.58,
+        maxNativeZoom: 7,
+        maxZoom: 21,
+        zIndex: 250,
+        attribution: 'Radar Curah Hujan &copy; RainViewer',
+      }).addTo(map);
+      weatherRadarTileRef.current = radarTile;
+    }
+
+    syncRadarOverlay(mapInstance, LInstance);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (weatherRadarTileRef.current && mapRef.current) {
+        mapRef.current.removeLayer(weatherRadarTileRef.current);
+        weatherRadarTileRef.current = null;
+      }
+    };
+  }, [currentBasemap, isWeatherRadarOn, mapReady]);
+
+  useEffect(() => {
+    const mapInstance = mapRef.current;
+    const LInstance = leafletRef.current;
+    const groupInstance = weatherPinsGroupRef.current;
+    if (!mapInstance || !LInstance || !groupInstance || !mapReady) return;
+
+    groupInstance.clearLayers();
+    if (currentBasemap !== 'bmkg_weather') {
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const kebunMap = new Map<
+      string,
+      {
+        key: string;
+        kebunId: number | null;
+        namaKebun: string;
+        wilayah: string;
+        minX: number;
+        minY: number;
+        maxX: number;
+        maxY: number;
+      }
+    >();
+
+    for (const l of layers) {
+      if (!l.bbox || l.bbox.length !== 4) continue;
+      const [w, s, e, n] = l.bbox;
+      if (
+        !Number.isFinite(w) ||
+        !Number.isFinite(s) ||
+        !Number.isFinite(e) ||
+        !Number.isFinite(n) ||
+        Math.abs(w) > 180 ||
+        Math.abs(e) > 180 ||
+        Math.abs(s) > 90 ||
+        Math.abs(n) > 90
+      ) {
+        continue;
+      }
+      const kKey = l.kebun_id ? `kebun_${l.kebun_id}` : `layer_${l.id}`;
+      const existing = kebunMap.get(kKey);
+      if (existing) {
+        existing.minX = Math.min(existing.minX, w);
+        existing.minY = Math.min(existing.minY, s);
+        existing.maxX = Math.max(existing.maxX, e);
+        existing.maxY = Math.max(existing.maxY, n);
+      } else {
+        kebunMap.set(kKey, {
+          key: kKey,
+          kebunId: l.kebun_id ? Number(l.kebun_id) : null,
+          namaKebun: l.nama_kebun || l.nama_layer,
+          wilayah: l.wilayah || l.provinsi || 'Wilayah Perkebunan',
+          minX: w,
+          minY: s,
+          maxX: e,
+          maxY: n,
+        });
+      }
+    }
+
+    const targets = Array.from(kebunMap.values());
+    if (targets.length === 0) return;
+
+    async function loadKebunWeatherPins(
+      map: LType.Map,
+      L: typeof LType,
+      group: LType.LayerGroup
+    ) {
+      setKebunWeatherCount(targets.length);
+      setLoadingWeather(true);
+      try {
+        await Promise.all(
+          targets.map(async (target) => {
+            const centerLat = (target.minY + target.maxY) / 2;
+            const centerLng = (target.minX + target.maxX) / 2;
+            try {
+              const report = await fetchBmkgAgroWeather(centerLat, centerLng, controller.signal);
+              if (cancelled || !weatherPinsGroupRef.current) return;
+
+              const safeKebun = target.namaKebun.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              const safeCond = report.conditionLabel.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+              const icon = L.divIcon({
+                className: 'bmkg-weather-pin',
+                html: `<div style="display:inline-flex;align-items:center;gap:7px;background:rgba(13,19,34,0.95);border:1.5px solid ${report.accentColor};border-radius:9999px;padding:4px 11px 4px 7px;box-shadow:0 8px 22px rgba(0,0,0,0.75);white-space:nowrap;cursor:pointer;transform:translate(-50%,-115%);">
+                  <span style="font-size:16px;line-height:1;">${report.conditionEmoji}</span>
+                  <span style="display:flex;flex-direction:column;line-height:1.15;">
+                    <span style="display:flex;align-items:center;gap:5px;">
+                      <span style="color:#ffffff;font-weight:900;font-size:12px;font-family:ui-monospace,monospace;">${report.temperatureC}°C</span>
+                      <span style="color:#00d2ff;font-weight:800;font-size:10.5px;">${safeKebun}</span>
+                    </span>
+                    <span style="color:#94a3b8;font-size:9px;font-weight:600;">${safeCond} · RH ${report.humidityPct}% · 💧 ${report.precipitationMm} mm</span>
+                  </span>
+                </div>`,
+                iconSize: [0, 0],
+                iconAnchor: [0, 0],
+              });
+
+              const marker = L.marker([centerLat, centerLng], { icon, zIndexOffset: 750 });
+              marker.on('click', (ev: LType.LeafletMouseEvent) => {
+                L.DomEvent.stopPropagation(ev);
+                zoomToBounds([target.minX, target.minY, target.maxX, target.maxY]);
+                const popupEl = buildWeatherPopupElement(
+                  target.namaKebun,
+                  target.wilayah,
+                  report
+                );
+                L.popup({
+                  className: 'monitoring-leaflet-popup',
+                  maxWidth: 370,
+                  minWidth: 315,
+                  closeButton: true,
+                  autoPan: true,
+                  autoPanPaddingTopLeft: L.point(24, 72),
+                  autoPanPaddingBottomRight: L.point(24, 28),
+                  keepInView: true,
+                  offset: [0, -14],
+                })
+                  .setLatLng([centerLat, centerLng])
+                  .setContent(popupEl)
+                  .openOn(map);
+              });
+
+              marker.addTo(group);
+            } catch {
+              // Abaikan kegagalan 1 titik kebun agar titik lain tetap tampil
+            }
+          })
+        );
+      } finally {
+        if (!cancelled) {
+          setLoadingWeather(false);
+        }
+      }
+    }
+
+    loadKebunWeatherPins(mapInstance, LInstance, groupInstance);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      setLoadingWeather(false);
+    };
+  }, [currentBasemap, layers, mapReady, buildWeatherPopupElement, zoomToBounds]);
 
   // 4. Render layer RASTER (GeoTIFF Overlay)
   useEffect(() => {
@@ -1430,8 +1597,8 @@ export function MonitoringMap({
               }
             });
 
-            // Label permanen (Nama Blok + Luas Ha) jika toggle Labels aktif
-            if (showLabels) {
+            // Label permanen (Nama Blok + Luas Ha) jika toggle Labels aktif dan bukan sedang di mode Cuaca BMKG (agar tidak bertumpuk dengan badge cuaca kebun)
+            if (showLabels && currentBasemap !== 'bmkg_weather') {
               const labelIntel = extractFeatureIntel(props, {
                 featId,
                 layerName: layer.nama_layer,
@@ -1539,14 +1706,63 @@ export function MonitoringMap({
         });
       }
 
-      // Auto-fit awal jika belum pernah auto-fit
-      if (!initialAutoFitDoneRef.current && !selectedAfdelingId && !selectedWilayahRef.current && (visibleLayers.length > 0 || rasterLayers.length > 0)) {
-        const firstVector = visibleLayers.find((l) => l.bbox);
-        const firstRaster = rasterLayers.find((r) => r.bbox);
-        const targetBbox = firstVector?.bbox || firstRaster?.bbox;
-        if (targetBbox) {
+      // Auto-fit awal ke gabungan seluruh wilayah (Semua Perusahaan PT RPN) jika belum pernah auto-fit
+      if (
+        !initialAutoFitDoneRef.current &&
+        !selectedAfdelingId &&
+        !selectedWilayahRef.current &&
+        (visibleLayers.length > 0 || rasterLayers.length > 0)
+      ) {
+        let minX = Infinity,
+          minY = Infinity,
+          maxX = -Infinity,
+          maxY = -Infinity,
+          foundUnion = false;
+
+        for (const l of visibleLayers) {
+          if (!l.bbox || l.bbox.length !== 4) continue;
+          const [w, s, e, n] = l.bbox;
+          if (
+            Number.isFinite(w) &&
+            Number.isFinite(s) &&
+            Number.isFinite(e) &&
+            Number.isFinite(n) &&
+            Math.abs(w) <= 180 &&
+            Math.abs(e) <= 180 &&
+            Math.abs(s) <= 90 &&
+            Math.abs(n) <= 90
+          ) {
+            minX = Math.min(minX, w);
+            minY = Math.min(minY, s);
+            maxX = Math.max(maxX, e);
+            maxY = Math.max(maxY, n);
+            foundUnion = true;
+          }
+        }
+        for (const r of rasterLayers) {
+          if (!r.terlihat || !r.bbox || r.bbox.length !== 4) continue;
+          const [w, s, e, n] = r.bbox;
+          if (
+            Number.isFinite(w) &&
+            Number.isFinite(s) &&
+            Number.isFinite(e) &&
+            Number.isFinite(n) &&
+            Math.abs(w) <= 180 &&
+            Math.abs(e) <= 180 &&
+            Math.abs(s) <= 90 &&
+            Math.abs(n) <= 90
+          ) {
+            minX = Math.min(minX, w);
+            minY = Math.min(minY, s);
+            maxX = Math.max(maxX, e);
+            maxY = Math.max(maxY, n);
+            foundUnion = true;
+          }
+        }
+
+        if (foundUnion) {
           initialAutoFitDoneRef.current = true;
-          zoomToBounds(targetBbox);
+          zoomToBounds([minX, minY, maxX, maxY]);
         }
       }
 
@@ -1562,6 +1778,7 @@ export function MonitoringMap({
     layers,
     rasterLayers,
     showLabels,
+    currentBasemap,
     isOutlineOnly,
     symbologyMode,
     statusFilter,
@@ -2230,15 +2447,39 @@ export function MonitoringMap({
           <button
             type="button"
             onClick={() => {
-              const firstLayerWithBbox = layers.find((l) => l.bbox) || rasterLayers.find((r) => r.bbox);
-              if (firstLayerWithBbox?.bbox) {
-                zoomToBounds(firstLayerWithBbox.bbox);
+              let minX = Infinity,
+                minY = Infinity,
+                maxX = -Infinity,
+                maxY = -Infinity,
+                foundUnion = false;
+              for (const l of layers) {
+                if (!l.bbox || l.bbox.length !== 4) continue;
+                const [w, s, e, n] = l.bbox;
+                if (
+                  Number.isFinite(w) &&
+                  Number.isFinite(s) &&
+                  Number.isFinite(e) &&
+                  Number.isFinite(n) &&
+                  Math.abs(w) <= 180 &&
+                  Math.abs(e) <= 180 &&
+                  Math.abs(s) <= 90 &&
+                  Math.abs(n) <= 90
+                ) {
+                  minX = Math.min(minX, w);
+                  minY = Math.min(minY, s);
+                  maxX = Math.max(maxX, e);
+                  maxY = Math.max(maxY, n);
+                  foundUnion = true;
+                }
+              }
+              if (foundUnion) {
+                zoomToBounds([minX, minY, maxX, maxY]);
               } else if (mapRef.current) {
-                mapRef.current.setView([-7.6668, 112.9125], 15, { animate: true });
+                mapRef.current.setView([-2.5, 117.0], 5, { animate: true });
               }
             }}
             className="p-1.5 rounded-md hover:bg-[#12192B] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors cursor-pointer"
-            title="Zoom ke Seluruh Extent Kebun"
+            title="Zoom ke Seluruh Wilayah (Semua Perusahaan PT RPN)"
           >
             <IconFullExtent className="w-4 h-4" />
           </button>
@@ -2688,11 +2929,86 @@ export function MonitoringMap({
         </div>
       )}
 
+      {/* Panel Kontrol & Switch Radar Hujan saat Mode "Peta Cuaca & Suhu BMKG" Aktif */}
+      {currentBasemap === 'bmkg_weather' && !isDrawingMode && (
+        <div className="absolute bottom-9 right-14 sm:bottom-10 sm:right-14 z-[995] w-[calc(100%-70px)] max-w-[300px] bg-[#0D1322]/95 backdrop-blur-md border border-[#00D2FF]/50 rounded-xl shadow-2xl overflow-hidden text-xs">
+          <div className="px-3 py-2 bg-[#12192B] border-b border-[#1E2942] flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-sm">⛅</span>
+              <div className="min-w-0">
+                <div className="font-extrabold text-[#F0F6FC] text-[11px] truncate">
+                  Peta Cuaca &amp; Suhu BMKG
+                </div>
+                <div className="text-[9.5px] text-[#00D2FF] truncate">
+                  {kebunWeatherCount} Unit Kebun · Klik Peta Cek Cuaca
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleSelectBasemap('google_sat')}
+              className="px-2 py-0.5 rounded bg-[#0D1322] hover:bg-[#19233A] border border-[#1E2942] text-[10px] font-semibold text-[#8B9BB4] hover:text-white cursor-pointer shrink-0"
+              title="Kembali ke Citra Satelit HD"
+            >
+              Satelit
+            </button>
+          </div>
+
+          <div className="p-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-2 bg-[#0A0E1A] border border-[#1E2942] rounded-lg px-2.5 py-1.5">
+              <div className="min-w-0">
+                <div className="text-[11px] font-bold text-[#F0F6FC]">
+                  Overlay Radar Awan Hujan
+                </div>
+                <div className="text-[9.5px] text-[#8B9BB4]">
+                  {isWeatherRadarOn
+                    ? `Aktif${radarFrameTime ? ` · Update ${radarFrameTime}` : ''}`
+                    : 'Nonaktif (Poligon Jernih)'}
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isWeatherRadarOn}
+                onClick={() => setIsWeatherRadarOn((prev) => !prev)}
+                className={`w-10 h-5 rounded-full p-0.5 transition-colors shrink-0 flex items-center cursor-pointer ${
+                  isWeatherRadarOn
+                    ? 'bg-[#00D2FF] justify-end'
+                    : 'bg-[#12192B] border border-[#1E2942] justify-start'
+                }`}
+                title="Tampilkan atau sembunyikan lapisan warna radar hujan di atas peta"
+              >
+                <span
+                  className={`w-4 h-4 rounded-full ${
+                    isWeatherRadarOn ? 'bg-[#051320]' : 'bg-[#566680]'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="text-[10px] text-[#8B9BB4] leading-snug px-0.5">
+              Klik <strong className="text-[#00D2FF]">badge suhu (°C)</strong> di setiap kebun atau <strong className="text-[#F0F6FC]">klik titik mana saja</strong> di peta untuk melihat suhu, kelembapan, angin, dan prakiraan 3 hari.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Indikator Inspeksi / Sinkronisasi */}
       {loadingLayers && (
         <div className="absolute top-3 left-3 z-[1000] bg-slate-900/90 border border-slate-800 text-emerald-300 px-2.5 py-1 rounded-md text-[11px] font-medium flex items-center gap-2 shadow-lg">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
           <span>Memuat geometri PostGIS...</span>
+        </div>
+      )}
+
+      {(loadingWeather || inspectingWeatherPoint) && (
+        <div className="absolute top-12 left-3 z-[1000] bg-[#0D1322]/95 border border-[#00D2FF]/50 text-[#00D2FF] px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-2 shadow-lg">
+          <span className="w-2 h-2 rounded-full bg-[#00D2FF] animate-ping" />
+          <span>
+            {inspectingWeatherPoint
+              ? 'Memuat data cuaca & suhu titik koordinat...'
+              : 'Memuat data cuaca & suhu BMKG unit kebun...'}
+          </span>
         </div>
       )}
 

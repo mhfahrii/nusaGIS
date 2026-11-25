@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth/guard';
+import { catatAktivitas, requireUser, safeErrorDetail } from '@/lib/auth/guard';
 import { Blok, Afdeling } from '@/types/perkebunan';
 
 interface PgError extends Error {
@@ -102,9 +102,8 @@ export async function GET(req: NextRequest) {
       data: res.rows,
     });
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal mengambil data blok.', detail: error.message },
+      { status: 'error', message: 'Gagal mengambil data blok.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }
@@ -112,7 +111,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/blok
 export async function POST(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'edit_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -194,6 +193,12 @@ export async function POST(req: NextRequest) {
       [afdeling_id, kode_blok, nama_blok, komoditas, tahun_tanam, keterangan]
     );
 
+    await catatAktivitas(
+      auth.user.id,
+      'tambah_blok',
+      `Menambahkan blok "${nama_blok}" (${kode_blok}) pada afdeling ID #${afdeling_id}.`
+    );
+
     return NextResponse.json(
       {
         status: 'success',
@@ -217,7 +222,7 @@ export async function POST(req: NextRequest) {
       );
     }
     return NextResponse.json(
-      { status: 'error', message: 'Gagal menambahkan data blok.', detail: pgErr.message },
+      { status: 'error', message: 'Gagal menambahkan data blok.', detail: safeErrorDetail(pgErr) },
       { status: 500 }
     );
   }
@@ -225,7 +230,7 @@ export async function POST(req: NextRequest) {
 
 // PATCH /api/blok
 export async function PATCH(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'edit_data' });
   if (auth.response) return auth.response;
 
   try {
@@ -360,11 +365,18 @@ export async function PATCH(req: NextRequest) {
     `;
 
     const updateRes = await query<Blok>(updateSql, values);
+    const updatedRow = updateRes.rows[0];
+
+    await catatAktivitas(
+      auth.user.id,
+      'ubah_blok',
+      `Memperbarui blok "${updatedRow.nama_blok}" (${updatedRow.kode_blok}).`
+    );
 
     return NextResponse.json({
       status: 'success',
       message: 'Data blok berhasil diperbarui.',
-      data: updateRes.rows[0],
+      data: updatedRow,
     });
   } catch (err: unknown) {
     const pgErr = err as PgError;
@@ -375,7 +387,7 @@ export async function PATCH(req: NextRequest) {
       );
     }
     return NextResponse.json(
-      { status: 'error', message: 'Gagal memperbarui data blok.', detail: pgErr.message },
+      { status: 'error', message: 'Gagal memperbarui data blok.', detail: safeErrorDetail(pgErr) },
       { status: 500 }
     );
   }
@@ -383,7 +395,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE /api/blok?id={id}
 export async function DELETE(req: NextRequest) {
-  const auth = await requireUser(req, { roles: ['admin'] });
+  const auth = await requireUser(req, { permission: 'hapus_data', requireJson: false });
   if (auth.response) return auth.response;
 
   try {
@@ -417,15 +429,20 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
+    await catatAktivitas(
+      auth.user.id,
+      'hapus_blok',
+      `Menghapus blok "${delRes.rows[0].nama_blok}" (${delRes.rows[0].kode_blok}).`
+    );
+
     return NextResponse.json({
       status: 'success',
       message: `Blok "${delRes.rows[0].nama_blok}" berhasil dihapus.`,
       data: delRes.rows[0],
     });
   } catch (err: unknown) {
-    const error = err as Error;
     return NextResponse.json(
-      { status: 'error', message: 'Gagal menghapus data blok.', detail: error.message },
+      { status: 'error', message: 'Gagal menghapus data blok.', detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }
