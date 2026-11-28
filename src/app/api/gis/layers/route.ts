@@ -260,7 +260,8 @@ export async function DELETE(req: NextRequest) {
       // Cari seluruh kebun yang berada di wilayah ini
       const kebunRes = await query<{ id: number; nama_kebun: string }>(
         `SELECT id, nama_kebun FROM public.kebun 
-         WHERE LOWER(TRIM(COALESCE(provinsi, ''))) = LOWER(TRIM($1)) 
+         WHERE LOWER(TRIM(COALESCE(kabupaten_kota, ''))) = LOWER(TRIM($1))
+            OR LOWER(TRIM(COALESCE(provinsi, ''))) = LOWER(TRIM($1)) 
             OR LOWER(TRIM(COALESCE(wilayah, ''))) = LOWER(TRIM($1)) 
             OR TRIM(COALESCE(wilayah, '')) ILIKE $2`,
         [wilayahClean, `%${wilayahClean}%`]

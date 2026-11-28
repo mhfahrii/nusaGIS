@@ -12,12 +12,17 @@ CREATE TABLE IF NOT EXISTS public.pengguna (
     nama VARCHAR(150) NOT NULL,
     email VARCHAR(254) NOT NULL UNIQUE,
     kata_sandi_hash TEXT NOT NULL,
-    peran VARCHAR(30) NOT NULL DEFAULT 'pengguna' CHECK (peran IN ('admin', 'pengguna')),
+    peran VARCHAR(30) NOT NULL DEFAULT 'pengguna' CHECK (peran IN ('admin', 'pengguna', 'mandor', 'asisten', 'kepala_kebun', 'pimpinan')),
     aktif BOOLEAN NOT NULL DEFAULT TRUE,
+    afdeling_id BIGINT REFERENCES public.afdeling(id) ON DELETE SET NULL,
+    kebun_id BIGINT REFERENCES public.kebun(id) ON DELETE SET NULL,
     hak_akses JSONB,
     foto_profil TEXT,
     dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_pengguna_afdeling ON public.pengguna (afdeling_id);
+CREATE INDEX IF NOT EXISTS idx_pengguna_kebun ON public.pengguna (kebun_id);
 
 -- 2. Tabel Permintaan Hak Akses Sementara (Workflow Pengajuan Karyawan -> Persetujuan Admin)
 CREATE TABLE IF NOT EXISTS public.permintaan_hak_sementara (
@@ -61,18 +66,45 @@ CREATE TABLE IF NOT EXISTS public.afdeling (
 CREATE INDEX IF NOT EXISTS idx_afdeling_kebun_id ON public.afdeling (kebun_id);
 
 -- 5. Tabel Master Blok
+-- Blok selalu milik satu kebun. Afdeling opsional: kebun kecil (tanpa afdeling) langsung punya blok.
 CREATE TABLE IF NOT EXISTS public.blok (
     id BIGSERIAL PRIMARY KEY,
-    afdeling_id BIGINT NOT NULL REFERENCES public.afdeling(id) ON DELETE CASCADE,
+    kebun_id BIGINT NOT NULL REFERENCES public.kebun(id) ON DELETE CASCADE,
+    afdeling_id BIGINT REFERENCES public.afdeling(id) ON DELETE CASCADE,
     kode_blok VARCHAR(60) NOT NULL,
     nama_blok VARCHAR(150) NOT NULL,
     komoditas VARCHAR(100),
     tahun_tanam INTEGER,
+    aktivitas_terakhir VARCHAR(200),
+    tanggal_aktivitas_terakhir DATE,
     keterangan TEXT,
-    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
-    UNIQUE (afdeling_id, kode_blok)
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+-- Migrasi database lama yang dibuat saat afdeling_id masih wajib.
+ALTER TABLE public.blok ADD COLUMN IF NOT EXISTS kebun_id BIGINT REFERENCES public.kebun(id) ON DELETE CASCADE;
+ALTER TABLE public.blok ADD COLUMN IF NOT EXISTS aktivitas_terakhir VARCHAR(200);
+ALTER TABLE public.blok ADD COLUMN IF NOT EXISTS tanggal_aktivitas_terakhir DATE;
+UPDATE public.blok b SET kebun_id = a.kebun_id FROM public.afdeling a WHERE b.kebun_id IS NULL AND a.id = b.afdeling_id;
+ALTER TABLE public.blok ALTER COLUMN kebun_id SET NOT NULL;
+ALTER TABLE public.blok ALTER COLUMN afdeling_id DROP NOT NULL;
+ALTER TABLE public.blok DROP CONSTRAINT IF EXISTS uq_blok_afdeling;
+ALTER TABLE public.blok DROP CONSTRAINT IF EXISTS blok_afdeling_id_kode_blok_key;
+
+-- Afdeling yang dipilih wajib berada di kebun yang sama dengan blok (tidak dicek bila afdeling_id NULL).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_afdeling_id_kebun ON public.afdeling (id, kebun_id);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_blok_afdeling_kebun') THEN
+        ALTER TABLE public.blok
+            ADD CONSTRAINT fk_blok_afdeling_kebun FOREIGN KEY (afdeling_id, kebun_id)
+            REFERENCES public.afdeling (id, kebun_id) ON UPDATE CASCADE ON DELETE CASCADE;
+    END IF;
+END $$;
+
+-- Kode blok unik per afdeling, atau per kebun untuk blok tanpa afdeling (tidak peka huruf besar/kecil).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_blok_kode_wilayah ON public.blok (kebun_id, COALESCE(afdeling_id, 0), LOWER(kode_blok));
+CREATE INDEX IF NOT EXISTS idx_blok_kebun_id ON public.blok (kebun_id);
 CREATE INDEX IF NOT EXISTS idx_blok_afdeling_id ON public.blok (afdeling_id);
 
 -- 6. Tabel Data Unggahan Arsip GIS (Shapefile ZIP / GeoJSON / GeoTIFF)
@@ -180,3 +212,89 @@ CREATE TABLE IF NOT EXISTS public.riwayat_aktivitas (
 );
 
 CREATE INDEX IF NOT EXISTS idx_riwayat_aktivitas_waktu ON public.riwayat_aktivitas (dibuat_pada DESC);
+
+-- 11. Tabel Master Data Aktivitas Agronomi (Lintas Komoditas PT RPN)
+CREATE TABLE IF NOT EXISTS public.master_aktivitas (
+    id BIGSERIAL PRIMARY KEY,
+    kode_aktivitas VARCHAR(50) NOT NULL UNIQUE,
+    nama_aktivitas VARCHAR(150) NOT NULL,
+    komoditas VARCHAR(50) NOT NULL DEFAULT 'Umum',
+    kategori VARCHAR(50) NOT NULL DEFAULT 'pemeliharaan',
+    satuan_hasil VARCHAR(50) NOT NULL DEFAULT 'Kg',
+    deskripsi TEXT,
+    is_aktif BOOLEAN NOT NULL DEFAULT TRUE,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_master_aktivitas_komoditas ON public.master_aktivitas (komoditas);
+CREATE INDEX IF NOT EXISTS idx_master_aktivitas_kategori ON public.master_aktivitas (kategori);
+
+-- 12. Tabel Catatan Aktivitas & Hasil Harian Lapangan per Blok (Input Mandor & Verifikasi Berjenjang)
+CREATE TABLE IF NOT EXISTS public.catatan_aktivitas_blok (
+    id BIGSERIAL PRIMARY KEY,
+    blok_id BIGINT NOT NULL REFERENCES public.blok(id) ON DELETE CASCADE,
+    aktivitas_id BIGINT NOT NULL REFERENCES public.master_aktivitas(id) ON DELETE RESTRICT,
+    pengguna_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    tanggal_aktivitas DATE NOT NULL DEFAULT CURRENT_DATE,
+    volume_hasil NUMERIC(12, 2) DEFAULT 0,
+    satuan VARCHAR(50) DEFAULT 'Kg',
+    tenaga_kerja_hk INTEGER DEFAULT 0,
+    pusingan_petik INTEGER,
+    persen_peko NUMERIC(5, 2),
+    kondisi_tanaman VARCHAR(50) DEFAULT 'sehat',
+    status_risiko_manual VARCHAR(30) DEFAULT 'normal',
+    catatan TEXT,
+    status_verifikasi VARCHAR(40) NOT NULL DEFAULT 'menunggu_asisten',
+    diverifikasi_oleh BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    disetujui_oleh BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    catatan_verifikasi TEXT,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_catatan_aktivitas_blok ON public.catatan_aktivitas_blok (blok_id);
+CREATE INDEX IF NOT EXISTS idx_catatan_aktivitas_tgl ON public.catatan_aktivitas_blok (tanggal_aktivitas DESC);
+CREATE INDEX IF NOT EXISTS idx_catatan_aktivitas_akt ON public.catatan_aktivitas_blok (aktivitas_id);
+
+-- 13. Tabel Laporan Kendala Lapangan (Fleksibel dari Dashboard & Digitasi Spasial Kontrol Peta)
+CREATE TABLE IF NOT EXISTS public.laporan_kendala_lapangan (
+    id BIGSERIAL PRIMARY KEY,
+    kebun_id BIGINT REFERENCES public.kebun(id) ON DELETE CASCADE,
+    afdeling_id BIGINT REFERENCES public.afdeling(id) ON DELETE SET NULL,
+    blok_id BIGINT REFERENCES public.blok(id) ON DELETE SET NULL,
+    fitur_id BIGINT REFERENCES public.fitur_peta(id) ON DELETE SET NULL,
+    pelapor_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    judul_kendala VARCHAR(200) NOT NULL,
+    kategori_kendala VARCHAR(80) NOT NULL DEFAULT 'lainnya',
+    tingkat_urgensi VARCHAR(40) NOT NULL DEFAULT 'sedang',
+    deskripsi TEXT,
+    koordinat_geojson JSONB,
+    luas_area_ha NUMERIC(10, 2),
+    status_verifikasi VARCHAR(40) NOT NULL DEFAULT 'menunggu_asisten',
+    diverifikasi_oleh BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    disetujui_oleh BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    catatan_tindak_lanjut TEXT,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_laporan_kendala_kebun ON public.laporan_kendala_lapangan (kebun_id);
+CREATE INDEX IF NOT EXISTS idx_laporan_kendala_afdeling ON public.laporan_kendala_lapangan (afdeling_id);
+CREATE INDEX IF NOT EXISTS idx_laporan_kendala_status ON public.laporan_kendala_lapangan (status_verifikasi);
+
+-- 14. Tabel Data Makro, Iklim & Agronomi Laboratorium (Input Kepala Kebun untuk Root Cause Analysis)
+CREATE TABLE IF NOT EXISTS public.data_makro_kebun (
+    id BIGSERIAL PRIMARY KEY,
+    kebun_id BIGINT NOT NULL REFERENCES public.kebun(id) ON DELETE CASCADE,
+    afdeling_id BIGINT REFERENCES public.afdeling(id) ON DELETE SET NULL,
+    blok_id BIGINT REFERENCES public.blok(id) ON DELETE SET NULL,
+    pengguna_id BIGINT REFERENCES public.pengguna(id) ON DELETE SET NULL,
+    periode_bulan VARCHAR(20) NOT NULL DEFAULT '2026-11',
+    curah_hujan_mm NUMERIC(8, 2) NOT NULL DEFAULT 145,
+    status_hara VARCHAR(40) NOT NULL DEFAULT 'normal',
+    ndvi_rata_rata NUMERIC(4, 2) NOT NULL DEFAULT 0.71,
+    kelembaban_tanah NUMERIC(4, 2) NOT NULL DEFAULT 0.28,
+    catatan_lab TEXT,
+    dibuat_pada TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_makro_kebun ON public.data_makro_kebun (kebun_id);
+CREATE INDEX IF NOT EXISTS idx_data_makro_blok ON public.data_makro_kebun (blok_id);

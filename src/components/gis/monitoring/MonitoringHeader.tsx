@@ -50,23 +50,19 @@ export function MonitoringHeader({
             <span className="font-extrabold tracking-wider text-[#F0F6FC] text-xs sm:text-sm uppercase truncate">
               GIS Monitoring
             </span>
-            <span className="hidden sm:inline-block px-1.5 py-0.2 rounded text-[10px] font-bold bg-[#0E3A5D]/80 border border-[#00B4D8]/60 text-[#00D2FF] font-mono shrink-0">
-              PostGIS
-            </span>
           </div>
           <p className="hidden sm:block text-[10px] text-[#8B9BB4] leading-none truncate">
-            PT Riset Perkebunan Nusantara (PT RPN) · Monitoring Spasial Kebun &amp; Blok Lahan
+            PT Riset Perkebunan Nusantara (PT RPN) · Monitoring Kebun &amp; Blok Lahan
           </p>
         </div>
       </div>
 
       {/* 2. Middle Period & Quick Filter Indicators */}
       <div className="hidden lg:flex items-center gap-6 text-[11px] text-[#8B9BB4]">
-        {/* Filter Status Pengelolaan Areal (Standar ArcGIS Pro) */}
+        {/* Filter Status Pengelolaan Areal */}
         <div className="flex flex-col">
           <span className="text-[10px] text-[#8B9BB4] flex items-center gap-1 font-semibold">
             <span>Status Pengelolaan</span>
-            <span className="text-[9px] text-[#00D2FF] font-mono px-1 bg-[#0E3A5D]/60 rounded">ArcGIS</span>
           </span>
           <select
             value={selectedStatusFilter}

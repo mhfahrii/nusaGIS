@@ -47,13 +47,13 @@ async function main() {
 
     // 3. Buat Blok
     await client.query(`
-      INSERT INTO blok (afdeling_id, kode_blok, nama_blok, komoditas, tahun_tanam, keterangan)
+      INSERT INTO blok (kebun_id, afdeling_id, kode_blok, nama_blok, komoditas, tahun_tanam, keterangan)
       VALUES 
-        ($1, 'A01', 'Blok A01', 'Kelapa Sawit', 2018, 'Produksi TM-1'),
-        ($1, 'A02', 'Blok A02', 'Kelapa Sawit', 2018, 'Produksi TM-1'),
-        ($1, 'A03', 'Blok A03', 'Kelapa Sawit', 2019, 'Produksi TBM-3'),
-        ($2, 'B01', 'Blok B01', 'Kelapa Sawit', 2020, 'Produksi TBM-2');
-    `, [afd1Id, afd2Id]);
+        ($3, $1, 'A01', 'Blok A01', 'Kelapa Sawit', 2018, 'Produksi TM-1'),
+        ($3, $1, 'A02', 'Blok A02', 'Kelapa Sawit', 2018, 'Produksi TM-1'),
+        ($3, $1, 'A03', 'Blok A03', 'Kelapa Sawit', 2019, 'Produksi TBM-3'),
+        ($3, $2, 'B01', 'Blok B01', 'Kelapa Sawit', 2020, 'Produksi TBM-2');
+    `, [afd1Id, afd2Id, kebunId]);
 
     // 4. Bersihkan layer_peta lama & fitur_peta untuk reset terstruktur
     await client.query('DELETE FROM fitur_peta;');

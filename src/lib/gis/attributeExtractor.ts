@@ -703,7 +703,11 @@ export function extractFeatureIntel(
       ? luasUkurHa * commodity.effectivePlantableRatio
       : luasUkurHa;
 
-  const estimasiPanenTon = Number((effectiveAreaHa * commodity.yieldPerHa).toFixed(2));
+  const customTargetTon = parseNumericHa(props.target_produksi_ton ?? props.estimasi_panen_ton);
+  const estimasiPanenTon =
+    customTargetTon !== null && customTargetTon > 0
+      ? Number(customTargetTon.toFixed(2))
+      : Number((effectiveAreaHa * commodity.yieldPerHa).toFixed(2));
   const estimasiOlahanTon =
     commodity.rendemenPct !== null
       ? Number(((estimasiPanenTon * commodity.rendemenPct) / 100).toFixed(2))

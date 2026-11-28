@@ -20,11 +20,12 @@ import {
 } from '@/lib/gis/rpnEntities';
 import {
   parseWilayahHierarchy,
+  resolveLokasiLabel,
   matchWilayahFilter,
   formatKebunOptionLabel,
 } from '@/lib/gis/wilayah';
 import type { LayerPeta } from '@/types/gis';
-import { CustomFilterDropdown } from './CustomFilterDropdown';
+import { CustomFilterDropdown, type DropdownOption } from './CustomFilterDropdown';
 
 interface KebunItem {
   id: number;
@@ -62,6 +63,9 @@ interface MonitoringSidebarProps {
   onSelectKebun: (id: number | null) => void;
   selectedAfdelingId: number | null;
   onSelectAfdeling: (id: number | null) => void;
+  blokOptions?: DropdownOption<string>[];
+  selectedBlokValue?: string | null;
+  onSelectBlok?: (value: string | null) => void;
   onResetFilters: () => void;
   // Manajemen Layer Props (Dipindahkan ke Sidebar Kiri)
   layers?: LayerPeta[];
@@ -76,6 +80,8 @@ interface MonitoringSidebarProps {
   // Settings & History
   onOpenSettings?: () => void;
   deletedCount?: number;
+  isMandorLocked?: boolean;
+  lockedAfdelingName?: string;
 }
 
 export function MonitoringSidebar({
@@ -95,6 +101,9 @@ export function MonitoringSidebar({
   onSelectKebun,
   selectedAfdelingId,
   onSelectAfdeling,
+  blokOptions = [],
+  selectedBlokValue = null,
+  onSelectBlok,
   onResetFilters,
   layers = [],
   allLayers,
@@ -105,6 +114,8 @@ export function MonitoringSidebar({
   onRenameLayer,
   onDeleteLayer,
   onDeleteWilayah,
+  isMandorLocked = false,
+  lockedAfdelingName,
 }: MonitoringSidebarProps) {
   // State untuk Rename Layer langsung di sidebar
   const [renamingLayerId, setRenamingLayerId] = useState<number | null>(null);
@@ -126,23 +137,28 @@ export function MonitoringSidebar({
     setCollapsedWilayah((prev) => ({ ...prev, [wil]: !prev[wil] }));
   };
 
-  // Pengelompokan Hirarkis Layer GIS: Provinsi (Wilayah) -> Kebun (Kabupaten) -> Layers
+  // Pengelompokan Hirarkis Layer GIS: Lokasi (Kota/Kabupaten) -> Kebun -> Layers
   const groupedLayers = useMemo(() => {
     const result: Record<string, Record<string, LayerPeta[]>> = {};
 
     layers.forEach((layer) => {
       const matchKebun = kebunList.find((k) => k.id === layer.kebun_id);
       const rawWil = layer.wilayah || matchKebun?.wilayah || '';
-      const parsed = parseWilayahHierarchy(layer.provinsi || matchKebun?.provinsi || rawWil);
-      const provName = (parsed.provinsi || 'Wilayah Belum Ditentukan').trim();
+      const lokasiName =
+        resolveLokasiLabel(
+          matchKebun?.kabupaten_kota || layer.kabupaten_kota,
+          rawWil,
+          layer.provinsi || matchKebun?.provinsi
+        ) || 'Lokasi Belum Ditentukan';
 
+      const parsed = parseWilayahHierarchy(rawWil);
       const kbnBase = (layer.nama_kebun || matchKebun?.nama_kebun || 'Kebun Umum').trim();
-      const kab = (matchKebun?.kabupaten_kota || parsed.kabupatenKota || '').trim();
-      const kbnLabel = kab ? `${kbnBase} (${kab})` : kbnBase;
+      const kab = (matchKebun?.kabupaten_kota || layer.kabupaten_kota || parsed.kabupatenKota || '').trim();
+      const kbnLabel = kab && kab.toLowerCase() !== lokasiName.toLowerCase() ? `${kbnBase} (${kab})` : kbnBase;
 
-      if (!result[provName]) result[provName] = {};
-      if (!result[provName][kbnLabel]) result[provName][kbnLabel] = [];
-      result[provName][kbnLabel].push(layer);
+      if (!result[lokasiName]) result[lokasiName] = {};
+      if (!result[lokasiName][kbnLabel]) result[lokasiName][kbnLabel] = [];
+      result[lokasiName][kbnLabel].push(layer);
     });
 
     return result;
@@ -157,18 +173,17 @@ export function MonitoringSidebar({
     new Set([...RPN_ENTITY_OPTIONS, ...rawPerusahaan])
   );
 
-  // 2. Cascading Wilayah (Murni Provinsi) berdasarkan Perusahaan terpilih
+  // 2. Cascading Lokasi (Kota/Kabupaten, fallback provinsi/wilayah) berdasarkan Perusahaan terpilih
   const filteredByPerusahaanKebun = selectedPerusahaan
     ? kebunList.filter((k) => matchPerusahaanFilter(k.perusahaan, selectedPerusahaan))
     : kebunList;
 
   const sourceLayersForWilayah = allLayers ?? layers;
-  const provinsiMap = new Map<string, string>();
+  const lokasiMap = new Map<string, string>();
   for (const k of filteredByPerusahaanKebun) {
-    const parsed = parseWilayahHierarchy(k.provinsi || k.wilayah);
-    const p = parsed.provinsi.trim();
-    if (p && !provinsiMap.has(p.toLowerCase())) {
-      provinsiMap.set(p.toLowerCase(), p);
+    const lok = resolveLokasiLabel(k.kabupaten_kota, k.wilayah, k.provinsi);
+    if (lok && !lokasiMap.has(lok.toLowerCase())) {
+      lokasiMap.set(lok.toLowerCase(), lok);
     }
   }
   for (const l of sourceLayersForWilayah) {
@@ -178,18 +193,17 @@ export function MonitoringSidebar({
         continue;
       }
     }
-    const parsed = parseWilayahHierarchy(l.provinsi || l.wilayah);
-    const p = parsed.provinsi.trim();
-    if (p && !provinsiMap.has(p.toLowerCase())) {
-      provinsiMap.set(p.toLowerCase(), p);
+    const lok = resolveLokasiLabel(l.kabupaten_kota, l.wilayah, l.provinsi);
+    if (lok && !lokasiMap.has(lok.toLowerCase())) {
+      lokasiMap.set(lok.toLowerCase(), lok);
     }
   }
-  const availableWilayah = Array.from(provinsiMap.values()).sort((a, b) => a.localeCompare(b, 'id'));
+  const availableWilayah = Array.from(lokasiMap.values()).sort((a, b) => a.localeCompare(b, 'id'));
 
-  // 3. Kebun berdasarkan Wilayah (Provinsi) & Perusahaan terpilih
+  // 3. Kebun berdasarkan Lokasi (Kota/Kabupaten) & Perusahaan terpilih
   const filteredKebun = selectedWilayah
     ? filteredByPerusahaanKebun.filter((k) =>
-        matchWilayahFilter(k.wilayah, selectedWilayah, k.provinsi)
+        matchWilayahFilter(k.wilayah, selectedWilayah, k.provinsi, k.kabupaten_kota)
       )
     : filteredByPerusahaanKebun;
 
@@ -291,6 +305,15 @@ export function MonitoringSidebar({
 
         {/* Form Cascading Filter */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs">
+          {isMandorLocked && (
+            <div className="p-2.5 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-[10.5px] text-emerald-200 leading-snug">
+              <div className="font-bold text-emerald-400 uppercase tracking-wider text-[9.5px] mb-0.5">
+                🔒 Wilayah Tugas Mandor
+              </div>
+              Afdeling terkunci pada <strong>{lockedAfdelingName || 'Afdeling Tugas'}</strong>. Silakan pilih petak pada filter <strong>Blok</strong> di bawah.
+            </div>
+          )}
+
           {/* Status Pengelolaan (khusus mobile/tablet karena header tengah tersembunyi di < lg) */}
           {onSelectStatusFilter && (
             <div className="space-y-1.5 lg:hidden">
@@ -314,16 +337,17 @@ export function MonitoringSidebar({
               <span>Perusahaan / Puslit</span>
               {selectedPerusahaan && (
                 <span className="text-[10px] font-mono text-[#00D2FF] tabular-nums">
-                  {availableWilayah.length} Wilayah · {filteredByPerusahaanKebun.length} Kebun
+                  {availableWilayah.length} Lokasi · {filteredByPerusahaanKebun.length} Kebun
                 </span>
               )}
             </label>
             <select
+              disabled={isMandorLocked}
               value={selectedPerusahaan}
               onChange={(e) => {
                 onSelectPerusahaan(e.target.value);
               }}
-              className="w-full min-h-10 lg:min-h-0 bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-2 lg:py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+              className="w-full min-h-10 lg:min-h-0 bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-2 lg:py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <option value="" className="bg-[#0D1322]">Semua Perusahaan (PT RPN)</option>
               {availablePerusahaan.map((p) => (
@@ -334,13 +358,13 @@ export function MonitoringSidebar({
             </select>
           </div>
 
-        {/* 2. Wilayah Geografis */}
+        {/* 2. Lokasi (Kota / Kabupaten) */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className="text-[11px] font-semibold text-[#8B9BB4] block">
-              Wilayah
+              Lokasi
             </label>
-            {selectedWilayah && onDeleteWilayah && (
+            {selectedWilayah && onDeleteWilayah && !isMandorLocked && (
               <button
                 type="button"
                 onClick={() =>
@@ -350,21 +374,22 @@ export function MonitoringSidebar({
                   })
                 }
                 className="text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors cursor-pointer"
-                title={`Hapus seluruh data wilayah "${selectedWilayah}"`}
+                title={`Hapus seluruh data lokasi "${selectedWilayah}"`}
               >
                 <IconTrash className="w-2.5 h-2.5" />
-                <span>Hapus Wilayah</span>
+                <span>Hapus Lokasi</span>
               </button>
             )}
           </div>
           <select
+            disabled={isMandorLocked}
             value={selectedWilayah}
             onChange={(e) => {
               onSelectWilayah(e.target.value);
             }}
-            className="w-full min-h-10 lg:min-h-0 bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-2 lg:py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+            className="w-full min-h-10 lg:min-h-0 bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-2 lg:py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <option value="" className="bg-[#0D1322]">Semua Wilayah</option>
+            <option value="" className="bg-[#0D1322]">Semua Lokasi</option>
             {availableWilayah.map((w) => (
               <option key={w} value={w} className="bg-[#0D1322]">
                 {w}
@@ -379,12 +404,13 @@ export function MonitoringSidebar({
             Kebun
           </label>
           <select
+            disabled={isMandorLocked}
             value={selectedKebunId || ''}
             onChange={(e) => {
               const val = e.target.value ? Number(e.target.value) : null;
               onSelectKebun(val);
             }}
-            className="w-full min-h-10 lg:min-h-0 bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-2 lg:py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors"
+            className="w-full min-h-10 lg:min-h-0 bg-[#12192B] border border-[#1E2942] hover:border-[#2C3B59] focus:border-[#00D2FF] rounded-md px-2.5 py-2 lg:py-1.5 text-xs text-[#F0F6FC] focus:outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <option value="" className="bg-[#0D1322]">Semua Kebun</option>
             {filteredKebun.map((k) => (
@@ -395,315 +421,51 @@ export function MonitoringSidebar({
           </select>
         </div>
 
-        {/* 4. Afdeling (Cascading dari Kebun) */}
+        {/* 4. Afdeling (Cascading dari Kebun). Terkunci jika Mandor ditugaskan pada 1 Afdeling. */}
         <CustomFilterDropdown
           label="Afdeling"
           value={selectedAfdelingId}
-          placeholder="Semua Afdeling"
+          placeholder={
+            isMandorLocked && lockedAfdelingName
+              ? lockedAfdelingName
+              : selectedKebunId && filteredAfdeling.length === 0
+              ? '(Tanpa Afdeling)'
+              : 'Semua Afdeling'
+          }
           options={filteredAfdeling.map((a) => ({
             value: a.id,
             label: a.nama_afdeling,
             sublabel: a.kode_afdeling,
           }))}
           onChange={onSelectAfdeling}
-          disabled={filteredAfdeling.length === 0}
+          disabled={isMandorLocked || filteredAfdeling.length === 0}
         />
 
-        {/* 5. MANAJEMEN LAYER GIS */}
-        <div className="space-y-2 pt-2.5 border-t border-[#1E2942]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#F0F6FC] uppercase tracking-wider">
-              <IconLayers className="w-3.5 h-3.5 text-[#00D2FF]" />
-              <span>Manajemen Layer</span>
-            </div>
-            <span className="text-[10px] bg-[#12192B] border border-[#1E2942] text-[#8B9BB4] px-1.5 py-0.5 rounded font-mono">
-              {layers.length} Layer
-            </span>
-          </div>
+        {/* 5. Blok (Cascading dari Kebun / Afdeling) */}
+        {onSelectBlok && (
+          <CustomFilterDropdown<string>
+            label="Blok"
+            value={selectedBlokValue}
+            placeholder={
+              !selectedKebunId
+                ? 'Pilih kebun terlebih dahulu'
+                : blokOptions.length === 0
+                  ? 'Belum ada blok'
+                  : `Semua Blok (${blokOptions.length})`
+            }
+            options={blokOptions}
+            onChange={onSelectBlok}
+            disabled={!selectedKebunId || blokOptions.length === 0}
+            searchable
+          />
+        )}
 
-          {layers.length === 0 ? (
-            <div className="text-[11px] text-[#566680] italic p-2 bg-[#12192B]/50 rounded border border-[#1E2942] text-center">
-              Belum ada layer spasial aktif.
-            </div>
-          ) : (
-            <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-              {Object.entries(groupedLayers).map(([wilayahName, kebunMap]) => {
-                const totalLayersInWilayah = Object.values(kebunMap).reduce(
-                  (acc, curr) => acc + curr.length,
-                  0
-                );
-                const isCollapsed = Boolean(collapsedWilayah[wilayahName]);
-
-                const getBbox = (layerList: LayerPeta[]): [number, number, number, number] | null => {
-                  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                  let count = 0;
-                  for (const l of layerList) {
-                    if (l.bbox) {
-                      if (l.bbox[0] < minX) minX = l.bbox[0];
-                      if (l.bbox[1] < minY) minY = l.bbox[1];
-                      if (l.bbox[2] > maxX) maxX = l.bbox[2];
-                      if (l.bbox[3] > maxY) maxY = l.bbox[3];
-                      count++;
-                    }
-                  }
-                  return count > 0 ? [minX, minY, maxX, maxY] : null;
-                };
-
-                return (
-                  <div
-                    key={wilayahName}
-                    className="space-y-1.5 pb-2 border-b border-[#1E2942]/60 last:border-b-0"
-                  >
-                    {/* Header Wilayah (Provinsi) */}
-                    <div
-                      onClick={() => toggleWilayahCollapse(wilayahName)}
-                      className="flex items-center justify-between px-1.5 py-1 rounded hover:bg-[#12192B] group cursor-pointer transition-colors"
-                      title={`Klik untuk ${isCollapsed ? 'membuka' : 'menutup'} daftar kebun di ${wilayahName}`}
-                    >
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-[#00D2FF] uppercase tracking-wider min-w-0">
-                        <IconChevronRight
-                          className={`w-3.5 h-3.5 text-[#00D2FF] shrink-0 transition-transform ${
-                            isCollapsed ? '' : 'rotate-90'
-                          }`}
-                        />
-                        <span className="truncate">{wilayahName}</span>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        {onZoomToLayer && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const bbox = getBbox(Object.values(kebunMap).flat());
-                              if (bbox) onZoomToLayer(bbox);
-                            }}
-                            className="p-1 rounded text-[#8B9BB4] hover:text-[#00D2FF] hover:bg-[#0D1322] transition-colors cursor-pointer"
-                            title={`Fokuskan peta ke wilayah ${wilayahName}`}
-                          >
-                            <IconZoomTo className="w-3 h-3" />
-                          </button>
-                        )}
-                        {onDeleteWilayah && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDeleteModal({
-                                type: 'wilayah',
-                                name: wilayahName,
-                                totalFiles: totalLayersInWilayah,
-                              });
-                            }}
-                            className="p-1 rounded text-[#8B9BB4] hover:text-[#EF4444] hover:bg-[#1E1420] transition-colors cursor-pointer"
-                            title={`Hapus seluruh data wilayah "${wilayahName}" (${totalLayersInWilayah} file/layer)`}
-                          >
-                            <IconTrash className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Sub-grup per Kebun */}
-                    {!isCollapsed &&
-                      Object.entries(kebunMap).map(([kebunName, layerItems]) => (
-                        <div key={kebunName} className="pl-2 space-y-1">
-                          <div
-                            onClick={() => {
-                              const kBox = getBbox(layerItems);
-                              if (kBox && onZoomToLayer) onZoomToLayer(kBox);
-                            }}
-                            className="text-xs font-semibold text-[#CBD5E1] hover:text-[#00D2FF] flex items-center justify-between gap-1 py-1 px-1 rounded hover:bg-[#12192B]/80 cursor-pointer transition-colors"
-                            title={`Klik untuk fokus ke ${kebunName}`}
-                          >
-                            <div className="flex items-center gap-1.5 truncate min-w-0">
-                              <span className="text-[#10B981] text-xs shrink-0">🌱</span>
-                              <span className="truncate">{kebunName}</span>
-                            </div>
-                            {onZoomToLayer && (
-                              <IconZoomTo className="w-3 h-3 text-[#8B9BB4] hover:text-[#00D2FF] shrink-0" />
-                            )}
-                          </div>
-
-                        {/* Daftar Layer dalam Kebun ini */}
-                        <div className="space-y-1 pl-1">
-                          {layerItems.map((layer) => {
-                            const isSelected = selectedLayerId === layer.id;
-                            const isRenaming = renamingLayerId === layer.id;
-
-                            return (
-                              <div
-                                key={layer.id}
-                                onClick={() => onSelectLayer?.(layer.id)}
-                                className={`p-1.5 rounded-lg border text-xs transition-all cursor-pointer flex flex-col gap-1.5 ${
-                                  isSelected
-                                    ? 'bg-[#132238] border-[#00D2FF] text-[#00D2FF] shadow-xs'
-                                    : 'bg-[#12192B] border-[#1E2942] text-[#F0F6FC] hover:border-[#2C3B59] hover:bg-[#19233A]'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-1.5">
-                                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                    <span
-                                      className="w-2 h-2 rounded-full shrink-0 border border-white/20"
-                                      style={{ backgroundColor: layer.warna || '#00D2FF' }}
-                                    />
-                                    {!isRenaming ? (
-                                      <span className="font-semibold truncate text-[13px] leading-snug">
-                                        {layer.nama_layer}
-                                      </span>
-                                    ) : (
-                                      <div
-                                        className="flex items-center gap-1 flex-1"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <input
-                                          type="text"
-                                          value={renamingText}
-                                          onChange={(e) => setRenamingText(e.target.value)}
-                                          onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                              if (renamingText.trim()) {
-                                                onRenameLayer?.(layer.id, renamingText.trim());
-                                              }
-                                              setRenamingLayerId(null);
-                                            } else if (e.key === 'Escape') {
-                                              setRenamingLayerId(null);
-                                            }
-                                          }}
-                                          autoFocus
-                                          className="w-full bg-[#0D1322] border border-[#00D2FF] rounded px-1.5 py-0.5 text-xs text-[#F0F6FC] focus:outline-none"
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            if (renamingText.trim()) {
-                                              onRenameLayer?.(layer.id, renamingText.trim());
-                                            }
-                                            setRenamingLayerId(null);
-                                          }}
-                                          className="px-1 text-[#10B981] hover:text-white font-bold"
-                                          title="Simpan Nama"
-                                        >
-                                          ✓
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setRenamingLayerId(null)}
-                                          className="px-1 text-[#8B9BB4] hover:text-white font-bold"
-                                          title="Batal"
-                                        >
-                                          ✕
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div
-                                    className="flex items-center gap-0.5 shrink-0"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    {onRenameLayer && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setRenamingLayerId(layer.id);
-                                          setRenamingText(layer.nama_layer);
-                                        }}
-                                        className="p-1 rounded hover:bg-[#0D1322] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors cursor-pointer"
-                                        title="Ganti Nama Layer"
-                                      >
-                                        <IconPencil className="w-3 h-3" />
-                                      </button>
-                                    )}
-
-                                    {/* Tombol Hapus Layer Tunggal */}
-                                    {onDeleteLayer && (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setDeleteModal({
-                                            type: 'layer',
-                                            id: layer.id,
-                                            name: layer.nama_layer,
-                                            parentName: wilayahName,
-                                            isLastFile: totalLayersInWilayah <= 1,
-                                            totalFiles: totalLayersInWilayah,
-                                          })
-                                        }
-                                        className="p-1 rounded hover:bg-[#1E1420] text-[#8B9BB4] hover:text-[#EF4444] transition-colors cursor-pointer"
-                                        title={
-                                          totalLayersInWilayah <= 1
-                                            ? `Hapus file "${layer.nama_layer}" (File terakhir, wilayah "${wilayahName}" akan otomatis ikut terhapus)`
-                                            : `Hapus file layer "${layer.nama_layer}" saja`
-                                        }
-                                      >
-                                        <IconTrash className="w-3 h-3" />
-                                      </button>
-                                    )}
-
-                                    {/* Zoom to layer bbox */}
-                                    {layer.bbox && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (layer.bbox) onZoomToLayer?.(layer.bbox);
-                                        }}
-                                        className="p-1 rounded hover:bg-[#0D1322] text-[#8B9BB4] hover:text-[#00D2FF] transition-colors cursor-pointer"
-                                        title="Fokus Zoom ke Layer ini"
-                                      >
-                                        <IconZoomTo className="w-3 h-3" />
-                                      </button>
-                                    )}
-
-                                    {/* Toggle Mata (Visibilitas) */}
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        onToggleLayerVisibility?.(layer.id, !layer.terlihat)
-                                      }
-                                      className={`p-1 rounded transition-colors cursor-pointer ${
-                                        layer.terlihat
-                                          ? 'text-[#00D2FF] hover:bg-[#0E3A5D]/50'
-                                          : 'text-[#566680] hover:bg-[#0D1322]'
-                                      }`}
-                                      title={layer.terlihat ? 'Sembunyikan Layer' : 'Tampilkan Layer'}
-                                    >
-                                      {layer.terlihat ? (
-                                        <IconEye className="w-3 h-3" />
-                                      ) : (
-                                        <IconEyeOff className="w-3 h-3" />
-                                      )}
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* Badge Tipe Geometri & Jumlah Fitur */}
-                                <div className="flex items-center justify-between text-[11px] text-[#94A3B8] font-stat px-0.5">
-                                  <span className="bg-[#0D1322] px-1.5 py-0.5 rounded border border-[#1E2942] text-[10.5px]">
-                                    {layer.tipe_geometri || 'Polygon'}
-                                  </span>
-                                  <span className="font-medium text-[#CBD5E1]">{layer.jumlah_fitur || 0} fitur</span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Footer Info Proyeksi Spasial */}
-      <div className="px-3.5 py-2.5 bg-[#0D1322] border-t border-[#1E2942] flex items-center justify-between gap-2 text-[10px] text-[#8B9BB4]">
-        <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
-          <span>PostGIS Spatial Engine</span>
-        </div>
-        <div className="text-right font-mono shrink-0">
-          <span className="text-[#566680] mr-1">Proyeksi:</span>
-          <span className="text-[#00D2FF] font-semibold">EPSG:4326</span>
+        {/* Info Ringkas Panduan Penggunaan untuk Pemula */}
+        <div className="mt-4 p-3 rounded-xl bg-[#12192B]/70 border border-[#1E2942] text-[11px] text-[#8B9BB4] space-y-1.5 leading-relaxed">
+          <div className="font-bold text-[#E2E8F0] text-[11px]">Panduan Singkat</div>
+          <p>
+            Pilih <strong className="text-[#00D2FF]">Kebun / Blok</strong> di atas atau klik langsung petak lahan di peta untuk melihat informasi detail di panel sebelah kanan.
+          </p>
         </div>
       </div>
 
@@ -724,15 +486,15 @@ export function MonitoringSidebar({
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-bold text-[#F0F6FC]">
                   {deleteModal.type === 'wilayah'
-                    ? 'Hapus Seluruh Data Wilayah?'
+                    ? 'Hapus Seluruh Data Lokasi?'
                     : deleteModal.isLastFile
-                    ? 'Hapus File Terakhir & Wilayah?'
+                    ? 'Hapus File Terakhir & Lokasi?'
                     : 'Hapus File / Layer Spasial?'}
                 </h3>
                 <div className="mt-2 text-xs text-[#8B9BB4] leading-relaxed space-y-2">
                   {deleteModal.type === 'wilayah' ? (
                     <p>
-                      Anda akan menghapus seluruh data pada wilayah{' '}
+                      Anda akan menghapus seluruh data pada lokasi{' '}
                       <strong className="text-red-400">{deleteModal.name}</strong>. Data akan dipindahkan ke{' '}
                       <strong className="text-[#00D2FF]">Backup &amp; Riwayat &gt; Tempat Sampah</strong> pada halaman profil agar dapat dihapus permanen beserta cache-nya atau dipulihkan kembali.
                     </p>
@@ -743,15 +505,15 @@ export function MonitoringSidebar({
                         <strong className="text-[#00D2FF]">{deleteModal.name}</strong>.
                       </p>
                       <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] leading-normal">
-                        <strong>Peringatan File Terakhir:</strong> Ini adalah satu-satunya file/layer aktif di wilayah{' '}
-                        <strong>{deleteModal.parentName}</strong>. Wilayah ini akan disembunyikan dari peta dan file dipindahkan ke{' '}
+                        <strong>Peringatan File Terakhir:</strong> Ini adalah satu-satunya file/layer aktif di lokasi{' '}
+                        <strong>{deleteModal.parentName}</strong>. Lokasi ini akan disembunyikan dari peta dan file dipindahkan ke{' '}
                         <strong>Backup &amp; Riwayat &gt; Tempat Sampah</strong> untuk dihapus permanen.
                       </div>
                     </>
                   ) : (
                     <p>
                       Anda akan menghapus layer/file{' '}
-                      <strong className="text-red-400">{deleteModal.name}</strong> dari wilayah{' '}
+                      <strong className="text-red-400">{deleteModal.name}</strong> dari lokasi{' '}
                       <strong className="text-[#00D2FF]">{deleteModal.parentName || 'Terkait'}</strong>.
                       File ini akan masuk ke <strong>Backup &amp; Riwayat &gt; Tempat Sampah</strong> untuk dihapus permanen atau dipulihkan.
                     </p>

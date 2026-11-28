@@ -216,3 +216,141 @@ export async function DELETE(req: NextRequest) {
     );
   }
 }
+
+// PATCH /api/gis/features - Inline Edit Nilai Atribut dari Pop-up Peta GIS & Sinkronisasi ke Tabel Blok
+export async function PATCH(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth.response) return auth.response;
+
+  try {
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ status: 'error', message: 'Format JSON tidak valid.' }, { status: 400 });
+    }
+
+    const id = Number(body.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return NextResponse.json({ status: 'error', message: 'ID fitur poligon tidak valid.' }, { status: 400 });
+    }
+
+    const featRes = await query<{
+      id: number;
+      layer_id: number;
+      atribut: Record<string, unknown>;
+      kebun_id: number | null;
+    }>(
+      `SELECT f.id, f.layer_id, f.atribut, l.kebun_id
+       FROM public.fitur_peta f
+       JOIN public.layer_peta l ON f.layer_id = l.id
+       WHERE f.id = $1 AND COALESCE(f.is_deleted, FALSE) = FALSE;`,
+      [id]
+    );
+
+    if (featRes.rows.length === 0) {
+      return NextResponse.json({ status: 'error', message: 'Fitur poligon tidak ditemukan.' }, { status: 404 });
+    }
+
+    const feat = featRes.rows[0];
+    const currentAttr = { ...(feat.atribut || {}) };
+
+    // Kolom yang diizinkan untuk diedit nilainya (Value Editable):
+    // 1. Nama Blok / Petak
+    if (typeof body.nama_blok === 'string' && body.nama_blok.trim()) {
+      const val = body.nama_blok.trim();
+      currentAttr.Name = val;
+      currentAttr.nama_blok = val;
+      currentAttr.nama_unit = val;
+    }
+
+    // 2. Luas Baku Dokumen (Ha) — Luas Ukur GIS tetap TERKUNCI otomatis dari PostGIS
+    if (body.luas_baku !== undefined && body.luas_baku !== '') {
+      const num = parseFloat(String(body.luas_baku));
+      if (Number.isFinite(num) && num >= 0) {
+        currentAttr.luas_baku = num;
+        currentAttr.Luas_Baku = num;
+      }
+    }
+
+    // 3. Komoditas
+    if (typeof body.komoditas === 'string' && body.komoditas.trim()) {
+      currentAttr.komoditas = body.komoditas.trim();
+      currentAttr.Komoditas = body.komoditas.trim();
+    }
+
+    // 4. Afdeling / Klaster
+    if (typeof body.afdeling === 'string') {
+      currentAttr.afdeling = body.afdeling.trim();
+      currentAttr.Afdeling = body.afdeling.trim();
+    }
+
+    // 5. Status Lahan
+    if (typeof body.status_lahan === 'string') {
+      currentAttr.status_lahan = body.status_lahan.trim();
+      currentAttr.status = body.status_lahan.trim();
+    }
+
+    // 6. Target Produksi / Estimasi Tonase (Opsional Override)
+    if (body.target_produksi_ton !== undefined && body.target_produksi_ton !== '') {
+      const tNum = parseFloat(String(body.target_produksi_ton));
+      if (Number.isFinite(tNum) && tNum >= 0) {
+        currentAttr.target_produksi_ton = tNum;
+        currentAttr.estimasi_panen_ton = tNum;
+      }
+    }
+
+    const updRes = await query<{ id: number; layer_id: number; atribut: Record<string, unknown> }>(
+      `UPDATE public.fitur_peta
+       SET atribut = $1::jsonb
+       WHERE id = $2
+       RETURNING id, layer_id, atribut;`,
+      [JSON.stringify(currentAttr), id]
+    );
+
+    // Sinkronkan juga ke tabel master public.blok
+    const blokId = Number(currentAttr.blok_id) || null;
+    const nextNamaBlok = String(currentAttr.nama_blok || currentAttr.Name || '').trim();
+    const nextKomoditas = String(currentAttr.komoditas || currentAttr.Komoditas || '').trim() || null;
+
+    if (blokId) {
+      await query(
+        `UPDATE public.blok
+         SET nama_blok = COALESCE(NULLIF($1, ''), nama_blok),
+             komoditas = COALESCE($2, komoditas)
+         WHERE id = $3;`,
+        [nextNamaBlok, nextKomoditas, blokId]
+      );
+    } else if (feat.kebun_id && nextNamaBlok) {
+      await query(
+        `UPDATE public.blok
+         SET komoditas = COALESCE($1, komoditas)
+         WHERE kebun_id = $2 AND LOWER(nama_blok) = LOWER($3);`,
+        [nextKomoditas, feat.kebun_id, nextNamaBlok]
+      );
+    }
+
+    await query(
+      `INSERT INTO public.riwayat_aktivitas (pengguna_id, aktivitas, keterangan)
+       VALUES ($1, $2, $3);`,
+      [
+        auth.user.id,
+        'inline_edit_popup_peta',
+        `Mengedit informasi pop-up poligon "${nextNamaBlok || `#${id}`}" (Komoditas: ${nextKomoditas || '-'}, Status: ${currentAttr.status_lahan || '-'}).`,
+      ]
+    ).catch(() => {});
+
+    return NextResponse.json({
+      status: 'success',
+      message: `Informasi poligon "${nextNamaBlok || `#${id}`}" berhasil diperbarui.`,
+      data: updRes.rows[0],
+    });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      {
+        status: 'error',
+        message: 'Gagal menyimpan perubahan atribut poligon.',
+        detail: safeErrorDetail(err),
+      },
+      { status: 500 }
+    );
+  }
+}

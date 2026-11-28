@@ -3,8 +3,11 @@ import type { HakAksesFitur, Peran } from '@/types/auth';
 
 export type MenuKey =
   | 'hasil_analisa'
+  | 'catatan_harian'
+  | 'data_makro'
   | 'data_perusahaan'
   | 'data_kebun'
+  | 'master_aktivitas'
   | 'hak_sementara'
   | 'manajemen_pengguna'
   | 'create_account'
@@ -37,6 +40,10 @@ export interface KaryawanItem {
   email: string;
   peran: Peran;
   aktif: boolean;
+  afdeling_id?: number | null;
+  kebun_id?: number | null;
+  afdeling_nama?: string | null;
+  kebun_nama?: string | null;
   hak_akses: HakAksesFitur;
   foto_profil?: string | null;
   dibuat_pada: string | null;

@@ -639,8 +639,8 @@ export function GisUploadModal({
         setErrorMessage('Nama Unit Kebun baru wajib diisi.');
         return;
       }
-      if (!newKebunProvinsi.trim() && !newKebunWilayah.trim()) {
-        setErrorMessage('Provinsi wilayah kebun baru wajib dipilih.');
+      if (!newKebunKabupaten.trim() && !newKebunProvinsi.trim() && !newKebunWilayah.trim()) {
+        setErrorMessage('Lokasi (Kota/Kabupaten) atau Provinsi kebun baru wajib diisi.');
         return;
       }
     }
@@ -1330,7 +1330,7 @@ export function GisUploadModal({
                         </div>
                         <div>
                           <label className="text-[11px] font-semibold text-[#8B9BB4] block mb-1 flex items-center justify-between">
-                            <span>Kabupaten / Kota</span>
+                            <span>Lokasi (Kabupaten / Kota)</span>
                             <span className="text-[9px] text-emerald-400">Otomatis / Edit</span>
                           </label>
                           <input
@@ -1399,9 +1399,9 @@ export function GisUploadModal({
                             </span>
                             <span className="text-[#2C3B59]">|</span>
                             <span>
-                              Wilayah:{' '}
+                              Lokasi:{' '}
                               <span className="text-emerald-400 font-medium">
-                                {curKebun.wilayah || '-'}
+                                {curKebun.kabupaten_kota || curKebun.wilayah || '-'}
                               </span>
                             </span>
                           </div>

@@ -63,6 +63,10 @@ export interface PenggunaPublik {
   email: string;
   peran: Peran;
   aktif: boolean;
+  afdeling_id?: number | null;
+  kebun_id?: number | null;
+  afdeling_nama?: string | null;
+  kebun_nama?: string | null;
   hak_akses?: HakAksesFitur;
   foto_profil?: string | null;
   dibuat_pada: string | null;

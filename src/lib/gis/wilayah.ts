@@ -156,18 +156,48 @@ export function parseWilayahHierarchy(raw?: string | null): ParsedWilayah {
 }
 
 /**
- * Evaluasi apakah suatu data wilayah (dari layer atau kebun) cocok dengan filter Wilayah (Provinsi) yang dipilih.
+ * Ambil label Lokasi (Kota/Kabupaten) untuk dropdown & pengelompokan layer.
+ * Jika kabupaten/kota kosong, jatuh ke provinsi/teks wilayah agar data lama tidak hilang.
+ */
+export function resolveLokasiLabel(
+  kabupatenKota?: string | null,
+  wilayah?: string | null,
+  provinsi?: string | null
+): string {
+  const directKab = cleanText(kabupatenKota);
+  if (directKab) return directKab;
+
+  const parsed = parseWilayahHierarchy(wilayah);
+  if (parsed.kabupatenKota) return parsed.kabupatenKota;
+
+  const directProv = cleanText(provinsi);
+  if (directProv) return directProv;
+
+  return parsed.provinsi || '';
+}
+
+/**
+ * Evaluasi apakah suatu data lokasi (dari layer atau kebun) cocok dengan filter Lokasi (Kota/Kabupaten) yang dipilih.
  */
 export function matchWilayahFilter(
   itemWilayah?: string | null,
   filterWilayah?: string | null,
-  itemProvinsi?: string | null
+  itemProvinsi?: string | null,
+  itemKabupatenKota?: string | null
 ): boolean {
   if (!filterWilayah || !filterWilayah.trim()) return true;
 
   const target = filterWilayah.trim().toLowerCase();
 
-  // 1. Cek langsung kecocokan kolom provinsi
+  const resolvedLokasi = resolveLokasiLabel(itemKabupatenKota, itemWilayah, itemProvinsi);
+  if (resolvedLokasi && resolvedLokasi.toLowerCase() === target) {
+    return true;
+  }
+
+  if (itemKabupatenKota && itemKabupatenKota.trim().toLowerCase() === target) {
+    return true;
+  }
+
   if (itemProvinsi && itemProvinsi.trim().toLowerCase() === target) {
     return true;
   }
@@ -175,7 +205,10 @@ export function matchWilayahFilter(
   if (!itemWilayah || !itemWilayah.trim()) return false;
 
   const itemParsed = parseWilayahHierarchy(itemWilayah);
-  if (itemParsed.provinsi.toLowerCase() === target) {
+  if (
+    itemParsed.kabupatenKota.toLowerCase() === target ||
+    itemParsed.provinsi.toLowerCase() === target
+  ) {
     return true;
   }
 

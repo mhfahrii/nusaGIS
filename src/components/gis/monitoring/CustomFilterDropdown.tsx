@@ -16,6 +16,7 @@ interface CustomFilterDropdownProps<T extends number | string = number> {
   options: DropdownOption<T>[];
   onChange: (value: T | null) => void;
   disabled?: boolean;
+  searchable?: boolean;
 }
 
 export function CustomFilterDropdown<T extends number | string = number>({
@@ -25,7 +26,9 @@ export function CustomFilterDropdown<T extends number | string = number>({
   options,
   onChange,
   disabled = false,
+  searchable = false,
 }: CustomFilterDropdownProps<T>) {
+  const showSearch = searchable || options.length > 5;
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,10 +61,10 @@ export function CustomFilterDropdown<T extends number | string = number>({
 
   // Focus search input when opened
   useEffect(() => {
-    if (isOpen && options.length > 5 && searchInputRef.current) {
+    if (isOpen && showSearch && searchInputRef.current) {
       searchInputRef.current.focus();
     }
-  }, [isOpen, options.length]);
+  }, [isOpen, showSearch]);
 
   const selectedOption = useMemo(
     () => options.find((opt) => String(opt.value) === String(value)),
@@ -124,8 +127,7 @@ export function CustomFilterDropdown<T extends number | string = number>({
       {/* Floating Dropdown Menu with Max-Height and Smooth Dark Scrollbar */}
       {isOpen && (
         <div className="absolute z-50 left-0 right-0 mt-1 bg-[#0D1322] border border-[#1E2942] rounded-lg shadow-2xl overflow-hidden backdrop-blur-md">
-          {/* Search box if options > 5 */}
-          {options.length > 5 && (
+          {showSearch && (
             <div className="p-1.5 border-b border-[#1E2942] bg-[#12192B]/90">
               <input
                 ref={searchInputRef}

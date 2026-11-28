@@ -7,7 +7,8 @@ import { hasPermission } from '@/types/auth';
 import { MonitoringHeader } from './MonitoringHeader';
 import { MonitoringSidebar } from './MonitoringSidebar';
 import { MonitoringRightPanel } from './MonitoringRightPanel';
-import { MonitoringMap, type CompanyLocationPin } from './MonitoringMap';
+import { MonitoringMap, type CompanyLocationPin, type MapBlokFeature } from './MonitoringMap';
+import type { DropdownOption } from './CustomFilterDropdown';
 import { GisUploadModal } from './GisUploadModal';
 import SettingsModal from './SettingsModal';
 import { IconFilter } from '../GisIcons';
@@ -31,6 +32,20 @@ interface AfdelingItem {
   kebun_id: number;
   kode_afdeling: string;
   nama_afdeling: string;
+}
+
+// BIGINT dari PostgreSQL tiba sebagai string, jadi selalu dibandingkan lewat Number().
+interface MasterBlokItem {
+  id: number | string;
+  kebun_id: number | string;
+  afdeling_id: number | string | null;
+  kode_blok: string;
+  nama_blok: string;
+}
+
+/** "Blok A-01", "a01", "A 01" dianggap blok yang sama saat mencocokkan poligon dengan master data. */
+function normBlokName(s: string): string {
+  return s.toLowerCase().replace(/^blok\s*/, '').replace(/[^a-z0-9]/g, '');
 }
 
 function normText(s?: string | null): string {
@@ -71,10 +86,13 @@ function computeUnionBbox(layerList: LayerPeta[]): [number, number, number, numb
 
 export function MonitoringDashboard() {
   const { user, loading: authLoading } = useAuth();
+  const isMandorLocked = Boolean(user && user.peran !== 'admin' && user.afdeling_id);
+  const lockedAfdelingId = isMandorLocked && user?.afdeling_id ? Number(user.afdeling_id) : null;
   const canViewMap = hasPermission(user, 'lihat_peta');
   const canUpload = hasPermission(user, 'upload_layer');
-  const canEdit = hasPermission(user, 'edit_data');
-  const canDelete = hasPermission(user, 'hapus_data');
+  const canEdit = isMandorLocked ? true : hasPermission(user, 'edit_data');
+  // Sesuai keputusan keamanan: Tombol Hapus Layer & Hapus Blok disembunyikan total untuk akun Mandor
+  const canDelete = isMandorLocked ? false : hasPermission(user, 'hapus_data');
 
   // Panel toggles (desktop docked vs mobile overlay drawer)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -107,6 +125,26 @@ export function MonitoringDashboard() {
   const [selectedFeatureId, setSelectedFeatureId] = useState<number | null>(null);
   const [fitBoundsTarget, setFitBoundsTarget] = useState<[number, number, number, number] | null>(null);
   const [dataRevision, setDataRevision] = useState(0);
+
+  // Filter Blok: poligon yang tampil di peta (utama) + master blok database (pelengkap)
+  const [mapBlokFeatures, setMapBlokFeatures] = useState<MapBlokFeature[]>([]);
+  const [masterBlokList, setMasterBlokList] = useState<MasterBlokItem[]>([]);
+  const [selectedMasterBlokId, setSelectedMasterBlokId] = useState<number | null>(null);
+  const [focusFeatureRequest, setFocusFeatureRequest] = useState<{ featureId: number; nonce: number } | null>(null);
+
+  useEffect(() => {
+    if (!selectedKebunId) return;
+    const controller = new AbortController();
+    fetch(`/api/blok?kebun_id=${selectedKebunId}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (json) setMasterBlokList(json.data || []);
+      })
+      .catch((err) => {
+        if ((err as Error)?.name !== 'AbortError') console.error('Failed to load master blok:', err);
+      });
+    return () => controller.abort();
+  }, [selectedKebunId, dataRevision]);
 
   // 1. Refresh seluruh master data (kebun, afdeling, layers, rasters, stats, history) setelah mutasi data
   const refreshStatsAndLayers = useCallback(async () => {
@@ -311,14 +349,15 @@ export function MonitoringDashboard() {
           }
         }
 
-        // Filter Wilayah (Provinsi)
+        // Filter Lokasi (Kota/Kabupaten)
         if (targetWilayah) {
-          const matchProv = matchWilayahFilter(
+          const matchLokasi = matchWilayahFilter(
             l.wilayah || matchKebun?.wilayah,
             criteria.wilayah,
-            l.provinsi || matchKebun?.provinsi
+            l.provinsi || matchKebun?.provinsi,
+            l.kabupaten_kota || matchKebun?.kabupaten_kota
           );
-          if (!matchProv) {
+          if (!matchLokasi) {
             return false;
           }
         }
@@ -445,6 +484,8 @@ export function MonitoringDashboard() {
       setSelectedKebunId(null);
       setSelectedAfdelingId(null);
       setSelectedFeatureId(null);
+      setSelectedMasterBlokId(null);
+      setFocusFeatureRequest(null);
 
       const matching = filterLayersByCriteria(rawLayers, { perusahaan: perusahaanVal });
       const visible = matching.filter((l) => l.terlihat);
@@ -466,6 +507,8 @@ export function MonitoringDashboard() {
       setSelectedKebunId(null);
       setSelectedAfdelingId(null);
       setSelectedFeatureId(null);
+      setSelectedMasterBlokId(null);
+      setFocusFeatureRequest(null);
 
       const matching = filterLayersByCriteria(rawLayers, {
         perusahaan: selectedPerusahaan,
@@ -495,6 +538,8 @@ export function MonitoringDashboard() {
       setSelectedKebunId(id);
       setSelectedAfdelingId(null);
       setSelectedFeatureId(null);
+      setSelectedMasterBlokId(null);
+      setFocusFeatureRequest(null);
 
       const matching = filterLayersByCriteria(rawLayers, {
         perusahaan: selectedPerusahaan,
@@ -523,6 +568,8 @@ export function MonitoringDashboard() {
     (id: number | null) => {
       setSelectedAfdelingId(id);
       setSelectedFeatureId(null);
+      setSelectedMasterBlokId(null);
+      setFocusFeatureRequest(null);
 
       if (id) {
         const afd = effectiveAfdelingList.find((a) => Number(a.id) === Number(id));
@@ -573,13 +620,102 @@ export function MonitoringDashboard() {
     ]
   );
 
-  // Reset filters
+  // Opsi filter Blok: poligon di peta lebih dulu (bisa di-zoom), lalu master blok DB yang belum punya poligon.
+  const blokOptions = useMemo<DropdownOption<string>[]>(() => {
+    if (!selectedKebunId) return [];
+    const isVirtualAfdeling = selectedAfdelingId !== null && selectedAfdelingId < 0;
+    const masterInScope = masterBlokList.filter(
+      (b) =>
+        Number(b.kebun_id) === selectedKebunId &&
+        (!selectedAfdelingId || isVirtualAfdeling || Number(b.afdeling_id) === selectedAfdelingId)
+    );
+
+    const matchedMasterIds = new Set<number>();
+    const kebunMapFeatures = mapBlokFeatures.filter((f) => Number(f.kebunId) === selectedKebunId);
+    const hasNonOuterFeatures = kebunMapFeatures.some((f) => !f.isOuterBoundary);
+    const polygonOptions = kebunMapFeatures
+      .filter((f) => !hasNonOuterFeatures || !f.isOuterBoundary)
+      .map((f) => {
+        const target = normBlokName(f.name);
+        const master = masterInScope.find(
+          (b) =>
+            Number(b.id) === f.masterBlokId ||
+            normBlokName(b.kode_blok) === target ||
+            normBlokName(b.nama_blok) === target
+        );
+        if (master) matchedMasterIds.add(Number(master.id));
+        const luas = f.luasHa > 0 ? `${f.luasHa.toLocaleString('id-ID', { maximumFractionDigits: 2 })} Ha` : '';
+        return {
+          value: `f:${f.featureId}`,
+          label: master?.nama_blok || f.name,
+          sublabel: [f.afdelingName, luas, master ? `Kode ${master.kode_blok}` : ''].filter(Boolean).join(' · '),
+        };
+      });
+
+    // Afdeling virtual (klaster DBF) tidak punya relasi ke master DB, jadi hanya blok berpoligon yang tampil.
+    const masterOnlyOptions = isVirtualAfdeling
+      ? []
+      : masterInScope
+          .filter((b) => !matchedMasterIds.has(Number(b.id)))
+          .map((b) => ({
+            value: `b:${b.id}`,
+            label: b.nama_blok,
+            sublabel: `Kode ${b.kode_blok} · belum ada poligon di peta`,
+          }));
+
+    return [...polygonOptions, ...masterOnlyOptions].sort((a, b) =>
+      a.label.localeCompare(b.label, 'id', { numeric: true })
+    );
+  }, [selectedKebunId, selectedAfdelingId, masterBlokList, mapBlokFeatures]);
+
+  // Klik poligon di peta juga ikut terpilih di dropdown karena nilainya diturunkan dari selectedFeatureId.
+  const selectedBlokValue =
+    selectedFeatureId && blokOptions.some((o) => o.value === `f:${selectedFeatureId}`)
+      ? `f:${selectedFeatureId}`
+      : selectedMasterBlokId && blokOptions.some((o) => o.value === `b:${selectedMasterBlokId}`)
+        ? `b:${selectedMasterBlokId}`
+        : null;
+
+  const handleSelectBlok = useCallback(
+    (value: string | null) => {
+      setSelectedMasterBlokId(null);
+      if (!value) {
+        setSelectedFeatureId(null);
+        return;
+      }
+      const [kind, rawId] = value.split(':');
+      const id = Number(rawId);
+      if (kind === 'b') {
+        setSelectedFeatureId(null);
+        setSelectedMasterBlokId(id);
+        return;
+      }
+      const feat = mapBlokFeatures.find((f) => f.featureId === id);
+      if (!feat) return;
+      setSelectedLayerId(feat.layerId);
+      setSelectedFeatureId(id);
+      setIsRightPanelOpen(true);
+      setFocusFeatureRequest({ featureId: id, nonce: Date.now() });
+      setMobileDrawer('kpi');
+    },
+    [mapBlokFeatures]
+  );
+
+  // Reset filters (Jika Mandor dikunci ke 1 afdeling, tetap pertahankan kebun & afdeling penugasannya)
   const handleResetFilters = () => {
+    if (isMandorLocked && lockedAfdelingId) {
+      setSelectedFeatureId(null);
+      setSelectedMasterBlokId(null);
+      setFocusFeatureRequest(null);
+      return;
+    }
     setSelectedPerusahaan('');
     setSelectedWilayah('');
     setSelectedKebunId(null);
     setSelectedAfdelingId(null);
     setSelectedFeatureId(null);
+    setSelectedMasterBlokId(null);
+    setFocusFeatureRequest(null);
     setSelectedLayerId(null);
     const visible = rawLayers.filter((l) => l.terlihat);
     const pool = visible.length > 0 ? visible : rawLayers;
@@ -588,6 +724,42 @@ export function MonitoringDashboard() {
       setFitBoundsTarget([...bbox]);
     }
   };
+
+  // Auto-Lock & Auto-Zoom Proporsional untuk akun Mandor yang ditugaskan pada 1 Afdeling tertentu
+  useEffect(() => {
+    if (!isMandorLocked || !lockedAfdelingId || afdelingList.length === 0 || kebunList.length === 0) {
+      return;
+    }
+    const targetAfd = afdelingList.find((a) => Number(a.id) === lockedAfdelingId);
+    const targetKbnId = targetAfd ? Number(targetAfd.kebun_id) : user?.kebun_id ? Number(user.kebun_id) : null;
+    const targetKbn = targetKbnId ? kebunList.find((k) => Number(k.id) === targetKbnId) : undefined;
+
+    if (targetKbn) {
+      if (targetKbn.perusahaan && selectedPerusahaan !== targetKbn.perusahaan) {
+        setSelectedPerusahaan(targetKbn.perusahaan);
+      }
+      const lok = targetKbn.kabupaten_kota || targetKbn.wilayah || '';
+      if (lok && selectedWilayah !== lok) {
+        setSelectedWilayah(lok);
+      }
+      if (selectedKebunId !== Number(targetKbn.id)) {
+        setSelectedKebunId(Number(targetKbn.id));
+      }
+    }
+    if (selectedAfdelingId !== lockedAfdelingId) {
+      setSelectedAfdelingId(lockedAfdelingId);
+    }
+  }, [
+    isMandorLocked,
+    lockedAfdelingId,
+    afdelingList,
+    kebunList,
+    user?.kebun_id,
+    selectedPerusahaan,
+    selectedWilayah,
+    selectedKebunId,
+    selectedAfdelingId,
+  ]);
 
   // Toggle layer visibility
   const handleToggleLayerVisibility = async (layerId: number, visible: boolean) => {
@@ -719,14 +891,14 @@ export function MonitoringDashboard() {
           prev.filter(
             (l) =>
               !deletedLayerIds.includes(l.id) &&
-              !matchWilayahFilter(l.wilayah, wilayahName, l.provinsi)
+              !matchWilayahFilter(l.wilayah, wilayahName, l.provinsi, l.kabupaten_kota)
           )
         );
         setKebunList((prev) =>
           prev.filter(
             (k) =>
               !deletedKebunIds.includes(k.id) &&
-              !matchWilayahFilter(k.wilayah, wilayahName, k.provinsi)
+              !matchWilayahFilter(k.wilayah, wilayahName, k.provinsi, k.kabupaten_kota)
           )
         );
 
@@ -789,6 +961,7 @@ export function MonitoringDashboard() {
     (selectedWilayah ? 1 : 0) +
     (selectedKebunId ? 1 : 0) +
     (selectedAfdelingId ? 1 : 0) +
+    (selectedBlokValue ? 1 : 0) +
     (selectedStatusFilter !== 'all' ? 1 : 0);
 
   const isFilteredByHierarchy = Boolean(
@@ -872,6 +1045,9 @@ export function MonitoringDashboard() {
           onSelectKebun={handleSelectKebun}
           selectedAfdelingId={selectedAfdelingId}
           onSelectAfdeling={handleSelectAfdeling}
+          blokOptions={blokOptions}
+          selectedBlokValue={selectedBlokValue}
+          onSelectBlok={handleSelectBlok}
           onResetFilters={handleResetFilters}
           layers={displayedLayers}
           allLayers={rawLayers}
@@ -890,6 +1066,8 @@ export function MonitoringDashboard() {
             setIsSettingsModalOpen(true);
           }}
           deletedCount={deletedCount}
+          isMandorLocked={isMandorLocked}
+          lockedAfdelingName={user?.afdeling_nama || undefined}
         />
 
         {/* Center: Main Map View + Collapsible Bottom Panel */}
@@ -914,8 +1092,14 @@ export function MonitoringDashboard() {
               onSelectFeature={(featId, layerId) => {
                 setSelectedFeatureId(featId);
                 if (layerId) setSelectedLayerId(layerId);
+                if (featId) {
+                  setIsRightPanelOpen(true);
+                  setMobileDrawer('kpi');
+                }
               }}
               selectedFeatureId={selectedFeatureId}
+              onBlokFeaturesChange={setMapBlokFeatures}
+              focusFeatureRequest={focusFeatureRequest}
               fitBoundsTarget={fitBoundsTarget}
               onToggleLayerVisibility={handleToggleLayerVisibility}
               onToggleRasterVisibility={handleToggleRasterVisibility}
@@ -940,6 +1124,38 @@ export function MonitoringDashboard() {
           periodYear={selectedYear}
           activeKebunName={kebunList.find((k) => k.id === selectedKebunId)?.nama_kebun}
           activeAfdelingName={effectiveAfdelingList.find((a) => a.id === selectedAfdelingId)?.nama_afdeling}
+          activeBlokName={blokOptions.find((b) => b.value === selectedBlokValue)?.label}
+          selectedBlokFeature={
+            selectedFeatureId
+              ? mapBlokFeatures.find((f) => f.featureId === selectedFeatureId) || null
+              : null
+          }
+          onClearSelectedBlok={() => {
+            setSelectedFeatureId(null);
+            setSelectedMasterBlokId(null);
+          }}
+          onFeatureUpdated={() => {
+            setDataRevision((prev) => prev + 1);
+            refreshStatsAndLayers();
+          }}
+          onFeatureDeleted={canDelete ? handleFeatureDeleted : undefined}
+          isAdmin={user?.peran === 'admin'}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          activeDiagnosis={
+            selectedFeatureId
+              ? mapBlokFeatures.find((f) => f.featureId === selectedFeatureId)?.diagnosis || null
+              : null
+          }
+          riskSummary={mapBlokFeatures.reduce(
+            (acc, f) => {
+              if (!f.isOuterBoundary && f.diagnosis) {
+                acc[f.diagnosis.tier] = (acc[f.diagnosis.tier] || 0) + 1;
+              }
+              return acc;
+            },
+            { normal: 0, moderate: 0, high: 0, critical: 0 }
+          )}
         />
       </div>
 

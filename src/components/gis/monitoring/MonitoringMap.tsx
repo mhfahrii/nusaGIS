@@ -16,6 +16,12 @@ import {
 import { CreateParcelModal } from './CreateParcelModal';
 import type { LayerPeta, LayerRaster, MonitoringStats } from '@/types/gis';
 import { extractFeatureIntel } from '@/lib/gis/attributeExtractor';
+import {
+  analyzeBlockRiskAndRca,
+  RISK_TIER_META,
+  type BlockRiskDiagnosis,
+  type RiskTier,
+} from '@/lib/gis/rcaEngine';
 import { findRpnEntity, formatPerusahaanForPopup } from '@/lib/gis/rpnEntities';
 import {
   fetchBmkgAgroWeather,
@@ -70,6 +76,23 @@ interface MonitoringMapProps {
   statusFilter?: 'all' | 'ktg' | 'ks_gpa';
   selectedAfdelingId?: number | null;
   afdelingList?: { id: number; kebun_id?: number; nama_afdeling: string; kode_afdeling: string }[];
+  onBlokFeaturesChange?: (items: MapBlokFeature[]) => void;
+  focusFeatureRequest?: { featureId: number; nonce: number } | null;
+}
+
+/** Poligon yang sedang tampil di peta, dipakai sebagai sumber utama dropdown filter Blok. */
+export interface MapBlokFeature {
+  featureId: number;
+  layerId: number;
+  kebunId: number | null;
+  name: string;
+  afdelingName: string;
+  luasHa: number;
+  masterBlokId: number | null;
+  isOuterBoundary?: boolean;
+  diagnosis?: BlockRiskDiagnosis;
+  properties?: Record<string, unknown>;
+  layer?: LayerPeta;
 }
 
 import {
@@ -147,11 +170,15 @@ export function MonitoringMap({
   statusFilter = 'all',
   selectedAfdelingId = null,
   afdelingList = [],
+  onBlokFeaturesChange,
+  focusFeatureRequest = null,
 }: MonitoringMapProps) {
   const canDeleteRef = useRef<boolean>(canDelete);
+  const canEditRef = useRef<boolean>(canEdit);
   useEffect(() => {
     canDeleteRef.current = canDelete;
-  }, [canDelete]);
+    canEditRef.current = canEdit;
+  }, [canDelete, canEdit]);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const leafletRef = useRef<typeof LType | null>(null);
   const mapRef = useRef<LType.Map | null>(null);
@@ -196,10 +223,20 @@ export function MonitoringMap({
   }, [currentBasemap]);
   const [isBasemapMenuOpen, setIsBasemapMenuOpen] = useState(false);
   const [isLayersPanelOpen, setIsLayersPanelOpen] = useState(false);
-  const [showLabels, setShowLabels] = useState(true);
+  // Default Labels OFF agar peta bersih dan tidak penuh sesak bagi pemula
+  const [showLabels, setShowLabels] = useState(false);
   const [isOutlineOnly, setIsOutlineOnly] = useState(false);
-  // ArcGIS Thematic Symbology: Mode Pewarnaan Layer ('default' vs 'rkap') — Default 'rkap' agar tematik status langsung aktif
+  // ArcGIS Thematic Symbology: Mode Pewarnaan Layer ('default' vs 'rkap') - Default 'rkap' agar tematik status langsung aktif
   const [symbologyMode, setSymbologyMode] = useState<'default' | 'rkap'>('rkap');
+  // Legenda Risiko Produksi 4 Warna (Bisa Dibuka-Tutup & Diklik untuk Filter Warna Risiko)
+  const [isLegendCollapsed, setIsLegendCollapsed] = useState<boolean>(false);
+  const [selectedRiskFilter, setSelectedRiskFilter] = useState<RiskTier | 'all'>('all');
+  const [riskCounts, setRiskCounts] = useState<Record<RiskTier, number>>({
+    normal: 0,
+    moderate: 0,
+    high: 0,
+    critical: 0,
+  });
   const [mapReady, setMapReady] = useState(false);
   const [loadingLayers, setLoadingLayers] = useState(false);
   const [inspectingPixel, setInspectingPixel] = useState(false);
@@ -210,6 +247,74 @@ export function MonitoringMap({
   const [mouseLatLng, setMouseLatLng] = useState<[number, number] | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isToolbarOpen, setIsToolbarOpen] = useState(false);
+
+  // Split Polygon Tool States (Potong 1 Poligon -> 2+ Blok via PostGIS ST_Split)
+  const [isSplitMode, setIsSplitMode] = useState(false);
+  const [splitTargetFeatureId, setSplitTargetFeatureId] = useState<number | null>(null);
+  const [splitTargetName, setSplitTargetName] = useState<string>('');
+  const [splitLinePoints, setSplitLinePoints] = useState<[number, number][]>([]);
+  const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  const [splitPartNames, setSplitPartNames] = useState<[string, string]>(['', '']);
+  const [splitLoading, setSplitLoading] = useState(false);
+  const [splitError, setSplitError] = useState<string | null>(null);
+  const renderedBlokMetaRef = useRef<Map<number, { name: string; layerId: number }>>(new Map());
+  const isSplitModeRef = useRef(isSplitMode);
+  const splitTargetFeatureIdRef = useRef(splitTargetFeatureId);
+  useEffect(() => {
+    isSplitModeRef.current = isSplitMode;
+    splitTargetFeatureIdRef.current = splitTargetFeatureId;
+  }, [isSplitMode, splitTargetFeatureId]);
+
+  const handleCancelSplit = () => {
+    setIsSplitMode(false);
+    setSplitTargetFeatureId(null);
+    setSplitTargetName('');
+    setSplitLinePoints([]);
+    setMouseLatLng(null);
+    setIsSplitModalOpen(false);
+    setSplitError(null);
+  };
+
+  const handleOpenSplitConfirm = () => {
+    if (!splitTargetFeatureId || splitLinePoints.length < 2) return;
+    const baseName = splitTargetName || `Blok #${splitTargetFeatureId}`;
+    setSplitPartNames([`${baseName} - Bagian 1`, `${baseName} - Bagian 2`]);
+    setSplitError(null);
+    setIsSplitModalOpen(true);
+  };
+
+  const handleSubmitSplit = async () => {
+    if (!splitTargetFeatureId || splitLinePoints.length < 2) return;
+    setSplitLoading(true);
+    setSplitError(null);
+    try {
+      const res = await fetch('/api/gis/features/split', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feature_id: splitTargetFeatureId,
+          line_coordinates: splitLinePoints.map(([lat, lng]) => [lng, lat]),
+          part_names: splitPartNames.map((n) => n.trim()),
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || json?.status !== 'success') {
+        setSplitError(json?.message || 'Gagal memotong poligon.');
+        return;
+      }
+      const layerId = Number(json.data.layer_id);
+      const firstNewId = Number(json.data.parts?.[0]?.id || 0);
+      geojsonCacheRef.current.delete(layerId);
+      handleCancelSplit();
+      if (onFeatureCreated) {
+        onFeatureCreated({ id: firstNewId }, layerId);
+      }
+    } catch {
+      setSplitError('Terjadi kesalahan jaringan saat memotong poligon.');
+    } finally {
+      setSplitLoading(false);
+    }
+  };
 
   // Map Location Search States
   const [searchQuery, setSearchQuery] = useState('');
@@ -226,6 +331,17 @@ export function MonitoringMap({
   useEffect(() => {
     onSelectFeatureRef.current = onSelectFeature;
   }, [onSelectFeature]);
+
+  const onBlokFeaturesChangeRef = useRef(onBlokFeaturesChange);
+  useEffect(() => {
+    onBlokFeaturesChangeRef.current = onBlokFeaturesChange;
+  }, [onBlokFeaturesChange]);
+  // Per poligon yang sedang dirender: fungsi zoom + buka popup, dipanggil dari filter Blok.
+  const featureFocusersRef = useRef<Map<number, () => void>>(new Map());
+  // Fokus yang diminta sebelum poligonnya selesai dirender, dijalankan di akhir render.
+  const pendingFocusFeatureRef = useRef<number | null>(null);
+  // Zoom ke afdeling hanya saat afdeling berganti, agar tidak menimpa zoom blok saat render ulang.
+  const lastFittedAfdelingRef = useRef<number | null>(null);
 
   // Helper: Zoom ke bbox [west, south, east, north] -> Leaflet [[south, west], [north, east]]
   const zoomToBounds = useCallback((bounds: [number, number, number, number]) => {
@@ -304,7 +420,7 @@ export function MonitoringMap({
         return true;
       };
 
-      // 1. Ekstraksi Universal Multi-Kolom (nama_unit, Block, Name, Luas1, Luas, PopupInfo, Afdeling, Estimasi Produksi)
+      // 1. Ekstraksi Universal Multi-Kolom & Diagnosis Risiko + Root Cause Analysis (RCA)
       const intel = extractFeatureIntel(properties, {
         featId,
         layerName: layer.nama_layer,
@@ -313,6 +429,13 @@ export function MonitoringMap({
         wilayah: layer.wilayah,
         komoditas: layer.komoditas,
         isSingleBoundaryLayer: layer.jumlah_fitur === 1,
+      });
+      const diag = analyzeBlockRiskAndRca(featId, properties, {
+        layerName: layer.nama_layer,
+        perusahaan: layer.perusahaan,
+        namaKebun: layer.nama_kebun,
+        wilayah: layer.wilayah,
+        komoditas: layer.komoditas,
       });
 
       const nameVal = intel.blokName;
@@ -352,14 +475,26 @@ export function MonitoringMap({
         'luas',
         'luas1',
         'luas_ha',
+        'luas_baku',
         'name',
         'nama_unit',
+        'nama_blok',
         'block',
         'label',
+        'blok_id',
+        'aktivitas_terakhir',
+        'tanggal_aktivitas_terakhir',
+        'kondisi_tanaman',
+        'status_risiko_manual',
+        'status_verifikasi_aktivitas',
+        'petugas_terakhir',
+        'kendala_aktif',
+        'target_produksi_ton',
+        'estimasi_panen_ton',
       ]);
 
       // 3. Susun baris atribut yang hanya BERISI DATA (Jika kosong, HILANGKAN row & nama barisnya)
-      const extraAttributes: Array<{ label: string; value: string }> = [];
+      const extraAttributes: Array<{ label: string; value: string; highlight?: string }> = [];
 
       const rawPerusahaan =
         properties.perusahaan ||
@@ -399,6 +534,41 @@ export function MonitoringMap({
         extraAttributes.push({ label: 'Wilayah', value: String(layer.wilayah) });
       }
 
+      // Kolom Aktivitas Terakhir (diinput dari Catatan Harian Dashboard)
+      const rawAktTerakhir = String(properties.aktivitas_terakhir || '').trim();
+      const rawTglAkt = String(properties.tanggal_aktivitas_terakhir || '').trim();
+      const rawVerifAkt = String(properties.status_verifikasi_aktivitas || '').trim();
+      if (rawAktTerakhir) {
+        const verifLabel =
+          rawVerifAkt === 'disetujui_kepala_kebun'
+            ? ' · Approved'
+            : rawVerifAkt === 'diverifikasi_asisten'
+            ? ' · Verified Asisten'
+            : rawVerifAkt === 'menunggu_asisten'
+            ? ' · Menunggu Verifikasi'
+            : '';
+        extraAttributes.push({
+          label: 'Aktivitas Terakhir',
+          value: `${rawAktTerakhir}${rawTglAkt ? ` (${rawTglAkt})` : ''}${verifLabel}`,
+          highlight: '#10b981',
+        });
+      } else {
+        extraAttributes.push({
+          label: 'Aktivitas Terakhir',
+          value: 'Belum ada catatan harian',
+          highlight: '#94a3b8',
+        });
+      }
+
+      const rawKendalaAktif = String(properties.kendala_aktif || '').trim();
+      if (rawKendalaAktif) {
+        extraAttributes.push({
+          label: 'Kendala Lapangan',
+          value: rawKendalaAktif,
+          highlight: '#f59e0b',
+        });
+      }
+
       // Masukkan atribut kustom lain jika ada (yang bukan sampah dan punya nilai nyata)
       for (const [k, v] of Object.entries(properties)) {
         if (!k.startsWith('_') && !GARBAGE_KEYS.has(k.toLowerCase()) && isValidValue(v)) {
@@ -412,23 +582,75 @@ export function MonitoringMap({
             keyLower !== 'wilayah' &&
             keyLower !== 'afdeling' &&
             keyLower !== 'perusahaan' &&
-            keyLower !== 'nama_kebun'
+            keyLower !== 'nama_kebun' &&
+            keyLower !== 'komoditas'
           ) {
             extraAttributes.push({ label: k, value: String(v) });
           }
         }
       }
 
-      // Header Badge: Status Lahan atau Klaster Afdeling
-      const headerBadgeText = statusLahan || intel.afdelingGroup || '';
-      const isKTG =
-        statusLahan.toLowerCase().includes('ktg') ||
-        statusLahan.toLowerCase().includes('kebun tebu giling');
-      const statusBadgeColor = isKTG
-        ? '#10B981'
-        : intel.afdelingGroup
-        ? intel.afdelingColor
-        : '#00D2FF';
+      // Header Badge: Status Risiko 4 Tingkat (Normal Hijau, Moderate Kuning, High Risk Oranye, Critical Merah Pekat)
+      const headerBadgeText = `${diag.tierBadge}${statusLahan ? ` · ${statusLahan}` : ''}`;
+      const statusBadgeColor = diag.color;
+
+      // Kotak Informasi Tambahan Diagnosis Masalah Khusus Blok Berwarna Oranye (High Risk) & Merah Pekat (Critical)
+      const isProblemBlock = diag.tier === 'high' || diag.tier === 'critical';
+      const problemDiagnosisHtml = isProblemBlock
+        ? `
+        <div style="margin: 8px 12px 4px 12px; padding: 9px 10px; background: ${
+          diag.tier === 'critical' ? '#450a0a95' : '#43140795'
+        }; border: 1.5px solid ${diag.color}; border-radius: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
+            <span style="font-size: 10px; font-weight: 900; color: ${
+              diag.tier === 'critical' ? '#fca5a5' : '#fdba74'
+            }; text-transform: uppercase; letter-spacing: 0.04em;">
+              ⚠️ Diagnosis Masalah Blok (${diag.tier === 'critical' ? 'CRITICAL - MERAH' : 'HIGH RISK - ORANYE'})
+            </span>
+            <span style="font-size: 9.5px; font-weight: 800; color: #ffffff; background: ${diag.color}; padding: 1px 6px; border-radius: 4px; font-family: ui-monospace, monospace;">
+              ${diag.perubahanProduksiPct}% vs Target
+            </span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-bottom: 7px;">
+            <div style="background: #0d1322cc; border: 1px solid #1e2942; border-radius: 5px; padding: 4px 6px;">
+              <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Yield Aktual</div>
+              <div style="font-size: 11px; font-weight: 900; color: ${diag.color}; font-family: ui-monospace, monospace;">${diag.yieldTonPerHa} t/ha</div>
+            </div>
+            <div style="background: #0d1322cc; border: 1px solid #1e2942; border-radius: 5px; padding: 4px 6px;">
+              <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Indeks NDVI</div>
+              <div style="font-size: 11px; font-weight: 900; color: #facc15; font-family: ui-monospace, monospace;">${diag.ndvi.toFixed(2)}</div>
+            </div>
+            <div style="background: #0d1322cc; border: 1px solid #1e2942; border-radius: 5px; padding: 4px 6px;">
+              <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Curah Hujan</div>
+              <div style="font-size: 11px; font-weight: 900; color: #38bdf8; font-family: ui-monospace, monospace;">${diag.curahHujanMm} mm</div>
+            </div>
+          </div>
+
+          <div style="font-size: 10px; color: #f8fafc; line-height: 1.35; margin-bottom: 6px;">
+            <div style="font-weight: 800; color: ${
+              diag.tier === 'critical' ? '#fecaca' : '#fed7aa'
+            }; margin-bottom: 2px;">Masalah yang Dialami Blok:</div>
+            <ul style="margin: 0; padding-left: 14px; color: #e2e8f0;">
+              ${diag.problemBullets
+                .slice(0, 3)
+                .map((b) => `<li style="margin-bottom: 2px;">${b}</li>`)
+                .join('')}
+            </ul>
+          </div>
+
+          <div style="padding-top: 5px; border-top: 1px solid ${diag.color}50; font-size: 9.5px;">
+            <div style="font-weight: 800; color: #6ee7b7; margin-bottom: 2px;">Akar Masalah (RCA) &amp; Rekomendasi Prioritas:</div>
+            <div style="color: #cbd5e1; margin-bottom: 3px; font-family: ui-monospace, monospace; font-size: 9px;">
+              • ${diag.rcaFactors[0].label}: <strong style="color:#ffffff;">${diag.rcaFactors[0].percentage}%</strong><br/>
+              • ${diag.rcaFactors[1].label}: <strong style="color:#ffffff;">${diag.rcaFactors[1].percentage}%</strong>
+            </div>
+            <div style="color: #a7f3d0; font-weight: 600;">
+              ✓ ${diag.recommendations[0]}
+            </div>
+          </div>
+        </div>`
+        : '';
 
       // Selisih Badge Styling
       let varianceBadge = '';
@@ -512,15 +734,15 @@ export function MonitoringMap({
       const tableContentHtml =
         extraAttributes.length > 0
           ? `
-        <div style="max-height: 150px; overflow-y: auto;">
+        <div data-view="read-table" style="max-height: 165px; overflow-y: auto;">
           <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
             <tbody>
               ${extraAttributes
                 .map(
                   (attr, idx) => `
                 <tr style="background: ${idx % 2 === 0 ? '#0d1322' : '#12192b'}; border-bottom: 1px solid #1e2942;">
-                  <td style="padding: 5px 10px; color: #8b9bb4; font-size: 10px; font-weight: 600; white-space: nowrap; width: 44%;">${attr.label}</td>
-                  <td style="padding: 5px 10px; color: #f0f6fc; font-weight: 700; font-size: 11px; text-align: left;">${attr.value}</td>
+                  <td style="padding: 5px 10px; color: #8b9bb4; font-size: 10px; font-weight: 600; white-space: nowrap; width: 42%;">${attr.label}</td>
+                  <td style="padding: 5px 10px; color: ${attr.highlight || '#f0f6fc'}; font-weight: 700; font-size: 11px; text-align: left;">${attr.value}</td>
                 </tr>`
                 )
                 .join('')}
@@ -529,9 +751,64 @@ export function MonitoringMap({
         </div>`
           : '';
 
+      const safeInputAttr = (val: unknown) =>
+        String(val ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/"/g, '&quot;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+
+      const editFormHtml = `
+        <div data-view="edit-form" style="display: none; padding: 10px 12px; background: #0a0e1a; border-top: 1px solid #1e2942; max-height: 225px; overflow-y: auto;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <span style="font-size: 10px; font-weight: 800; color: #00d2ff; text-transform: uppercase; letter-spacing: 0.04em;">Edit Nilai Atribut Blok</span>
+            <span style="font-size: 9px; color: #8b9bb4;">Label &amp; Luas GIS Terkunci</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 7px;">
+            <div style="grid-column: span 2;">
+              <label style="display: block; font-size: 9.5px; color: #8b9bb4; margin-bottom: 2px;">Nama Blok / Petak</label>
+              <input type="text" data-field="nama_blok" value="${safeInputAttr(nameVal)}" style="width: 100%; background: #12192b; border: 1px solid #1e2942; border-radius: 5px; padding: 4px 7px; color: #ffffff; font-size: 11px; font-weight: 700;" />
+            </div>
+            <div>
+              <label style="display: block; font-size: 9.5px; color: #8b9bb4; margin-bottom: 2px;">Komoditas</label>
+              <select data-field="komoditas" style="width: 100%; background: #12192b; border: 1px solid #1e2942; border-radius: 5px; padding: 4px 6px; color: #ffffff; font-size: 11px; font-weight: 700;">
+                ${['Tebu', 'Teh', 'Kelapa Sawit', 'Karet', 'Kina', 'Kopi', 'Kakao']
+                  .map(
+                    (k) =>
+                      `<option value="${k}" ${
+                        intel.commodity.label.toLowerCase() === k.toLowerCase() ? 'selected' : ''
+                      } style="background: #0d1322;">${k}</option>`
+                  )
+                  .join('')}
+              </select>
+            </div>
+            <div>
+              <label style="display: block; font-size: 9.5px; color: #8b9bb4; margin-bottom: 2px;">Luas Baku Dokumen (Ha)</label>
+              <input type="number" step="0.01" data-field="luas_baku" value="${luasBakuNum ?? luasUkurHa.toFixed(2)}" style="width: 100%; background: #12192b; border: 1px solid #1e2942; border-radius: 5px; padding: 4px 7px; color: #ffffff; font-size: 11px; font-family: ui-monospace, monospace;" />
+            </div>
+            <div>
+              <label style="display: block; font-size: 9.5px; color: #8b9bb4; margin-bottom: 2px;">Afdeling / Klaster</label>
+              <input type="text" data-field="afdeling" value="${safeInputAttr(intel.afdelingGroup || '')}" style="width: 100%; background: #12192b; border: 1px solid #1e2942; border-radius: 5px; padding: 4px 7px; color: #ffffff; font-size: 11px;" />
+            </div>
+            <div>
+              <label style="display: block; font-size: 9.5px; color: #8b9bb4; margin-bottom: 2px;">Status Lahan</label>
+              <input type="text" data-field="status_lahan" value="${safeInputAttr(statusLahan)}" style="width: 100%; background: #12192b; border: 1px solid #1e2942; border-radius: 5px; padding: 4px 7px; color: #ffffff; font-size: 11px;" />
+            </div>
+            <div style="grid-column: span 2;">
+              <label style="display: block; font-size: 9.5px; color: #8b9bb4; margin-bottom: 2px;">Target / Estimasi Produksi (Ton)</label>
+              <input type="number" step="0.1" data-field="target_produksi_ton" value="${intel.estimasiPanenTon || ''}" style="width: 100%; background: #12192b; border: 1px solid #1e2942; border-radius: 5px; padding: 4px 7px; color: #10b981; font-size: 11px; font-weight: 700; font-family: ui-monospace, monospace;" />
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 9px; padding-top: 8px; border-top: 1px solid #1e2942;">
+            <button type="button" data-action="cancel-edit" style="color: #94a3b8; background: #12192b; border: 1px solid #1e2942; font-size: 10px; font-weight: 700; cursor: pointer; padding: 4px 9px; border-radius: 4px;">Batal</button>
+            <button type="button" data-action="save-edit" style="color: #0a0e1a; background: #00d2ff; border: 1px solid #00d2ff; font-size: 10px; font-weight: 800; cursor: pointer; padding: 4px 10px; border-radius: 4px;">Simpan Perubahan</button>
+          </div>
+        </div>
+      `;
+
       const wrapper = document.createElement('div');
       wrapper.style.cssText =
-        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; width: min(340px, calc(100vw - 36px)); max-width: calc(100vw - 36px); max-height: min(460px, 64dvh); display: flex; flex-direction: column; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.8), 0 10px 20px -4px rgba(0, 0, 0, 0.5);';
+        'font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; color: #f0f6fc; background: #0d1322; border: 1px solid #1e2942; border-radius: 10px; overflow: hidden; width: min(350px, calc(100vw - 36px)); max-width: calc(100vw - 36px); max-height: min(500px, 70dvh); display: flex; flex-direction: column; box-shadow: 0 20px 45px -4px rgba(0, 0, 0, 0.8), 0 10px 20px -4px rgba(0, 0, 0, 0.5);';
 
       wrapper.innerHTML = `
         <!-- 1. ArcGIS Pro Header -->
@@ -542,13 +819,13 @@ export function MonitoringMap({
                 <span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: ${statusBadgeColor};"></span>
                 <span style="font-size: 9px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: #00D2FF;">${layer.nama_layer}</span>
               </div>
-              <h4 style="margin: 0; font-size: 13px; font-weight: 800; color: #ffffff; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              <h4 data-role="popup-title" style="margin: 0; font-size: 13px; font-weight: 800; color: #ffffff; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                 ${String(nameVal)}
               </h4>
             </div>
             ${
               isValidValue(headerBadgeText)
-                ? `<span style="background: ${statusBadgeColor}20; border: 1px solid ${statusBadgeColor}60; color: ${statusBadgeColor}; padding: 2px 7px; border-radius: 4px; font-size: 9.5px; font-weight: 800; white-space: nowrap;">
+                ? `<span data-role="popup-badge" style="background: ${statusBadgeColor}20; border: 1px solid ${statusBadgeColor}60; color: ${statusBadgeColor}; padding: 2px 7px; border-radius: 4px; font-size: 9.5px; font-weight: 800; white-space: nowrap;">
                      ${headerBadgeText}
                    </span>`
                 : ''
@@ -561,28 +838,118 @@ export function MonitoringMap({
           ${kpiHighlightHtml}
         </div>
 
-        <!-- 3. Clean Attribute Table (Hanya baris yang ada nilainya) -->
+        <!-- 2B. Diagnosis Masalah & RCA (Tampil Otomatis untuk Blok Oranye High Risk & Merah Pekat Critical) -->
+        <!-- 3. Clean Attribute Table & Inline Edit Form -->
         <div style="flex: 1; min-height: 0; overflow-y: auto;">
+          ${problemDiagnosisHtml}
           ${tableContentHtml}
+          ${editFormHtml}
         </div>
 
-        <!-- 4. Modern Action Bar (Download & Kelola Data) -->
-        <div style="background: #12192b; padding: 8px 12px; border-top: 1px solid #1e2942; display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-shrink: 0;">
-          <a href="/api/gis/export?feature_id=${featId}&format=geojson" target="_blank" download="${String(nameVal)}.geojson" style="color: #00d2ff; background: #0e3a5d; border: 1px solid #00b4d8; font-size: 10px; font-weight: 700; text-decoration: none; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Unduh GeoJSON">
-            <span>GeoJSON</span>
-          </a>
-          <a href="/api/gis/export?feature_id=${featId}&format=kml" target="_blank" download="${String(nameVal)}.kml" style="color: #7dd3fc; background: #132238; border: 1px solid #1e2942; font-size: 10px; font-weight: 700; text-decoration: none; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Unduh KML Google Earth">
-            <span>KML</span>
-          </a>
-          ${
-            canDeleteRef.current
-              ? `<button type="button" data-action="delete" style="color: #f87171; background: #450a0a; border: 1px solid #991b1b; font-size: 10px; font-weight: 700; cursor: pointer; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Hapus Lahan ini dari Database">
-                  <span>Hapus</span>
-                </button>`
-              : ''
-          }
+        <!-- 4. Modern Action Bar (Edit Value, Download & Kelola Data) -->
+        <div style="background: #12192b; padding: 8px 12px; border-top: 1px solid #1e2942; display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-shrink: 0;">
+          <div>
+            ${
+              canEditRef.current && featId
+                ? `<button type="button" data-action="toggle-edit" style="color: #10b981; background: #064e3b80; border: 1px solid #10b98160; font-size: 10px; font-weight: 800; cursor: pointer; padding: 4px 9px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Edit Nilai Informasi Blok (Label Terkunci)">
+                    <span>✎ Edit Info</span>
+                  </button>`
+                : ''
+            }
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <a href="/api/gis/export?feature_id=${featId}&format=geojson" target="_blank" download="${String(nameVal)}.geojson" style="color: #00d2ff; background: #0e3a5d; border: 1px solid #00b4d8; font-size: 10px; font-weight: 700; text-decoration: none; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Unduh GeoJSON">
+              <span>GeoJSON</span>
+            </a>
+            <a href="/api/gis/export?feature_id=${featId}&format=kml" target="_blank" download="${String(nameVal)}.kml" style="color: #7dd3fc; background: #132238; border: 1px solid #1e2942; font-size: 10px; font-weight: 700; text-decoration: none; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Unduh KML Google Earth">
+              <span>KML</span>
+            </a>
+            ${
+              canDeleteRef.current
+                ? `<button type="button" data-action="delete" style="color: #f87171; background: #450a0a; border: 1px solid #991b1b; font-size: 10px; font-weight: 700; cursor: pointer; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Hapus Lahan ini dari Database">
+                    <span>Hapus</span>
+                  </button>`
+                : ''
+            }
+          </div>
         </div>
       `;
+
+      // Handler Toggle Mode Inline Edit di Pop-up
+      const toggleEditBtn = wrapper.querySelector('[data-action="toggle-edit"]') as HTMLButtonElement | null;
+      const cancelEditBtn = wrapper.querySelector('[data-action="cancel-edit"]') as HTMLButtonElement | null;
+      const saveEditBtn = wrapper.querySelector('[data-action="save-edit"]') as HTMLButtonElement | null;
+      const readTableEl = wrapper.querySelector('[data-view="read-table"]') as HTMLElement | null;
+      const editFormEl = wrapper.querySelector('[data-view="edit-form"]') as HTMLElement | null;
+
+      if (toggleEditBtn && editFormEl && readTableEl) {
+        toggleEditBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const isEditing = editFormEl.style.display !== 'none';
+          editFormEl.style.display = isEditing ? 'none' : 'block';
+          readTableEl.style.display = isEditing ? 'block' : 'none';
+          toggleEditBtn.textContent = isEditing ? '✎ Edit Info' : '✕ Tutup Edit';
+        });
+      }
+
+      if (cancelEditBtn && editFormEl && readTableEl && toggleEditBtn) {
+        cancelEditBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          editFormEl.style.display = 'none';
+          readTableEl.style.display = 'block';
+          toggleEditBtn.textContent = '✎ Edit Info';
+        });
+      }
+
+      if (saveEditBtn && featId) {
+        saveEditBtn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          const namaInput = (wrapper.querySelector('[data-field="nama_blok"]') as HTMLInputElement)?.value?.trim();
+          const komoditasInput = (wrapper.querySelector('[data-field="komoditas"]') as HTMLSelectElement)?.value;
+          const luasBakuInput = (wrapper.querySelector('[data-field="luas_baku"]') as HTMLInputElement)?.value;
+          const afdelingInput = (wrapper.querySelector('[data-field="afdeling"]') as HTMLInputElement)?.value?.trim();
+          const statusInput = (wrapper.querySelector('[data-field="status_lahan"]') as HTMLInputElement)?.value?.trim();
+          const targetTonInput = (wrapper.querySelector('[data-field="target_produksi_ton"]') as HTMLInputElement)?.value;
+
+          saveEditBtn.textContent = 'Menyimpan...';
+          saveEditBtn.disabled = true;
+
+          try {
+            const res = await fetch('/api/gis/features', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: featId,
+                nama_blok: namaInput,
+                komoditas: komoditasInput,
+                luas_baku: luasBakuInput,
+                afdeling: afdelingInput,
+                status_lahan: statusInput,
+                target_produksi_ton: targetTonInput,
+              }),
+            });
+            const json = await res.json();
+            if (!res.ok) {
+              alert(json.message || 'Gagal menyimpan perubahan.');
+              saveEditBtn.textContent = 'Simpan Perubahan';
+              saveEditBtn.disabled = false;
+              return;
+            }
+
+            // Perbarui properties di memori & cache GeoJSON lalu render ulang popup secara instan
+            if (json.data?.atribut) {
+              Object.assign(properties, json.data.atribut);
+            }
+            const refreshedEl = buildPopupElement(map, featureBounds, clickLatLng, properties, layer, featId);
+            wrapper.replaceWith(refreshedEl);
+          } catch (err) {
+            console.error('Inline edit error:', err);
+            alert('Terjadi kesalahan jaringan saat menyimpan perubahan.');
+            saveEditBtn.textContent = 'Simpan Perubahan';
+            saveEditBtn.disabled = false;
+          }
+        });
+      }
 
       const delBtn = wrapper.querySelector('[data-action="delete"]');
       if (delBtn && featId) {
@@ -848,7 +1215,7 @@ export function MonitoringMap({
         minZoom: 2,
         maxZoom: 21,
         zoomControl: false,
-        preferCanvas: true,
+        preferCanvas: false,
       });
 
       // Kontrol Zoom di kanan bawah
@@ -936,13 +1303,19 @@ export function MonitoringMap({
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    if (isDrawingMode) {
+    if (isDrawingMode || isSplitMode) {
       map.getContainer().style.cursor = 'crosshair';
     } else {
       map.getContainer().style.cursor = '';
     }
 
     const handleMapClick = async (e: LType.LeafletMouseEvent) => {
+      if (isSplitMode) {
+        if (splitTargetFeatureId) {
+          setSplitLinePoints((prev) => [...prev, [e.latlng.lat, e.latlng.lng]]);
+        }
+        return;
+      }
       // Jika mode gambar aktif: tambahkan titik koordinat baru
       if (isDrawingMode) {
         setDrawingPoints((prev) => [...prev, [e.latlng.lat, e.latlng.lng]]);
@@ -1033,12 +1406,23 @@ export function MonitoringMap({
     };
 
     const handleMouseMove = (e: LType.LeafletMouseEvent) => {
-      if (isDrawingMode) {
+      if (isDrawingMode || (isSplitMode && splitTargetFeatureId)) {
         setMouseLatLng([e.latlng.lat, e.latlng.lng]);
       }
     };
 
     const handleDblClick = (e: LType.LeafletMouseEvent) => {
+      if (isSplitMode) {
+        e.originalEvent.preventDefault();
+        e.originalEvent.stopPropagation();
+        if (splitTargetFeatureId && splitLinePoints.length >= 2) {
+          const baseName = splitTargetName || `Blok #${splitTargetFeatureId}`;
+          setSplitPartNames([`${baseName} - Bagian 1`, `${baseName} - Bagian 2`]);
+          setSplitError(null);
+          setIsSplitModalOpen(true);
+        }
+        return;
+      }
       if (isDrawingMode) {
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
@@ -1057,15 +1441,54 @@ export function MonitoringMap({
       map.off('mousemove', handleMouseMove);
       map.off('dblclick', handleDblClick);
     };
-  }, [isDrawingMode, drawingPoints, rasterLayers, mapReady, buildRasterPopupElement, buildWeatherPopupElement]);
+  }, [
+    isDrawingMode,
+    drawingPoints,
+    isSplitMode,
+    splitTargetFeatureId,
+    splitTargetName,
+    splitLinePoints,
+    rasterLayers,
+    mapReady,
+    buildRasterPopupElement,
+    buildWeatherPopupElement,
+  ]);
 
-  // 3. Render Visualisasi Interaktif Mode Gambar (Pencil Digitize Preview)
+  // 3. Render Visualisasi Interaktif Mode Gambar (Pencil Digitize Preview) & Garis Potong Poligon
   useEffect(() => {
     const L = leafletRef.current;
     const group = drawGroupRef.current;
     if (!L || !group) return;
 
     group.clearLayers();
+
+    if (isSplitMode && splitLinePoints.length > 0) {
+      splitLinePoints.forEach((pt, idx) => {
+        L.circleMarker(pt, {
+          radius: idx === 0 ? 7 : 5,
+          fillColor: '#f59e0b',
+          color: '#ffffff',
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.95,
+        }).addTo(group);
+      });
+      if (splitLinePoints.length >= 2) {
+        L.polyline(splitLinePoints, {
+          color: '#f97316',
+          weight: 3.5,
+          dashArray: '8, 5',
+        }).addTo(group);
+      }
+      if (mouseLatLng) {
+        L.polyline([splitLinePoints[splitLinePoints.length - 1], mouseLatLng], {
+          color: '#fbbf24',
+          weight: 2,
+          dashArray: '4, 6',
+        }).addTo(group);
+      }
+      return;
+    }
 
     if (!isDrawingMode || drawingPoints.length === 0) return;
 
@@ -1134,7 +1557,7 @@ export function MonitoringMap({
         fillOpacity: 0.25,
       }).addTo(group);
     }
-  }, [isDrawingMode, drawingPoints, mouseLatLng]);
+  }, [isDrawingMode, drawingPoints, isSplitMode, splitLinePoints, mouseLatLng]);
 
   // 4B. Render pin penanda lokasi kebun/wilayah saat filter Perusahaan / Puslit aktif
   const onSelectCompanyLocationRef = useRef(onSelectCompanyLocation);
@@ -1423,6 +1846,15 @@ export function MonitoringMap({
     ) {
       setLoadingLayers(true);
       group.clearLayers();
+      featureFocusersRef.current.clear();
+      renderedBlokMetaRef.current.clear();
+      const blokFeatures: MapBlokFeature[] = [];
+      const nextRiskCounts: Record<RiskTier, number> = {
+        normal: 0,
+        moderate: 0,
+        high: 0,
+        critical: 0,
+      };
 
       // Urutkan layer agar batas luar (1 poligon perimeter) dirender di BAWAH petak blok, sehingga outline & klik selalu rapi
       const visibleLayers = [...layers.filter((l) => l.terlihat)].sort((a, b) => {
@@ -1487,9 +1919,15 @@ export function MonitoringMap({
             ) {
               return false;
             }
-            if (!statusFilter || statusFilter === 'all') return true;
             const featId = Number(feature?.id || feature?.properties?._feature_id || 0);
             const rkap = getFeatureRkapClassification(featId, (feature?.properties || {}) as Record<string, unknown>);
+            if (!isOuterBoundaryLayer) {
+              nextRiskCounts[rkap.riskTier] = (nextRiskCounts[rkap.riskTier] || 0) + 1;
+            }
+            if (selectedRiskFilter !== 'all' && !isOuterBoundaryLayer && rkap.riskTier !== selectedRiskFilter) {
+              return false;
+            }
+            if (!statusFilter || statusFilter === 'all') return true;
             if (statusFilter === 'ktg') return rkap.category === 'optimal';
             if (statusFilter === 'ks_gpa') return rkap.category === 'warning' || rkap.category === 'critical';
             return true;
@@ -1632,30 +2070,15 @@ export function MonitoringMap({
             }
 
             // Interaksi klik fitur: tampilkan popup RPN
-            featureLayer.on('click', (e: LType.LeafletMouseEvent) => {
-              L.DomEvent.stopPropagation(e);
+            const getFeatureBounds = (): LType.LatLngBounds | null =>
+              'getBounds' in featureLayer && typeof featureLayer.getBounds === 'function'
+                ? (featureLayer as LType.Polygon | LType.Polyline).getBounds()
+                : null;
 
-              if (featId && onSelectFeatureRef.current) {
-                onSelectFeatureRef.current(featId, layer.id);
-              }
-
-              let featBounds: LType.LatLngBounds | null = null;
-              if ('getBounds' in featureLayer && typeof featureLayer.getBounds === 'function') {
-                featBounds = (featureLayer as LType.Polygon | LType.Polyline).getBounds();
-              }
-
-              const popupLatLng =
-                featBounds && featBounds.isValid() ? featBounds.getCenter() : e.latlng;
-
-              // Geser titik fokus kamera sedikit ke atas poligon agar seluruh kartu popup berada tepat di tengah layar tanpa terpotong header
-              const currentZoom = map.getZoom();
-              const projected = map.project(popupLatLng, currentZoom);
-              const centeredLatLng = map.unproject(
-                L.point(projected.x, projected.y - 175),
-                currentZoom
-              );
-              map.panTo(centeredLatLng, { animate: true, duration: 0.35 });
-
+            const openFeaturePopup = (
+              featBounds: LType.LatLngBounds | null,
+              popupLatLng: LType.LatLng
+            ) => {
               const popupEl = buildPopupElement(
                 map,
                 featBounds,
@@ -1679,6 +2102,72 @@ export function MonitoringMap({
                 .setLatLng(popupLatLng)
                 .setContent(popupEl)
                 .openOn(map);
+            };
+
+            const geomType = feature.geometry?.type;
+            if (featId && (geomType === 'Polygon' || geomType === 'MultiPolygon')) {
+              const blokIntel = extractFeatureIntel(props, {
+                featId,
+                layerName: layer.nama_layer,
+                namaKebun: layer.nama_kebun,
+                wilayah: layer.wilayah,
+                isSingleBoundaryLayer: layer.jumlah_fitur === 1,
+              });
+              const blokDiagnosis = analyzeBlockRiskAndRca(featId, props, {
+                layerName: layer.nama_layer,
+                perusahaan: layer.perusahaan,
+                namaKebun: layer.nama_kebun,
+                wilayah: layer.wilayah,
+                komoditas: layer.komoditas,
+              });
+              blokFeatures.push({
+                featureId: featId,
+                layerId: layer.id,
+                kebunId: layer.kebun_id ?? null,
+                name: blokIntel.blokName,
+                afdelingName: blokIntel.afdelingGroup || '',
+                luasHa: blokIntel.luasUkurHa,
+                masterBlokId: Number(props.blok_id) || null,
+                isOuterBoundary: isOuterBoundaryLayer,
+                diagnosis: blokDiagnosis,
+                properties: props,
+                layer,
+              });
+              renderedBlokMetaRef.current.set(featId, { name: blokIntel.blokName, layerId: layer.id });
+              featureFocusersRef.current.set(featId, () => {
+                const featBounds = getFeatureBounds();
+                if (!featBounds || !featBounds.isValid()) return;
+                map.stop();
+                // Opsi A: Zoom proporsional ke poligon tanpa membuka popup mengambang yang menutupi outline
+                map.fitBounds(featBounds, { padding: [90, 90], maxZoom: 17, animate: true });
+              });
+            }
+
+            featureLayer.on('click', (e: LType.LeafletMouseEvent) => {
+              L.DomEvent.stopPropagation(e);
+
+              if (isSplitModeRef.current) {
+                if (!splitTargetFeatureIdRef.current) {
+                  if (featId && (geomType === 'Polygon' || geomType === 'MultiPolygon')) {
+                    setSplitTargetFeatureId(featId);
+                    setSplitTargetName(renderedBlokMetaRef.current.get(featId)?.name || `Blok #${featId}`);
+                    onSelectFeatureRef.current?.(featId, layer.id);
+                  }
+                } else {
+                  setSplitLinePoints((prev) => [...prev, [e.latlng.lat, e.latlng.lng]]);
+                }
+                return;
+              }
+
+              // Opsi A: Tampilkan detail blok di Panel Samping Kanan agar outline & lokasi peta 100% bersih tanpa terhalangi pop-up!
+              if (featId && onSelectFeatureRef.current) {
+                onSelectFeatureRef.current(featId, layer.id);
+              }
+
+              const featBounds = getFeatureBounds();
+              const targetLatLng =
+                featBounds && featBounds.isValid() ? featBounds.getCenter() : e.latlng;
+              map.panTo(targetLatLng, { animate: true, duration: 0.3 });
             });
           },
         });
@@ -1696,14 +2185,30 @@ export function MonitoringMap({
 
       if (ignore) return;
 
-      // Arahkan peta 1 kali ke gabungan seluruh poligon Afdeling terpilih (cegah lompat ke kebun/wilayah lain!)
-      if (selectedAfdelingId && combinedAfdelingBounds.isValid()) {
+      setRiskCounts(nextRiskCounts);
+      onBlokFeaturesChangeRef.current?.(blokFeatures);
+
+      // Arahkan peta 1 kali ke gabungan seluruh poligon Afdeling terpilih (zoom-out proporsional agar tidak terlalu dekat)
+      if (!selectedAfdelingId) lastFittedAfdelingRef.current = null;
+      if (
+        selectedAfdelingId &&
+        combinedAfdelingBounds.isValid() &&
+        lastFittedAfdelingRef.current !== selectedAfdelingId
+      ) {
+        lastFittedAfdelingRef.current = selectedAfdelingId;
         map.stop();
         map.fitBounds(combinedAfdelingBounds, {
-          padding: [55, 55],
-          maxZoom: 17,
+          padding: [110, 110],
+          maxZoom: 15,
           animate: true,
         });
+      }
+
+      const pendingFocusId = pendingFocusFeatureRef.current;
+      const pendingFocus = pendingFocusId !== null ? featureFocusersRef.current.get(pendingFocusId) : undefined;
+      if (pendingFocus) {
+        pendingFocusFeatureRef.current = null;
+        pendingFocus();
       }
 
       // Auto-fit awal ke gabungan seluruh wilayah (Semua Perusahaan PT RPN) jika belum pernah auto-fit
@@ -1782,6 +2287,7 @@ export function MonitoringMap({
     isOutlineOnly,
     symbologyMode,
     statusFilter,
+    selectedRiskFilter,
     selectedAfdelingId,
     afdelingList,
     selectedFeatureId,
@@ -1802,6 +2308,18 @@ export function MonitoringMap({
       zoomToBounds(fitBoundsTarget);
     }
   }, [fitBoundsTarget, mapReady, zoomToBounds]);
+
+  // Blok dipilih dari filter: zoom + buka popup. Bila poligon belum dirender, ditunda ke akhir render layer.
+  useEffect(() => {
+    if (!focusFeatureRequest) return;
+    const focus = featureFocusersRef.current.get(focusFeatureRequest.featureId);
+    if (focus) {
+      pendingFocusFeatureRef.current = null;
+      focus();
+    } else {
+      pendingFocusFeatureRef.current = focusFeatureRequest.featureId;
+    }
+  }, [focusFeatureRequest]);
 
   // 7. Outline Batas Administratif & Auto-Navigation saat Filter Wilayah dipilih
   useEffect(() => {
@@ -2426,8 +2944,64 @@ export function MonitoringMap({
         </div>
       )}
 
+      {/* Floating Split Polygon Toolbar (Muncul saat Mode Potong Poligon Aktif) */}
+      {isSplitMode && (
+        <div className="absolute top-2.5 sm:top-4 left-2.5 right-2.5 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-[1100] bg-[#0D1322]/95 backdrop-blur-md border border-amber-500 rounded-xl shadow-2xl p-2 sm:p-2.5 flex flex-wrap items-center justify-between sm:justify-center gap-2 sm:gap-3 animate-in fade-in slide-in-from-top-3">
+          <div className="flex items-center gap-2 sm:pr-3 sm:border-r border-[#1E2942]">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+            <span className="text-xs font-bold text-amber-300">Tool Potong Blok</span>
+          </div>
+
+          <div className="text-[11px] text-[#8B9BB4] flex items-center gap-2">
+            {!splitTargetFeatureId ? (
+              <span className="text-amber-200">Klik 1 poligon di peta yang akan dibelah</span>
+            ) : (
+              <>
+                <span>
+                  Target:{' '}
+                  <strong className="text-white">
+                    {splitTargetName || `Blok #${splitTargetFeatureId}`}
+                  </strong>
+                </span>
+                <span>
+                  Titik garis: <strong className="text-amber-400 font-mono">{splitLinePoints.length}</strong>
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 pl-2 border-l border-[#1E2942]">
+            {splitLinePoints.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSplitLinePoints((prev) => prev.slice(0, -1))}
+                className="px-2.5 py-1 bg-[#12192B] hover:bg-[#19233A] border border-[#1E2942] text-[#8B9BB4] hover:text-[#F0F6FC] rounded text-xs transition-colors cursor-pointer"
+              >
+                Undo Titik
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleCancelSplit}
+              className="px-2.5 py-1 bg-[#12192B] hover:bg-[#19233A] border border-[#1E2942] text-[#8B9BB4] hover:text-[#EF4444] rounded text-xs transition-colors cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              disabled={!splitTargetFeatureId || splitLinePoints.length < 2}
+              onClick={handleOpenSplitConfirm}
+              className="px-3.5 py-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-[#0A0E1A] font-bold rounded text-xs transition-all cursor-pointer flex items-center gap-1"
+            >
+              <IconCheck className="w-3.5 h-3.5" />
+              <span>Potong Poligon</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Right Quick Controls Toolbar (Buka / Tutup Collapsible) */}
-      {!isToolbarOpen && !isDrawingMode ? (
+      {!isToolbarOpen && !isDrawingMode && !isSplitMode ? (
         <div className="absolute top-2.5 sm:top-3 right-2.5 sm:right-3 z-[1000]">
           <button
             type="button"
@@ -2441,7 +3015,7 @@ export function MonitoringMap({
             <span className="hidden sm:inline text-[10px] text-[#00D2FF] bg-[#0E3A5D]/70 px-1.5 py-0.2 rounded font-mono">Buka ▾</span>
           </button>
         </div>
-      ) : !isDrawingMode ? (
+      ) : !isDrawingMode && !isSplitMode ? (
         <div className="absolute top-2.5 sm:top-3 left-2.5 right-2.5 sm:left-auto sm:right-3 z-[1000] flex flex-wrap items-center justify-end gap-1.5 bg-[#0D1322]/95 backdrop-blur-md p-1.5 sm:p-1 rounded-xl border border-[#1E2942] shadow-2xl animate-in fade-in zoom-in-95 duration-100">
           {/* Full Extent / Home */}
           <button
@@ -2484,26 +3058,46 @@ export function MonitoringMap({
             <IconFullExtent className="w-4 h-4" />
           </button>
 
+          <button
+            type="button"
+            onClick={() => {
+              if (isDrawingMode) {
+                handleCancelDrawing();
+              } else {
+                setIsDrawingMode(true);
+                setDrawingPoints([]);
+              }
+            }}
+            className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+              isDrawingMode
+                ? 'bg-[#00D2FF] border-[#00B4D8] text-[#0A0E1A] font-extrabold shadow-lg shadow-[#00D2FF]/20'
+                : 'bg-[#12192B] border-[#1E2942] text-[#00D2FF] hover:bg-[#19233A] hover:border-[#00D2FF]'
+            }`}
+            title="Klik untuk menggambar Digitasi Blok Baru atau Melaporkan Kendala Lapangan di Peta"
+          >
+            <IconPencil className="w-3.5 h-3.5" />
+            <span>{isDrawingMode ? 'Mode Digitasi Aktif' : 'Digitasi & Lapor Kendala'}</span>
+          </button>
+
           {canEdit && (
             <button
               type="button"
               onClick={() => {
-                if (isDrawingMode) {
-                  handleCancelDrawing();
-                } else {
-                  setIsDrawingMode(true);
-                  setDrawingPoints([]);
-                }
+                mapRef.current?.closePopup();
+                setIsDrawingMode(false);
+                setDrawingPoints([]);
+                setIsSplitMode(true);
+                setSplitLinePoints([]);
+                const targetId = selectedFeatureId ?? null;
+                setSplitTargetFeatureId(targetId);
+                setSplitTargetName(
+                  targetId ? renderedBlokMetaRef.current.get(targetId)?.name || `Blok #${targetId}` : ''
+                );
               }}
-              className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                isDrawingMode
-                  ? 'bg-[#00D2FF] border-[#00B4D8] text-[#0A0E1A] font-extrabold shadow-lg shadow-[#00D2FF]/20'
-                  : 'bg-[#12192B] border-[#1E2942] text-[#00D2FF] hover:bg-[#19233A] hover:border-[#00D2FF]'
-              }`}
-              title="Klik untuk mengaktifkan Tool Digitasi Poligon Lahan di Peta"
+              className="px-2.5 py-1 rounded-md text-[10px] font-bold border bg-[#12192B] border-[#1E2942] text-amber-300 hover:bg-[#19233A] hover:border-amber-400 transition-all cursor-pointer flex items-center gap-1.5"
+              title="Belah 1 poligon menjadi 2 blok baru dengan menarik garis potong di peta"
             >
-              <IconPencil className="w-3.5 h-3.5" />
-              <span>{isDrawingMode ? 'Mode Digitasi Aktif' : 'Digitasi'}</span>
+              <span>Potong Blok</span>
             </button>
           )}
 
@@ -2665,10 +3259,7 @@ export function MonitoringMap({
             {/* Seksi Layer Vektor */}
             <div>
               <div className="text-[10px] font-bold text-[#8B9BB4] uppercase tracking-wider mb-2 flex items-center justify-between">
-                <span>Layer Vektor ({layers.length})</span>
-                <span className="text-[9px] bg-[#12192B] border border-[#1E2942] px-1.5 py-0.5 rounded text-[#00D2FF] font-mono">
-                  PostGIS
-                </span>
+                <span>Daftar Peta ({layers.length})</span>
               </div>
               {layers.length === 0 ? (
                 <div className="text-[11px] text-[#566680] py-2 text-center">Belum ada layer vektor</div>
@@ -2929,6 +3520,73 @@ export function MonitoringMap({
         </div>
       )}
 
+      {/* Legenda Peta Interaktif 4 Tingkat Risiko Produksi (Bisa Ditutup & Diklik untuk Filter Warna) */}
+      {!isDrawingMode && !isSplitMode && currentBasemap !== 'bmkg_weather' && (
+        <div className="absolute bottom-24 right-2.5 sm:bottom-24 sm:right-3 z-[994] w-56 bg-[#0D1322]/95 backdrop-blur-md border border-[#1E2942] rounded-xl shadow-2xl overflow-hidden text-xs">
+          <div className="px-3 py-2 bg-[#12192B] border-b border-[#1E2942] flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="w-2 h-2 rounded-full bg-[#10B981] shrink-0" />
+              <span className="font-bold text-[#F0F6FC] text-[10.5px] truncate">
+                Layer Aktif: Risiko Produksi
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsLegendCollapsed((prev) => !prev)}
+              className="px-1.5 py-0.5 rounded bg-[#0D1322] hover:bg-[#19233A] border border-[#1E2942] text-[9.5px] font-semibold text-[#00D2FF] cursor-pointer shrink-0"
+              title={isLegendCollapsed ? 'Buka Legenda Risiko' : 'Tutup Legenda agar tidak menghalangi peta'}
+            >
+              {isLegendCollapsed ? 'Buka ▴' : 'Tutup ▾'}
+            </button>
+          </div>
+
+          {!isLegendCollapsed && (
+            <div className="p-2 space-y-1">
+              {(['normal', 'moderate', 'high', 'critical'] as RiskTier[]).map((tierKey) => {
+                const meta = RISK_TIER_META[tierKey];
+                const isSelected = selectedRiskFilter === tierKey;
+                const count = riskCounts[tierKey] || 0;
+                return (
+                  <button
+                    key={tierKey}
+                    type="button"
+                    onClick={() =>
+                      setSelectedRiskFilter((prev) => (prev === tierKey ? 'all' : tierKey))
+                    }
+                    className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between gap-2 transition-all cursor-pointer border ${
+                      isSelected
+                        ? 'bg-[#19233A] border-[#00D2FF] text-white shadow-xs'
+                        : 'bg-transparent border-transparent hover:bg-[#12192B] text-[#CBD5E1]'
+                    }`}
+                    title={`Klik untuk menyaring hanya blok berstatus ${meta.label}`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-3.5 h-2.5 rounded-xs shrink-0 border border-white/20"
+                        style={{ backgroundColor: meta.color }}
+                      />
+                      <span className="text-[10px] font-semibold truncate">{meta.rangeText}</span>
+                    </div>
+                    <span className="text-[9.5px] font-mono font-bold text-[#8B9BB4] bg-[#0A0E1A] px-1.5 py-0.2 rounded border border-[#1E2942] shrink-0">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+              {selectedRiskFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedRiskFilter('all')}
+                  className="w-full mt-1 py-1 rounded bg-[#0E3A5D] hover:bg-[#0E3A5D]/80 text-[#00D2FF] text-[10px] font-bold text-center cursor-pointer"
+                >
+                  Tampilkan Semua Blok
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Panel Kontrol & Switch Radar Hujan saat Mode "Peta Cuaca & Suhu BMKG" Aktif */}
       {currentBasemap === 'bmkg_weather' && !isDrawingMode && (
         <div className="absolute bottom-9 right-14 sm:bottom-10 sm:right-14 z-[995] w-[calc(100%-70px)] max-w-[300px] bg-[#0D1322]/95 backdrop-blur-md border border-[#00D2FF]/50 rounded-xl shadow-2xl overflow-hidden text-xs">
@@ -2997,7 +3655,7 @@ export function MonitoringMap({
       {loadingLayers && (
         <div className="absolute top-3 left-3 z-[1000] bg-slate-900/90 border border-slate-800 text-emerald-300 px-2.5 py-1 rounded-md text-[11px] font-medium flex items-center gap-2 shadow-lg">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-          <span>Memuat geometri PostGIS...</span>
+          <span>Memuat peta blok kebun...</span>
         </div>
       )}
 
@@ -3043,6 +3701,62 @@ export function MonitoringMap({
           }
         }}
       />
+      {/* Modal Penamaan Hasil Potong Poligon */}
+      {isSplitModalOpen && (
+        <div className="fixed inset-0 z-[1300] bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#0D1322] border border-amber-500/50 rounded-2xl shadow-2xl max-w-md w-full p-5 text-[#F0F6FC] space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-amber-300">Simpan Hasil Potong Poligon</h3>
+              <p className="text-xs text-[#8B9BB4] mt-1">
+                Beri nama untuk masing-masing blok baru. Poligon lama dipindahkan ke Tempat Sampah agar tetap aman.
+              </p>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">Nama Blok Bagian 1</label>
+                <input
+                  type="text"
+                  value={splitPartNames[0]}
+                  onChange={(e) => setSplitPartNames([e.target.value, splitPartNames[1]])}
+                  className="w-full bg-[#12192B] border border-[#1E2942] focus:border-amber-400 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-[#8B9BB4] mb-1">Nama Blok Bagian 2</label>
+                <input
+                  type="text"
+                  value={splitPartNames[1]}
+                  onChange={(e) => setSplitPartNames([splitPartNames[0], e.target.value])}
+                  className="w-full bg-[#12192B] border border-[#1E2942] focus:border-amber-400 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                />
+              </div>
+              {splitError && (
+                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-xs text-rose-300">
+                  {splitError}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#1E2942]">
+              <button
+                type="button"
+                disabled={splitLoading}
+                onClick={() => setIsSplitModalOpen(false)}
+                className="px-3 py-1.5 rounded-lg bg-[#12192B] border border-[#1E2942] text-xs font-semibold text-[#8B9BB4] hover:text-white cursor-pointer disabled:opacity-50"
+              >
+                Kembali
+              </button>
+              <button
+                type="button"
+                disabled={splitLoading}
+                onClick={handleSubmitSplit}
+                className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-[#0A0E1A] text-xs font-bold cursor-pointer disabled:opacity-50"
+              >
+                {splitLoading ? 'Memotong...' : 'Simpan & Potong'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

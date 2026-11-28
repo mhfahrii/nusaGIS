@@ -1,4 +1,5 @@
 import { extractFeatureIntel } from '@/lib/gis/attributeExtractor';
+import { analyzeBlockRiskAndRca, RISK_TIER_META, type RiskTier } from '@/lib/gis/rcaEngine';
 
 export type LeafletBasemapKey = 'google_sat' | 'google_hybrid' | 'satellite' | 'bmkg_weather' | 'osm';
 
@@ -61,6 +62,7 @@ export const BASEMAP_STYLES: Record<LeafletBasemapKey, BasemapConfig> = {
 export interface RkapClassification {
   luasHa: number;
   category: 'optimal' | 'warning' | 'critical';
+  riskTier: RiskTier;
   color: string;
   label: string;
   statusText: string;
@@ -156,57 +158,22 @@ export function getFeatureRkapClassification(
   featId: number,
   props: Record<string, unknown>
 ): RkapClassification {
-  const intel = extractFeatureIntel(props, { featId });
-  const luasHa = intel.luasUkurHa;
-  const statusLahan = intel.statusLahan;
-  const varietas = intel.varietas;
+  const diag = analyzeBlockRiskAndRca(featId, props);
+  const meta = RISK_TIER_META[diag.tier];
 
-  // Kelas 1: Kebun Tebu Giling (KTG) / Blok Sudah Tanam Varietas
-  if (/ktg|tebu giling/i.test(statusLahan) || varietas !== '') {
-    return {
-      luasHa,
-      category: 'optimal',
-      color: '#10b981',
-      label: 'KTG · Tebu Giling',
-      statusText: statusLahan || 'Kebun Tebu Giling (KTG)',
-      badgeText: varietas ? `${statusLahan || 'KTG'} · ${varietas}` : statusLahan || 'KTG',
-    };
-  }
-
-  // Kelas Khusus Klaster Afdeling (misal Kebun Sarongge A/B/C/Kebun Rakyat tanpa status KS GPA)
-  if (!statusLahan && intel.afdelingGroup) {
-    const isB = /afdeling b/i.test(intel.afdelingGroup);
-    const isC = /afdeling c|kebun rakyat/i.test(intel.afdelingGroup);
-    return {
-      luasHa,
-      category: isB ? 'optimal' : isC ? 'critical' : 'warning',
-      color: intel.afdelingColor,
-      label: intel.afdelingGroup,
-      statusText: intel.afdelingGroup,
-      badgeText: `${luasHa} Ha`,
-    };
-  }
-
-  // Kelas 2: KS GPA 2023 - Blok Luas Besar (>= 1.50 Ha)
-  if (luasHa >= 1.5) {
-    return {
-      luasHa,
-      category: 'warning',
-      color: '#00d2ff',
-      label: 'KS GPA (≥ 1,50 Ha)',
-      statusText: `${statusLahan || 'KS GPA 2023'} · Blok Besar`,
-      badgeText: `${luasHa} Ha`,
-    };
-  }
-
-  // Kelas 3: KS GPA 2023 - Blok Luas Kecil (< 1.50 Ha)
   return {
-    luasHa,
-    category: 'critical',
-    color: '#f59e0b',
-    label: 'KS GPA (< 1,50 Ha)',
-    statusText: `${statusLahan || 'KS GPA 2023'} · Blok Kecil`,
-    badgeText: `${luasHa} Ha`,
+    luasHa: diag.luasHa,
+    category:
+      diag.tier === 'normal'
+        ? 'optimal'
+        : diag.tier === 'critical'
+        ? 'critical'
+        : 'warning',
+    riskTier: diag.tier,
+    color: meta.color,
+    label: meta.label,
+    statusText: diag.problemSummary,
+    badgeText: meta.badge,
   };
 }
 

@@ -30,6 +30,9 @@ export async function GET(req: NextRequest) {
       ? `(LOWER(TRIM(k.perusahaan)) = LOWER(TRIM($1)) OR LOWER(TRIM(k.perusahaan)) = LOWER($2) OR LOWER(TRIM(k.perusahaan)) LIKE LOWER($3))`
       : `LOWER(TRIM(k.perusahaan)) = LOWER(TRIM($1))`;
 
+    const lokasiSqlCond = (paramIdx: number, alias = 'k.') =>
+      `(LOWER(TRIM(COALESCE(${alias}kabupaten_kota, ''))) = LOWER(TRIM($${paramIdx})) OR LOWER(TRIM(COALESCE(${alias}provinsi, ''))) = LOWER(TRIM($${paramIdx})) OR LOWER(TRIM(COALESCE(${alias}wilayah, ''))) LIKE '%' || LOWER(TRIM($${paramIdx})) || '%')`;
+
     // 1. Query agregasi dasar (total kebun, afdeling, blok, layer, fitur, unggahan)
     let statsQuery = '';
     const params: unknown[] = [];
@@ -39,7 +42,7 @@ export async function GET(req: NextRequest) {
         SELECT
           (SELECT COUNT(*)::int FROM public.kebun WHERE id = $1) AS total_kebun,
           (SELECT COUNT(*)::int FROM public.afdeling WHERE kebun_id = $1) AS total_afdeling,
-          (SELECT COUNT(*)::int FROM public.blok b JOIN public.afdeling a ON a.id = b.afdeling_id WHERE a.kebun_id = $1) AS total_blok,
+          (SELECT COUNT(*)::int FROM public.blok WHERE kebun_id = $1) AS total_blok,
           (SELECT COUNT(*)::int FROM public.layer_peta WHERE kebun_id = $1 AND COALESCE(is_deleted, FALSE) = FALSE) AS total_layer,
           (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id WHERE lp.kebun_id = $1 AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
           (SELECT COUNT(*)::int FROM public.data_unggahan WHERE kebun_id = $1) AS total_unggahan;
@@ -52,25 +55,28 @@ export async function GET(req: NextRequest) {
         wilParamIdx = 4;
       }
       params.push(wilayahParam);
+      const lok = lokasiSqlCond(wilParamIdx, 'k.');
       statsQuery = `
         SELECT
-          (SELECT COUNT(*)::int FROM public.kebun k WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%')) AS total_kebun,
-          (SELECT COUNT(*)::int FROM public.afdeling a JOIN public.kebun k ON k.id = a.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%')) AS total_afdeling,
-          (SELECT COUNT(*)::int FROM public.blok b JOIN public.afdeling a ON a.id = b.afdeling_id JOIN public.kebun k ON k.id = a.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%')) AS total_blok,
-          (SELECT COUNT(*)::int FROM public.layer_peta lp JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%') AND COALESCE(lp.is_deleted, FALSE) = FALSE) AS total_layer,
-          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%') AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
-          (SELECT COUNT(*)::int FROM public.data_unggahan du JOIN public.kebun k ON k.id = du.kebun_id WHERE ${perusahaanSqlCond} AND (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${wilParamIdx})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${wilParamIdx})) || '%')) AS total_unggahan;
+          (SELECT COUNT(*)::int FROM public.kebun k WHERE ${perusahaanSqlCond} AND ${lok}) AS total_kebun,
+          (SELECT COUNT(*)::int FROM public.afdeling a JOIN public.kebun k ON k.id = a.kebun_id WHERE ${perusahaanSqlCond} AND ${lok}) AS total_afdeling,
+          (SELECT COUNT(*)::int FROM public.blok b JOIN public.kebun k ON k.id = b.kebun_id WHERE ${perusahaanSqlCond} AND ${lok}) AS total_blok,
+          (SELECT COUNT(*)::int FROM public.layer_peta lp JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND ${lok} AND COALESCE(lp.is_deleted, FALSE) = FALSE) AS total_layer,
+          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND ${lok} AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
+          (SELECT COUNT(*)::int FROM public.data_unggahan du JOIN public.kebun k ON k.id = du.kebun_id WHERE ${perusahaanSqlCond} AND ${lok}) AS total_unggahan;
       `;
     } else if (wilayahParam) {
       params.push(wilayahParam);
+      const lokBare = lokasiSqlCond(1, '');
+      const lok = lokasiSqlCond(1, 'k.');
       statsQuery = `
         SELECT
-          (SELECT COUNT(*)::int FROM public.kebun WHERE LOWER(TRIM(COALESCE(provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AS total_kebun,
-          (SELECT COUNT(*)::int FROM public.afdeling a JOIN public.kebun k ON k.id = a.kebun_id WHERE LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AS total_afdeling,
-          (SELECT COUNT(*)::int FROM public.blok b JOIN public.afdeling a ON a.id = b.afdeling_id JOIN public.kebun k ON k.id = a.kebun_id WHERE LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AS total_blok,
-          (SELECT COUNT(*)::int FROM public.layer_peta lp JOIN public.kebun k ON k.id = lp.kebun_id WHERE (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AND COALESCE(lp.is_deleted, FALSE) = FALSE) AS total_layer,
-          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id JOIN public.kebun k ON k.id = lp.kebun_id WHERE (LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
-          (SELECT COUNT(*)::int FROM public.data_unggahan du JOIN public.kebun k ON k.id = du.kebun_id WHERE LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($1)) || '%') AS total_unggahan;
+          (SELECT COUNT(*)::int FROM public.kebun WHERE ${lokBare}) AS total_kebun,
+          (SELECT COUNT(*)::int FROM public.afdeling a JOIN public.kebun k ON k.id = a.kebun_id WHERE ${lok}) AS total_afdeling,
+          (SELECT COUNT(*)::int FROM public.blok b JOIN public.kebun k ON k.id = b.kebun_id WHERE ${lok}) AS total_blok,
+          (SELECT COUNT(*)::int FROM public.layer_peta lp JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${lok} AND COALESCE(lp.is_deleted, FALSE) = FALSE) AS total_layer,
+          (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${lok} AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
+          (SELECT COUNT(*)::int FROM public.data_unggahan du JOIN public.kebun k ON k.id = du.kebun_id WHERE ${lok}) AS total_unggahan;
       `;
     } else if (normalizedPerusahaan) {
       params.push(normalizedPerusahaan);
@@ -81,7 +87,7 @@ export async function GET(req: NextRequest) {
         SELECT
           (SELECT COUNT(*)::int FROM public.kebun k WHERE ${perusahaanSqlCond}) AS total_kebun,
           (SELECT COUNT(*)::int FROM public.afdeling a JOIN public.kebun k ON k.id = a.kebun_id WHERE ${perusahaanSqlCond}) AS total_afdeling,
-          (SELECT COUNT(*)::int FROM public.blok b JOIN public.afdeling a ON a.id = b.afdeling_id JOIN public.kebun k ON k.id = a.kebun_id WHERE ${perusahaanSqlCond}) AS total_blok,
+          (SELECT COUNT(*)::int FROM public.blok b JOIN public.kebun k ON k.id = b.kebun_id WHERE ${perusahaanSqlCond}) AS total_blok,
           (SELECT COUNT(*)::int FROM public.layer_peta lp JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND COALESCE(lp.is_deleted, FALSE) = FALSE) AS total_layer,
           (SELECT COUNT(*)::int FROM public.fitur_peta fp JOIN public.layer_peta lp ON lp.id = fp.layer_id JOIN public.kebun k ON k.id = lp.kebun_id WHERE ${perusahaanSqlCond} AND COALESCE(lp.is_deleted, FALSE) = FALSE AND COALESCE(fp.is_deleted, FALSE) = FALSE) AS total_fitur,
           (SELECT COUNT(*)::int FROM public.data_unggahan du JOIN public.kebun k ON k.id = du.kebun_id WHERE ${perusahaanSqlCond}) AS total_unggahan;
@@ -133,9 +139,7 @@ export async function GET(req: NextRequest) {
     } else {
       if (wilayahParam) {
         featParams.push(wilayahParam);
-        featWhereClauses.push(
-          `(LOWER(TRIM(COALESCE(k.provinsi, ''))) = LOWER(TRIM($${featParams.length})) OR LOWER(TRIM(COALESCE(k.wilayah, ''))) LIKE '%' || LOWER(TRIM($${featParams.length})) || '%')`
-        );
+        featWhereClauses.push(lokasiSqlCond(featParams.length, 'k.'));
       }
       if (normalizedPerusahaan) {
         if (matchedEntity) {

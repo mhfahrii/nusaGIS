@@ -57,10 +57,17 @@ export async function POST(req: NextRequest) {
 
   try {
     const res = await query<PenggunaPublik & { kata_sandi_hash: string }>(
-      `SELECT ${KOLOM_PENGGUNA_PUBLIK}, kata_sandi_hash
-       FROM pengguna
-       WHERE LOWER(email) = $1 OR LOWER(nama) = $1
-       ORDER BY CASE WHEN LOWER(email) = $1 THEN 0 ELSE 1 END
+      `SELECT p.id, p.nama, p.email, p.peran, p.aktif, p.afdeling_id,
+              COALESCE(p.kebun_id, a.kebun_id) AS kebun_id,
+              a.nama_afdeling AS afdeling_nama,
+              COALESCE(k.nama_kebun, ka.nama_kebun) AS kebun_nama,
+              p.hak_akses, p.foto_profil, p.dibuat_pada, p.kata_sandi_hash
+       FROM public.pengguna p
+       LEFT JOIN public.afdeling a ON p.afdeling_id = a.id
+       LEFT JOIN public.kebun ka ON a.kebun_id = ka.id
+       LEFT JOIN public.kebun k ON p.kebun_id = k.id
+       WHERE LOWER(p.email) = $1 OR LOWER(p.nama) = $1
+       ORDER BY CASE WHEN LOWER(p.email) = $1 THEN 0 ELSE 1 END
        LIMIT 1;`,
       [identifier]
     );
@@ -88,6 +95,10 @@ export async function POST(req: NextRequest) {
       email: row.email,
       peran: row.peran,
       aktif: row.aktif,
+      afdeling_id: row.afdeling_id ? Number(row.afdeling_id) : null,
+      kebun_id: row.kebun_id ? Number(row.kebun_id) : null,
+      afdeling_nama: row.afdeling_nama ?? null,
+      kebun_nama: row.kebun_nama ?? null,
       hak_akses: normalizeHakAkses(row.hak_akses, row.peran),
       foto_profil: row.foto_profil ?? null,
       dibuat_pada: row.dibuat_pada,

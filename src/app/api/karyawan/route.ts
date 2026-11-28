@@ -44,7 +44,7 @@ export interface KaryawanRecord extends PenggunaPublik {
   foto_profil: string | null;
 }
 
-function formatKaryawanRow(row: PenggunaPublik): KaryawanRecord {
+function formatKaryawanRow(row: PenggunaPublik & { afdeling_nama?: string | null; kebun_nama?: string | null }): KaryawanRecord {
   const numericId = Number(row.id);
   return {
     id: numericId,
@@ -53,6 +53,10 @@ function formatKaryawanRow(row: PenggunaPublik): KaryawanRecord {
     email: row.email,
     peran: row.peran,
     aktif: Boolean(row.aktif),
+    afdeling_id: row.afdeling_id ? Number(row.afdeling_id) : null,
+    kebun_id: row.kebun_id ? Number(row.kebun_id) : null,
+    afdeling_nama: row.afdeling_nama ?? null,
+    kebun_nama: row.kebun_nama ?? null,
     hak_akses: normalizeHakAkses(row.hak_akses, row.peran),
     foto_profil: row.foto_profil ?? null,
     dibuat_pada: row.dibuat_pada,
@@ -72,15 +76,25 @@ export async function GET(req: NextRequest) {
     await ensureKaryawanColumns();
 
     const canManage = canManageEmployees(auth.user);
-    const res = await query<PenggunaPublik>(
+    const res = await query<PenggunaPublik & { afdeling_nama?: string | null; kebun_nama?: string | null }>(
       canManage
-        ? `SELECT id, nama, email, peran, aktif, hak_akses, foto_profil, dibuat_pada
-           FROM public.pengguna
-           ORDER BY id ASC;`
-        : `SELECT id, nama, email, peran, aktif, hak_akses, foto_profil, dibuat_pada
-           FROM public.pengguna
-           WHERE id = $1
-           ORDER BY id ASC;`,
+        ? `SELECT p.id, p.nama, p.email, p.peran, p.aktif, p.afdeling_id, p.kebun_id, p.hak_akses, p.foto_profil, p.dibuat_pada,
+                  a.nama_afdeling AS afdeling_nama,
+                  COALESCE(k.nama_kebun, ka.nama_kebun) AS kebun_nama
+           FROM public.pengguna p
+           LEFT JOIN public.afdeling a ON p.afdeling_id = a.id
+           LEFT JOIN public.kebun ka ON a.kebun_id = ka.id
+           LEFT JOIN public.kebun k ON p.kebun_id = k.id
+           ORDER BY p.id ASC;`
+        : `SELECT p.id, p.nama, p.email, p.peran, p.aktif, p.afdeling_id, p.kebun_id, p.hak_akses, p.foto_profil, p.dibuat_pada,
+                  a.nama_afdeling AS afdeling_nama,
+                  COALESCE(k.nama_kebun, ka.nama_kebun) AS kebun_nama
+           FROM public.pengguna p
+           LEFT JOIN public.afdeling a ON p.afdeling_id = a.id
+           LEFT JOIN public.kebun ka ON a.kebun_id = ka.id
+           LEFT JOIN public.kebun k ON p.kebun_id = k.id
+           WHERE p.id = $1
+           ORDER BY p.id ASC;`,
       canManage ? [] : [auth.user.id]
     );
 
@@ -189,11 +203,14 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await hashPassword(password);
 
+    const afdelingId = body.afdeling_id ? Number(body.afdeling_id) : null;
+    const kebunId = body.kebun_id ? Number(body.kebun_id) : null;
+
     const insertRes = await query<PenggunaPublik>(
-      `INSERT INTO public.pengguna (nama, email, kata_sandi_hash, peran, aktif, hak_akses, foto_profil, dibuat_pada)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW())
-       RETURNING id, nama, email, peran, aktif, hak_akses, foto_profil, dibuat_pada;`,
-      [nama, email, passwordHash, peran, aktif, JSON.stringify(hakAkses), fotoProfil]
+      `INSERT INTO public.pengguna (nama, email, kata_sandi_hash, peran, aktif, afdeling_id, kebun_id, hak_akses, foto_profil, dibuat_pada)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, NOW())
+       RETURNING id, nama, email, peran, aktif, afdeling_id, kebun_id, hak_akses, foto_profil, dibuat_pada;`,
+      [nama, email, passwordHash, peran, aktif, afdelingId, kebunId, JSON.stringify(hakAkses), fotoProfil]
     );
 
     const created = formatKaryawanRow(insertRes.rows[0]);
@@ -371,17 +388,28 @@ export async function PATCH(req: NextRequest) {
       passwordUpdated = true;
     }
 
+    const nextAfdelingId =
+      body.afdeling_id !== undefined
+        ? (body.afdeling_id ? Number(body.afdeling_id) : null)
+        : (current.afdeling_id ? Number(current.afdeling_id) : null);
+    const nextKebunId =
+      body.kebun_id !== undefined
+        ? (body.kebun_id ? Number(body.kebun_id) : null)
+        : (current.kebun_id ? Number(current.kebun_id) : null);
+
     const updateRes = await query<PenggunaPublik>(
       `UPDATE public.pengguna
        SET nama = $1,
            email = $2,
            peran = $3,
            aktif = $4,
-           hak_akses = $5::jsonb,
-           foto_profil = $6
-       WHERE id = $7
-       RETURNING id, nama, email, peran, aktif, hak_akses, foto_profil, dibuat_pada;`,
-      [nextNama, nextEmail, nextPeran, nextAktif, JSON.stringify(nextHakAkses), nextFotoProfil, id]
+           afdeling_id = $5,
+           kebun_id = $6,
+           hak_akses = $7::jsonb,
+           foto_profil = $8
+       WHERE id = $9
+       RETURNING id, nama, email, peran, aktif, afdeling_id, kebun_id, hak_akses, foto_profil, dibuat_pada;`,
+      [nextNama, nextEmail, nextPeran, nextAktif, nextAfdelingId, nextKebunId, JSON.stringify(nextHakAkses), nextFotoProfil, id]
     );
 
     const updated = formatKaryawanRow(updateRes.rows[0]);

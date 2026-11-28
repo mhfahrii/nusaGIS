@@ -36,6 +36,11 @@ import {
   type Peran,
 } from '@/types/auth';
 import type { LayerPeta, MonitoringStats } from '@/types/gis';
+import type { DataMakroKebun, MasterAktivitas } from '@/types/perkebunan';
+import MasterAktivitasSection from './MasterAktivitasSection';
+import CatatanHarianSection from './CatatanHarianSection';
+import DataMakroKepalaKebunSection from './DataMakroKepalaKebunSection';
+import ExecutiveRcaSection from './ExecutiveRcaSection';
 import {
   PERMISSION_ITEMS,
   classifyAuditBadge,
@@ -73,7 +78,26 @@ function DashboardContent() {
   const [karyawanList, setKaryawanList] = useState<KaryawanItem[]>([]);
   const [kebunList, setKebunList] = useState<KebunRecord[]>([]);
   const [afdelingList, setAfdelingList] = useState<AfdelingRecord[]>([]);
+  const [blokList, setBlokList] = useState<
+    {
+      id: number;
+      kebun_id: number;
+      afdeling_id: number | null;
+      kode_blok: string;
+      nama_blok: string;
+      komoditas: string | null;
+      tahun_tanam: number | null;
+      aktivitas_terakhir: string | null;
+      tanggal_aktivitas_terakhir: string | null;
+      nama_afdeling?: string | null;
+    }[]
+  >([]);
   const [layersList, setLayersList] = useState<LayerPeta[]>([]);
+  const [masterAktivitasList, setMasterAktivitasList] = useState<MasterAktivitas[]>([]);
+  const [makroList, setMakroList] = useState<DataMakroKebun[]>([]);
+  const [analisaFeatures, setAnalisaFeatures] = useState<
+    { id: number; layer_id: number; kebun_id?: number | null; atribut: Record<string, unknown> }[]
+  >([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [stats, setStats] = useState<MonitoringStats | null>(null);
   const [loadingData, setLoadingData] = useState<boolean>(true);
@@ -105,6 +129,16 @@ function DashboardContent() {
   const [newAfdKeterangan, setNewAfdKeterangan] = useState<string>('');
   const [savingAfd, setSavingAfd] = useState<boolean>(false);
 
+  // Form Tambah Blok per Kebun (afdeling opsional untuk kebun tanpa afdeling)
+  const [newBlokAfdelingId, setNewBlokAfdelingId] = useState<string>('');
+  const [newBlokKode, setNewBlokKode] = useState<string>('');
+  const [newBlokNama, setNewBlokNama] = useState<string>('');
+  const [newBlokKomoditas, setNewBlokKomoditas] = useState<string>('');
+  const [newBlokTahunTanam, setNewBlokTahunTanam] = useState<string>('');
+  const [newBlokAktivitas, setNewBlokAktivitas] = useState<string>('');
+  const [newBlokTanggalAktivitas, setNewBlokTanggalAktivitas] = useState<string>('');
+  const [savingBlok, setSavingBlok] = useState<boolean>(false);
+
   // State Menu Manajemen Pengguna
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [roleFilter, setRoleFilter] = useState<'all' | Peran>('all');
@@ -117,6 +151,7 @@ function DashboardContent() {
   const [newPeran, setNewPeran] = useState<Peran>('pengguna');
   const [newAktif, setNewAktif] = useState<boolean>(true);
   const [newFotoProfil, setNewFotoProfil] = useState<string | null>(null);
+  const [newAfdelingId, setNewAfdelingId] = useState<string>('');
   const [newHakAkses, setNewHakAkses] = useState<HakAksesFitur>({
     ...DEFAULT_HAK_AKSES_KARYAWAN,
   });
@@ -126,6 +161,7 @@ function DashboardContent() {
   const [editTarget, setEditTarget] = useState<KaryawanItem | null>(null);
   const [editNama, setEditNama] = useState<string>('');
   const [editEmail, setEditEmail] = useState<string>('');
+  const [editAfdelingId, setEditAfdelingId] = useState<string>('');
   const [editPeran, setEditPeran] = useState<Peran>('pengguna');
   const [editAktif, setEditAktif] = useState<boolean>(true);
   const [editPassword, setEditPassword] = useState<string>('');
@@ -168,14 +204,17 @@ function DashboardContent() {
   const fetchAllData = useCallback(async () => {
     setLoadingData(true);
     try {
-      const [karRes, kbnRes, afdRes, lyrRes, hisRes, stRes, hakRes] = await Promise.all([
+      const [karRes, kbnRes, afdRes, blkRes, lyrRes, hisRes, stRes, hakRes, aktRes, mkrRes] = await Promise.all([
         fetch('/api/karyawan', { cache: 'no-store' }),
         fetch('/api/kebun', { cache: 'no-store' }),
         fetch('/api/afdeling', { cache: 'no-store' }),
+        fetch('/api/blok', { cache: 'no-store' }),
         fetch('/api/gis/layers', { cache: 'no-store' }),
         fetch('/api/gis/history', { cache: 'no-store' }),
         fetch('/api/stats', { cache: 'no-store' }),
         fetch('/api/hak-sementara', { cache: 'no-store' }),
+        fetch('/api/master-aktivitas?semua=true', { cache: 'no-store' }),
+        fetch('/api/data-makro', { cache: 'no-store' }),
       ]);
 
       if (karRes.ok) {
@@ -201,6 +240,23 @@ function DashboardContent() {
           }))
         );
       }
+      if (blkRes.ok) {
+        const j = await blkRes.json();
+        setBlokList(
+          (j.data || []).map((b: Record<string, unknown>) => ({
+            id: Number(b.id),
+            kebun_id: Number(b.kebun_id),
+            afdeling_id: b.afdeling_id ? Number(b.afdeling_id) : null,
+            kode_blok: String(b.kode_blok || ''),
+            nama_blok: String(b.nama_blok || ''),
+            komoditas: b.komoditas ? String(b.komoditas) : null,
+            tahun_tanam: b.tahun_tanam ? Number(b.tahun_tanam) : null,
+            aktivitas_terakhir: b.aktivitas_terakhir ? String(b.aktivitas_terakhir) : null,
+            tanggal_aktivitas_terakhir: b.tanggal_aktivitas_terakhir ? String(b.tanggal_aktivitas_terakhir) : null,
+            nama_afdeling: b.nama_afdeling ? String(b.nama_afdeling) : null,
+          }))
+        );
+      }
       if (lyrRes.ok) {
         const j = await lyrRes.json();
         const lRows: LayerPeta[] = j.data || [];
@@ -218,6 +274,14 @@ function DashboardContent() {
       if (hakRes.ok) {
         const j = await hakRes.json();
         setHakSementaraList(j.data || []);
+      }
+      if (aktRes && aktRes.ok) {
+        const j = await aktRes.json();
+        setMasterAktivitasList(j.data || []);
+      }
+      if (mkrRes && mkrRes.ok) {
+        const j = await mkrRes.json();
+        setMakroList(j.data || []);
       }
     } catch {
       setBanner({
@@ -253,6 +317,22 @@ function DashboardContent() {
           const j = await res.json();
           setStats(j.data || null);
         }
+        const targetLayer = analisaLayerId || layersList[0]?.id;
+        if (targetLayer) {
+          const fRes = await fetch(`/api/gis/features?layer_id=${targetLayer}&limit=200`, {
+            cache: 'no-store',
+          });
+          if (!ignore && fRes.ok) {
+            const fj = await fRes.json();
+            const fRows = (fj.data || []).map((row: Record<string, unknown>) => ({
+              id: Number(row.id),
+              layer_id: Number(row.layer_id || targetLayer),
+              kebun_id: analisaKebunId,
+              atribut: row,
+            }));
+            setAnalisaFeatures(fRows);
+          }
+        }
       } catch {
         // Abaikan kegagalan sementara
       }
@@ -261,7 +341,7 @@ function DashboardContent() {
     return () => {
       ignore = true;
     };
-  }, [analisaPerusahaan, analisaKebunId, analisaLayerId]);
+  }, [analisaPerusahaan, analisaKebunId, analisaLayerId, layersList]);
 
   useEffect(() => {
     if (!banner) return;
@@ -605,6 +685,64 @@ function DashboardContent() {
     }
   };
 
+  const handleAddBlok = async (e: React.FormEvent<HTMLFormElement>, kebunId: number) => {
+    e.preventDefault();
+    if (!newBlokKode.trim() || !newBlokNama.trim()) {
+      setBanner({ type: 'error', text: 'Kode Blok dan Nama Blok wajib diisi.' });
+      return;
+    }
+    setSavingBlok(true);
+    try {
+      const res = await fetch('/api/blok', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kebun_id: kebunId,
+          afdeling_id: newBlokAfdelingId ? Number(newBlokAfdelingId) : null,
+          kode_blok: newBlokKode.trim(),
+          nama_blok: newBlokNama.trim(),
+          komoditas: newBlokKomoditas.trim() || null,
+          tahun_tanam: newBlokTahunTanam.trim() ? Number(newBlokTahunTanam) : null,
+          aktivitas_terakhir: newBlokAktivitas.trim() || null,
+          tanggal_aktivitas_terakhir: newBlokTanggalAktivitas.trim() || null,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        setBanner({ type: 'error', text: json?.message || 'Gagal menambahkan blok.' });
+        return;
+      }
+      setNewBlokKode('');
+      setNewBlokNama('');
+      setNewBlokKomoditas('');
+      setNewBlokTahunTanam('');
+      setNewBlokAktivitas('');
+      setNewBlokTanggalAktivitas('');
+      setBanner({ type: 'success', text: `Blok "${newBlokNama.trim()}" berhasil ditambahkan.` });
+      await fetchAllData();
+    } catch {
+      setBanner({ type: 'error', text: 'Gagal menambahkan blok.' });
+    } finally {
+      setSavingBlok(false);
+    }
+  };
+
+  const handleDeleteBlok = async (blok: { id: number; nama_blok: string; kode_blok: string }) => {
+    if (!window.confirm(`Hapus blok "${blok.nama_blok}" (${blok.kode_blok})?`)) return;
+    try {
+      const res = await fetch(`/api/blok?id=${blok.id}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        setBanner({ type: 'error', text: json?.message || 'Gagal menghapus blok.' });
+        return;
+      }
+      setBanner({ type: 'success', text: `Blok "${blok.nama_blok}" berhasil dihapus.` });
+      await fetchAllData();
+    } catch {
+      setBanner({ type: 'error', text: 'Gagal menghapus blok.' });
+    }
+  };
+
   // Handlers Manajemen Pengguna & Create Account
   const handleSelectNewRole = (role: Peran) => {
     setNewPeran(role);
@@ -638,6 +776,7 @@ function DashboardContent() {
           password: newPassword,
           peran: newPeran,
           aktif: newAktif,
+          afdeling_id: newAfdelingId ? Number(newAfdelingId) : null,
           foto_profil: newFotoProfil,
           hak_akses: newHakAkses,
         }),
@@ -659,6 +798,7 @@ function DashboardContent() {
       });
       setNewNama('');
       setNewEmail('');
+      setNewAfdelingId('');
       setNewPassword('');
       setNewPeran('pengguna');
       setNewAktif(true);
@@ -680,6 +820,7 @@ function DashboardContent() {
     setEditTarget(item);
     setEditNama(item.nama);
     setEditEmail(item.email);
+    setEditAfdelingId(item.afdeling_id ? String(item.afdeling_id) : '');
     setEditPeran(item.peran);
     setEditAktif(item.aktif);
     setEditPassword('');
@@ -702,6 +843,7 @@ function DashboardContent() {
           id: editTarget.id,
           nama: editNama.trim(),
           email: editEmail.trim(),
+          afdeling_id: editAfdelingId ? Number(editAfdelingId) : null,
           peran: editPeran,
           aktif: editAktif,
           foto_profil: editFotoProfil,
@@ -1021,6 +1163,70 @@ function DashboardContent() {
               Master Perkebunan
             </div>
 
+            {/* 2B. Menu Catatan Harian & Lapor Kendala Lapangan (Mandor / Asisten / Kepala Kebun) */}
+            <button
+              type="button"
+              onClick={() => setActiveMenu('catatan_harian')}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                activeMenu === 'catatan_harian'
+                  ? 'bg-[#132238] text-[#00D2FF] border-[#00D2FF]/60 shadow-sm'
+                  : 'text-[#8B9BB4] hover:text-white hover:bg-[#12192B] border-transparent'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center border ${
+                    activeMenu === 'catatan_harian'
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                      : 'bg-[#12192B] border-[#1E2942] text-[#8B9BB4]'
+                  }`}
+                >
+                  <IconPencil className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <div className="text-xs font-bold">Catatan &amp; Kendala</div>
+                  <div className="text-[10px] text-[#8B9BB4] font-normal">
+                    Input Harian &amp; Verifikasi
+                  </div>
+                </div>
+              </div>
+              <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+                Lapangan
+              </span>
+            </button>
+
+            {/* 2C. Menu Input Data Makro & Iklim (Khusus Kepala Kebun / Admin) */}
+            <button
+              type="button"
+              onClick={() => setActiveMenu('data_makro')}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                activeMenu === 'data_makro'
+                  ? 'bg-[#132238] text-[#00D2FF] border-[#00D2FF]/60 shadow-sm'
+                  : 'text-[#8B9BB4] hover:text-white hover:bg-[#12192B] border-transparent'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center border ${
+                    activeMenu === 'data_makro'
+                      ? 'bg-[#00D2FF]/15 border-[#00D2FF]/40 text-[#00D2FF]'
+                      : 'bg-[#12192B] border-[#1E2942] text-[#8B9BB4]'
+                  }`}
+                >
+                  <IconSettings className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <div className="text-xs font-bold">Data Makro &amp; Iklim</div>
+                  <div className="text-[10px] text-[#8B9BB4] font-normal">
+                    Hara, Curah Hujan &amp; NDVI
+                  </div>
+                </div>
+              </div>
+              <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-[#00D2FF]/15 border border-[#00D2FF]/30 text-[#00D2FF]">
+                RCA
+              </span>
+            </button>
+
             {/* 3. Menu Data Perusahaan */}
             <button
               type="button"
@@ -1082,6 +1288,38 @@ function DashboardContent() {
               </div>
               <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-[#0D1322] border border-[#1E2942] text-[#8B9BB4]">
                 {kebunList.length}
+              </span>
+            </button>
+
+            {/* 5. Menu Master Data Aktivitas (Lintas Komoditas) */}
+            <button
+              type="button"
+              onClick={() => setActiveMenu('master_aktivitas')}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                activeMenu === 'master_aktivitas'
+                  ? 'bg-[#132238] text-[#00D2FF] border-[#00D2FF]/60 shadow-sm'
+                  : 'text-[#8B9BB4] hover:text-white hover:bg-[#12192B] border-transparent'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center border ${
+                    activeMenu === 'master_aktivitas'
+                      ? 'bg-[#00D2FF]/15 border-[#00D2FF]/40 text-[#00D2FF]'
+                      : 'bg-[#12192B] border-[#1E2942] text-[#8B9BB4]'
+                  }`}
+                >
+                  <IconDatabase className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <div className="text-xs font-bold">Master Aktivitas</div>
+                  <div className="text-[10px] text-[#8B9BB4] font-normal">
+                    Katalog Agronomi Terpadu
+                  </div>
+                </div>
+              </div>
+              <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-[#0D1322] border border-[#1E2942] text-[#00D2FF]">
+                {masterAktivitasList.length}
               </span>
             </button>
 
@@ -1288,9 +1526,12 @@ function DashboardContent() {
         <header className="h-14 px-4 sm:px-6 bg-[#0D1322] border-b border-[#1E2942] flex items-center justify-between gap-4 shrink-0">
           <div>
             <h1 className="text-sm sm:text-base font-bold text-white tracking-wide">
-              {activeMenu === 'hasil_analisa' && 'Hasil & Analisa Spasial Perkebunan'}
+              {activeMenu === 'hasil_analisa' && 'Hasil & Analisa Spasial Perkebunan (Executive RCA & Tren)'}
+              {activeMenu === 'catatan_harian' && 'Catatan Harian Blok & Laporan Kendala Lapangan'}
+              {activeMenu === 'data_makro' && 'Input Data Makro Iklim, Hara & NDVI (Kepala Kebun)'}
               {activeMenu === 'data_perusahaan' && 'Data Perusahaan & Puslit PT RPN'}
               {activeMenu === 'data_kebun' && 'Data Unit Kebun & Daftar Afdeling'}
+              {activeMenu === 'master_aktivitas' && 'Master Data Aktivitas Agronomi (Lintas Komoditas)'}
               {activeMenu === 'hak_sementara' &&
                 (canManage
                   ? 'Konfirmasi & Validasi Hak Akses Sementara Karyawan'
@@ -1303,10 +1544,16 @@ function DashboardContent() {
             <p className="text-[11px] text-[#8B9BB4] hidden sm:block">
               {activeMenu === 'hasil_analisa' &&
                 'Diagram analisis atribut shapefile (.dbf), profil luas blok, estimasi produksi, dan tabel atribut.'}
+              {activeMenu === 'catatan_harian' &&
+                'Formulir input harian mandor (tersinkron ke Pop-up Peta GIS) serta verifikasi berjenjang Asisten Kebun -> Kepala Kebun.'}
+              {activeMenu === 'data_makro' &&
+                'Input bulanan curah hujan (mm), kategori status hara laboratorium (N, P, K), dan indeks vegetasi (NDVI) untuk kalkulasi Root Cause Analysis.'}
               {activeMenu === 'data_perusahaan' &&
                 'Daftar entitas perusahaan/puslit di bawah naungan PT Riset Perkebunan Nusantara beserta cakupan kebunnya.'}
               {activeMenu === 'data_kebun' &&
                 'Kelola data unit kebun beserta daftar afdeling di dalam masing-masing kebun.'}
+              {activeMenu === 'master_aktivitas' &&
+                'Katalog terpadu perlakuan agronomi (Teh Gamboeng, Sawit, Tebu, Karet) untuk input harian dan analisis.'}
               {activeMenu === 'hak_sementara' &&
                 (canManage
                   ? 'Setujui, tolak, atau cabut kembali izin sementara Upload Data GIS dan Edit Data yang diajukan oleh Karyawan.'
@@ -1537,6 +1784,14 @@ function DashboardContent() {
                   </div>
                 </div>
               </div>
+
+              {/* Dashboard Analisis Eksekutif: 6 Kartu KPI, Tren Siklus Panen (4/6/10/12 Bln), Distribusi Risiko, Top Blok, RCA 5 Faktor & Rekomendasi */}
+              <ExecutiveRcaSection
+                features={analisaFeatures}
+                kebunList={kebunList}
+                selectedKebunId={analisaKebunId}
+                makroList={makroList}
+              />
 
               {/* Panel Diagram Visualisasi & Tabel Atribut */}
               {!canViewMap ? (
@@ -1942,6 +2197,177 @@ function DashboardContent() {
                                 </button>
                               </form>
                             )}
+
+                            {/* Daftar Master Blok pada Kebun Ini (mendukung dengan atau tanpa Afdeling) */}
+                            {(() => {
+                              const kebunBloks = blokList.filter((b) => b.kebun_id === k.id);
+                              return (
+                                <div className="pt-3 border-t border-[#1E2942] space-y-3">
+                                  <div>
+                                    <h4 className="text-xs font-bold text-[#10B981] uppercase tracking-wider">
+                                      Daftar Blok pada {k.nama_kebun} ({kebunBloks.length})
+                                    </h4>
+                                    <p className="text-[11px] text-[#8B9BB4]">
+                                      Kelola blok di bawah afdeling atau langsung di bawah kebun (tanpa afdeling).
+                                    </p>
+                                  </div>
+
+                                  {kebunBloks.length === 0 ? (
+                                    <div className="p-3 rounded-xl bg-[#0D1322] border border-[#1E2942] text-xs text-[#8B9BB4]">
+                                      Belum ada master blok di database untuk {k.nama_kebun}.
+                                    </div>
+                                  ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                                      {kebunBloks.map((blk) => (
+                                        <div
+                                          key={blk.id}
+                                          className="p-3 rounded-xl bg-[#0D1322] border border-[#1E2942] flex items-start justify-between gap-2"
+                                        >
+                                          <div className="min-w-0 space-y-0.5">
+                                            <div className="text-xs font-bold text-white truncate">
+                                              {blk.nama_blok}
+                                            </div>
+                                            <div className="text-[10px] font-mono text-[#10B981]">
+                                              Kode: {blk.kode_blok} · {blk.nama_afdeling || 'Tanpa Afdeling'}
+                                            </div>
+                                            {(blk.komoditas || blk.tahun_tanam) && (
+                                              <div className="text-[10px] text-[#8B9BB4] truncate">
+                                                {[blk.komoditas, blk.tahun_tanam ? `Tanam ${blk.tahun_tanam}` : '']
+                                                  .filter(Boolean)
+                                                  .join(' · ')}
+                                              </div>
+                                            )}
+                                            {(blk.aktivitas_terakhir || blk.tanggal_aktivitas_terakhir) && (
+                                              <div className="text-[10px] text-[#00D2FF] truncate">
+                                                Aktivitas: {blk.aktivitas_terakhir || '-'}
+                                                {blk.tanggal_aktivitas_terakhir ? ` (${blk.tanggal_aktivitas_terakhir})` : ''}
+                                              </div>
+                                            )}
+                                          </div>
+                                          {canDeleteData && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDeleteBlok(blk)}
+                                              className="p-1.5 rounded-lg bg-[#12192B] hover:bg-rose-500/20 border border-[#1E2942] text-[#8B9BB4] hover:text-rose-400 shrink-0 cursor-pointer"
+                                              title={`Hapus ${blk.nama_blok}`}
+                                            >
+                                              <IconTrash className="w-3.5 h-3.5" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {canEditData && (
+                                    <form
+                                      onSubmit={(e) => handleAddBlok(e, k.id)}
+                                      className="p-3.5 rounded-xl bg-[#0D1322] border border-[#1E2942] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 items-end"
+                                    >
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                                          Afdeling (Opsional)
+                                        </label>
+                                        <select
+                                          value={newBlokAfdelingId}
+                                          onChange={(e) => setNewBlokAfdelingId(e.target.value)}
+                                          className="w-full bg-[#12192B] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                        >
+                                          <option value="">(Tanpa Afdeling - Langsung di Kebun)</option>
+                                          {kebunAfdelings.map((afd) => (
+                                            <option key={afd.id} value={String(afd.id)}>
+                                              {afd.nama_afdeling}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                                          Kode Blok *
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={newBlokKode}
+                                          onChange={(e) => setNewBlokKode(e.target.value)}
+                                          placeholder="Contoh: B03"
+                                          className="w-full bg-[#12192B] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                          required
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                                          Nama Blok *
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={newBlokNama}
+                                          onChange={(e) => setNewBlokNama(e.target.value)}
+                                          placeholder="Contoh: Blok B03"
+                                          className="w-full bg-[#12192B] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                          required
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                                          Komoditas
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={newBlokKomoditas}
+                                          onChange={(e) => setNewBlokKomoditas(e.target.value)}
+                                          placeholder={k.komoditas || 'Contoh: Teh / Sawit / Tebu'}
+                                          className="w-full bg-[#12192B] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                                          Tahun Tanam
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min={1900}
+                                          max={2100}
+                                          value={newBlokTahunTanam}
+                                          onChange={(e) => setNewBlokTahunTanam(e.target.value)}
+                                          placeholder="Contoh: 2021"
+                                          className="w-full bg-[#12192B] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                                          Aktivitas Terakhir
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={newBlokAktivitas}
+                                          onChange={(e) => setNewBlokAktivitas(e.target.value)}
+                                          placeholder="Contoh: Pemupukan NPK / Petik"
+                                          className="w-full bg-[#12192B] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-[#8B9BB4] mb-1">
+                                          Tanggal Aktivitas Terakhir
+                                        </label>
+                                        <input
+                                          type="date"
+                                          value={newBlokTanggalAktivitas}
+                                          onChange={(e) => setNewBlokTanggalAktivitas(e.target.value)}
+                                          className="w-full bg-[#12192B] border border-[#1E2942] focus:border-[#00D2FF] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                        />
+                                      </div>
+                                      <button
+                                        type="submit"
+                                        disabled={savingBlok}
+                                        className="px-3 py-1.5 rounded-lg bg-[#00D2FF] hover:bg-[#38BDF8] text-[#0A0E1A] font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+                                      >
+                                        {savingBlok ? 'Menyimpan...' : '+ Tambah Blok'}
+                                      </button>
+                                    </form>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                       </div>
@@ -1950,6 +2376,41 @@ function DashboardContent() {
                 </div>
               )}
             </div>
+          )}
+
+          {/* VIEW: CATATAN HARIAN BLOK & LAPORAN KENDALA LAPANGAN */}
+          {activeMenu === 'catatan_harian' && (
+            <CatatanHarianSection
+              user={user}
+              kebunList={kebunList}
+              afdelingList={afdelingList}
+              blokList={blokList}
+              masterAktivitasList={masterAktivitasList}
+              onRefreshMaster={fetchAllData}
+              setBanner={setBanner}
+            />
+          )}
+
+          {/* VIEW: INPUT DATA MAKRO & IKLIM (KEPALA KEBUN - FASE 5) */}
+          {activeMenu === 'data_makro' && (
+            <DataMakroKepalaKebunSection
+              kebunList={kebunList}
+              afdelingList={afdelingList}
+              blokList={blokList}
+              onRefreshMaster={fetchAllData}
+              setBanner={setBanner}
+            />
+          )}
+
+          {/* VIEW: MASTER DATA AKTIVITAS (LINTAS KOMODITAS PT RPN) */}
+          {activeMenu === 'master_aktivitas' && (
+            <MasterAktivitasSection
+              aktivitasList={masterAktivitasList}
+              loading={loadingData}
+              canEdit={canEditData}
+              onRefresh={fetchAllData}
+              setBanner={setBanner}
+            />
           )}
 
           {/* VIEW 3B: HAK SEMENTARA (PENGAJUAN KARYAWAN & VALIDASI ADMIN) */}
@@ -2385,15 +2846,25 @@ function DashboardContent() {
                               </td>
 
                               <td className="py-3.5 px-4">
-                                <span
-                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-wide border ${
-                                    item.peran === 'admin'
-                                      ? 'bg-[#00D2FF]/15 text-[#00D2FF] border-[#00D2FF]/40'
-                                      : 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/40'
-                                  }`}
-                                >
-                                  {item.peran === 'admin' ? 'Admin' : 'Karyawan'}
-                                </span>
+                                <div className="space-y-1">
+                                  <span
+                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-wide border ${
+                                      item.peran === 'admin'
+                                        ? 'bg-[#00D2FF]/15 text-[#00D2FF] border-[#00D2FF]/40'
+                                        : 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/40'
+                                    }`}
+                                  >
+                                    {item.peran === 'admin' ? 'Admin' : 'Karyawan'}
+                                  </span>
+                                  {item.afdeling_nama && (
+                                    <div className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                                      <span>📍 {item.afdeling_nama}</span>
+                                      {item.kebun_nama && (
+                                        <span className="text-[#8B9BB4]">({item.kebun_nama})</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               </td>
 
                               <td className="py-3.5 px-4">
@@ -2634,6 +3105,30 @@ function DashboardContent() {
                       <option value="nonaktif" className="bg-[#0D1322]">Nonaktif</option>
                     </select>
                   </div>
+                </div>
+
+                <div className="pt-2">
+                  <label className="block text-xs font-semibold text-[#E2E8F0] mb-1.5">
+                    Penugasan Wilayah Afdeling (Khusus Mandor Lapangan)
+                  </label>
+                  <select
+                    value={newAfdelingId}
+                    onChange={(e) => setNewAfdelingId(e.target.value)}
+                    className="w-full bg-[#12192B] border border-[#1E2942] focus:border-[#00D2FF] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none cursor-pointer"
+                  >
+                    <option value="" className="bg-[#0D1322]">-- Akses Bebas / Lintas Unit (Bukan Mandor Khusus) --</option>
+                    {afdelingList.map((afd) => {
+                      const kbn = kebunList.find((k) => k.id === afd.kebun_id);
+                      return (
+                        <option key={afd.id} value={afd.id} className="bg-[#0D1322]">
+                          {afd.nama_afdeling} ({kbn?.nama_kebun || 'Kebun ID ' + afd.kebun_id})
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <p className="text-[10px] text-[#8B9BB4] mt-1">
+                    Jika akun mandor dikunci ke 1 afdeling, peta GIS otomatis zoom dan membatasi data hanya pada afdeling tersebut.
+                  </p>
                 </div>
               </div>
 
@@ -2945,7 +3440,7 @@ function DashboardContent() {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-[#E2E8F0] mb-1">
-                    Kabupaten / Kota
+                    Lokasi (Kabupaten / Kota)
                   </label>
                   <input
                     type="text"
@@ -3105,6 +3600,26 @@ function DashboardContent() {
                   >
                     <option value="pengguna" className="bg-[#0D1322]">Karyawan / Staff</option>
                     <option value="admin" className="bg-[#0D1322]">Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#E2E8F0] mb-1">
+                    Penugasan Afdeling (Khusus Mandor)
+                  </label>
+                  <select
+                    value={editAfdelingId}
+                    onChange={(e) => setEditAfdelingId(e.target.value)}
+                    className="w-full bg-[#12192B] border border-[#1E2942] focus:border-[#00D2FF] rounded-xl px-3 py-2 text-xs text-white focus:outline-none cursor-pointer"
+                  >
+                    <option value="" className="bg-[#0D1322]">-- Akses Bebas / Lintas Unit --</option>
+                    {afdelingList.map((afd) => {
+                      const kbn = kebunList.find((k) => k.id === afd.kebun_id);
+                      return (
+                        <option key={afd.id} value={afd.id} className="bg-[#0D1322]">
+                          {afd.nama_afdeling} ({kbn?.nama_kebun || 'Kebun ID ' + afd.kebun_id})
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div>

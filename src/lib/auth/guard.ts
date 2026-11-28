@@ -10,7 +10,8 @@ import {
   type PenggunaPublik,
 } from '@/types/auth';
 
-export const KOLOM_PENGGUNA_PUBLIK = 'id, nama, email, peran, aktif, hak_akses, foto_profil, dibuat_pada';
+export const KOLOM_PENGGUNA_PUBLIK =
+  'id, nama, email, peran, aktif, afdeling_id, kebun_id, hak_akses, foto_profil, dibuat_pada';
 
 type AuthResult = { user: PenggunaPublik; response?: never } | { user?: never; response: NextResponse };
 
@@ -35,7 +36,16 @@ function unauthorized(message: string, clearCookie = false): NextResponse {
 
 export async function findActiveUserById(id: number): Promise<PenggunaPublik | null> {
   const res = await query<PenggunaPublik>(
-    `SELECT ${KOLOM_PENGGUNA_PUBLIK} FROM pengguna WHERE id = $1;`,
+    `SELECT p.id, p.nama, p.email, p.peran, p.aktif, p.afdeling_id,
+            COALESCE(p.kebun_id, a.kebun_id) AS kebun_id,
+            a.nama_afdeling AS afdeling_nama,
+            COALESCE(k.nama_kebun, ka.nama_kebun) AS kebun_nama,
+            p.hak_akses, p.foto_profil, p.dibuat_pada
+     FROM public.pengguna p
+     LEFT JOIN public.afdeling a ON p.afdeling_id = a.id
+     LEFT JOIN public.kebun ka ON a.kebun_id = ka.id
+     LEFT JOIN public.kebun k ON p.kebun_id = k.id
+     WHERE p.id = $1;`,
     [id]
   );
   const user = res.rows[0];
@@ -69,6 +79,10 @@ export async function findActiveUserById(id: number): Promise<PenggunaPublik | n
   return {
     ...user,
     id: Number(user.id),
+    afdeling_id: user.afdeling_id ? Number(user.afdeling_id) : null,
+    kebun_id: user.kebun_id ? Number(user.kebun_id) : null,
+    afdeling_nama: user.afdeling_nama ?? null,
+    kebun_nama: user.kebun_nama ?? null,
     hak_akses: baseHakAkses,
   };
 }
